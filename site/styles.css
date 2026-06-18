@@ -392,15 +392,15 @@ a {
 
 /* Hero visual (Doppelrand nested wrapper) */
 .brand-image-wrapper {
-  aspect-ratio: 4/3;
+  aspect-ratio: 1280 / 767;
   width: 100%;
-  height: 100%;
+  height: auto;
 }
 
 .brand-image-wrapper img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   filter: saturate(1.1) brightness(0.9);
 }
 
