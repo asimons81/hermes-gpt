@@ -558,6 +558,88 @@ a {
   font-size: 11px;
   color: var(--text-dim);
 }
+/* Control Group & Inputs */
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  transition: var(--transition-fast);
+}
+
+.control-group:hover {
+  border-color: var(--border-hover);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.control-label {
+  display: flex;
+  flex-direction: column;
+  cursor: default;
+}
+
+.control-label code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.control-label small {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.sim-select {
+  font-family: var(--font-sans);
+  background-color: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  width: 100%;
+}
+
+.sim-select:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15);
+}
+
+.sim-select option {
+  background-color: var(--bg-soft);
+  color: var(--text-main);
+}
+
+.mode-indicator {
+  display: inline-block;
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: var(--transition-fast);
+}
+
+.mode-indicator.direct {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--accent-red);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.mode-indicator.dry-run {
+  background-color: rgba(20, 184, 166, 0.1);
+  color: var(--accent-teal);
+  border: 1px solid rgba(20, 184, 166, 0.2);
+}
 
 /* Tool Select Grid */
 .tool-select-grid {

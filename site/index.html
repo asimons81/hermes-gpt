@@ -67,8 +67,8 @@
           </div>
           <div class="metric-card">
             <span>Security posture</span>
-            <strong>Gated Opt-in</strong>
-            <small>Gated write tools, terminal executions, session search, and memory writes. Only safe reads are visible by default.</small>
+            <strong>Tiered Operator Policy</strong>
+            <small>Tiered safety levels (read_only up to owner). Mutating calls require explicit opt-in apply modes and dry-run override tags.</small>
           </div>
           <div class="metric-card">
             <span>Hermes Home</span>
@@ -119,7 +119,7 @@
         <div class="timeline-step">
           <span class="step-num">04</span>
           <strong>Gated Response</strong>
-          <p>Outputs are captured. Gated actions are blocked if environment overrides are missing. Safe results travel back to the chat context.</p>
+          <p>Execution is evaluated against your active Operator Level (e.g. read_only, skills, workspace) and server apply mode before returning results.</p>
         </div>
       </div>
     </section>
@@ -143,36 +143,42 @@
             <div class="control-section">
               <h4>1. Configure Environment Security Gates</h4>
               <div class="toggle-grid">
-                <label class="toggle-switch">
-                  <input type="checkbox" id="gate-terminal">
-                  <span class="toggle-slider"></span>
+                <div class="control-group">
+                  <label for="gate-level" class="control-label">
+                    <code>HERMES_GPT_OPERATOR_LEVEL</code>
+                    <small>Define permitted action tiers</small>
+                  </label>
+                  <select id="gate-level" class="sim-select">
+                    <option value="read_only">read_only (Safe status/reads)</option>
+                    <option value="cron">cron (plus cron mutations)</option>
+                    <option value="skills">skills (plus skill edits)</option>
+                    <option value="skills_config">skills_config (plus config edits)</option>
+                    <option value="workspace">workspace (plus scoped writes/tests)</option>
+                    <option value="owner">owner (break-glass shell/writes)</option>
+                  </select>
+                </div>
+                
+                <div class="control-group">
+                  <label class="toggle-switch" style="background: none; border: none; padding: 0; width: 100%;">
+                    <input type="checkbox" id="gate-apply-mode">
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-label">
+                      <code>HERMES_GPT_OPERATOR_APPLY_MODE</code>
+                      <small>Toggle dry-run previews vs direct writes</small>
+                    </span>
+                  </label>
+                  <span class="mode-indicator dry-run" id="apply-mode-label">dry_run</span>
+                </div>
+              </div>
+              
+              <!-- Owner Ack Box (Shown/enabled when level=owner) -->
+              <div class="control-group owner-ack-container" id="owner-ack-container" style="display: none; margin-top: 16px; border-color: rgba(239, 68, 68, 0.2); background: rgba(239, 68, 68, 0.02);">
+                <label class="toggle-switch" style="background: none; border: none; padding: 0; width: 100%;">
+                  <input type="checkbox" id="gate-owner-ack">
+                  <span class="toggle-slider" style="background-color: rgba(255, 255, 255, 0.1);"></span>
                   <span class="toggle-label">
-                    <code>HERMES_GPT_ENABLE_TERMINAL=1</code>
-                    <small>Allow shell commands</small>
-                  </span>
-                </label>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="gate-write">
-                  <span class="toggle-slider"></span>
-                  <span class="toggle-label">
-                    <code>HERMES_GPT_ENABLE_WRITE=1</code>
-                    <small>Allow file writes & patches</small>
-                  </span>
-                </label>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="gate-memory">
-                  <span class="toggle-slider"></span>
-                  <span class="toggle-label">
-                    <code>HERMES_GPT_ENABLE_MEMORY_WRITE=1</code>
-                    <small>Allow memory modification</small>
-                  </span>
-                </label>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="gate-session">
-                  <span class="toggle-slider"></span>
-                  <span class="toggle-label">
-                    <code>HERMES_GPT_ENABLE_SESSION_SEARCH=1</code>
-                    <small>Allow DB session scans</small>
+                    <code>HERMES_GPT_OWNER_ACK</code>
+                    <small>Acknowledge risk: "I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"</small>
                   </span>
                 </label>
               </div>
@@ -181,21 +187,21 @@
             <div class="control-section">
               <h4>2. Select MCP Tool to Execute</h4>
               <div class="tool-select-grid">
-                <button class="tool-btn is-active" data-tool="read" type="button">
-                  <strong>hermes_read_file</strong>
-                  <span class="tool-desc">Read local file (Safe)</span>
+                <button class="tool-btn is-active" data-tool="status" type="button">
+                  <strong>hermes_operator_status</strong>
+                  <span class="tool-desc">View policy and logs (read_only)</span>
+                </button>
+                <button class="tool-btn" data-tool="cron" type="button">
+                  <strong>hermes_cron_run</strong>
+                  <span class="tool-desc">Run profile cron task (cron)</span>
+                </button>
+                <button class="tool-btn" data-tool="workspace" type="button">
+                  <strong>hermes_workspace_write</strong>
+                  <span class="tool-desc">Write file in workspace (workspace)</span>
                 </button>
                 <button class="tool-btn" data-tool="command" type="button">
                   <strong>hermes_run_command</strong>
-                  <span class="tool-desc">Run shell command (Gated)</span>
-                </button>
-                <button class="tool-btn" data-tool="write" type="button">
-                  <strong>hermes_write_file</strong>
-                  <span class="tool-desc">Modify local file (Gated)</span>
-                </button>
-                <button class="tool-btn" data-tool="memory" type="button">
-                  <strong>hermes_memory</strong>
-                  <span class="tool-desc">Add memory node (Gated)</span>
+                  <span class="tool-desc">Run shell command (owner)</span>
                 </button>
               </div>
             </div>
@@ -282,9 +288,9 @@
 
         <article class="bento-card col-span-2">
           <span class="card-num">04</span>
-          <h3>Opt-In Safety Gating</h3>
+          <h3>Tiered Safety Gating</h3>
           <p>
-            All mutating commands (terminal, writes, memory updates) are hidden from clients unless explicitly enabled via environment variables.
+            Action tiers (from read_only to workspace and owner) restrict mutating tools unless the server apply mode is explicitly set to direct.
           </p>
         </article>
 
@@ -395,6 +401,16 @@ python server.py</code></pre>
       </div>
 
       <div class="release-list">
+        <div class="release-item">
+          <div class="release-meta">
+            <span class="rel-version">v0.2.0</span>
+            <span class="rel-date">2026-06-21</span>
+          </div>
+          <div class="release-content">
+            <h4>Operator & Owner Modes</h4>
+            <p>Introduced tiered Operator and Owner safety postures (read_only, cron, skills, skills_config, workspace, owner) expanding the interface to 39 tools. Added dry-run previews for mutating operations, break-glass acknowledgements, cron tools, workspace scoped file actions, configuration editing, and audit logging.</p>
+          </div>
+        </div>
         <div class="release-item">
           <div class="release-meta">
             <span class="rel-version">v0.1.0</span>
