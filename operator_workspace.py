@@ -151,13 +151,37 @@ def hermes_gateway_status(
         }
         return json.dumps(result, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="gateway",
+                code="GATEWAY_STATUS_ERROR",
+                suggested_action="Check gateway.pid, gateway_state.json, and profile name.",
+            ),
+            indent=2,
+        )
 
 
 def _hermes_argv(profile: str, sub: list[str]) -> list[str]:
     if profile == "default":
         return ["hermes", *sub]
     return ["hermes", "-p", profile, *sub]
+
+
+def _gateway_restart_argv(profile: str) -> list[str]:
+    return _hermes_argv(profile, ["gateway", "restart"])
+
+
+def _hermes_gateway_restart_raw(
+    profile: str = "default",
+    runner=None,
+) -> tuple[int, str, str]:
+    """Execute the raw gateway restart argv. Returns (rc, stdout, stderr).
+
+    No policy checks; callers must gate mutation themselves.
+    """
+    run_fn = runner or op.run_argv
+    return run_fn(_gateway_restart_argv(profile), timeout=120, workdir=None)
 
 
 def hermes_gateway_restart(
@@ -170,7 +194,7 @@ def hermes_gateway_restart(
         policy = op.OperatorPolicy()
         policy.require_level("workspace")
         policy.require_profile(profile, hermes_root)
-        argv = _hermes_argv(profile, ["gateway", "restart"])
+        argv = _gateway_restart_argv(profile)
 
         if policy.effective_dry_run(dry_run):
             plan = {
@@ -192,8 +216,7 @@ def hermes_gateway_restart(
             return json.dumps({"success": True, "dry_run": True, "plan": plan}, indent=2)
 
         policy.require_mutation(dry_run)
-        run_fn = runner or op.run_argv
-        rc, out, err = run_fn(argv, timeout=120, workdir=None)
+        rc, out, err = _hermes_gateway_restart_raw(profile, runner=runner)
         result = {
             "success": rc == 0,
             "dry_run": False,
@@ -228,7 +251,15 @@ def hermes_gateway_restart(
             error=str(exc),
             profile=profile,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="gateway",
+                code="GATEWAY_RESTART_ERROR",
+                suggested_action="Check Hermes CLI availability, profile, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +306,15 @@ def hermes_workspace_read(
         }
         return json.dumps(result, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="workspace",
+                code="WORKSPACE_READ_ERROR",
+                suggested_action="Check path, allowed_paths, denied-path policy, and that the file exists.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_workspace_patch(
@@ -362,7 +401,15 @@ def hermes_workspace_patch(
             error=str(exc),
             path=path,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="workspace",
+                code="WORKSPACE_PATCH_ERROR",
+                suggested_action="Check path, allowed_paths, old_string/new_string, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_workspace_write_file(
@@ -427,7 +474,15 @@ def hermes_workspace_write_file(
             error=str(exc),
             path=path,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="workspace",
+                code="WORKSPACE_WRITE_ERROR",
+                suggested_action="Check path, allowed_paths, denied-path policy, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 # Allowlist for run_test. Each entry is a tuple of (argv_prefix, max_args).
@@ -570,7 +625,15 @@ def hermes_workspace_run_test(
             success=False,
             error=str(exc),
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="workspace",
+                code="WORKSPACE_RUN_TEST_ERROR",
+                suggested_action="Check command allowlist, workdir, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +667,15 @@ def hermes_git_status(workdir: str, runner=None) -> str:
         }
         return json.dumps(result, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="workspace",
+                code="GIT_STATUS_ERROR",
+                suggested_action="Check workdir, allowed_paths, and git availability.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_git_diff(
@@ -636,7 +707,15 @@ def hermes_git_diff(
         }
         return json.dumps(result, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="workspace",
+                code="GIT_DIFF_ERROR",
+                suggested_action="Check workdir, allowed_paths, pathspec, and git availability.",
+            ),
+            indent=2,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -771,7 +850,15 @@ def hermes_owner_run_command(
             success=False,
             error=str(exc),
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="owner",
+                code="OWNER_RUN_COMMAND_ERROR",
+                suggested_action="Check owner acknowledgement, command safety, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_owner_patch(
@@ -867,7 +954,15 @@ def hermes_owner_patch(
             error=str(exc),
             path=path,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="owner",
+                code="OWNER_PATCH_ERROR",
+                suggested_action="Check owner acknowledgement, path, old_string/new_string, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_owner_write_file(
@@ -939,4 +1034,12 @@ def hermes_owner_write_file(
             error=str(exc),
             path=path,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="owner",
+                code="OWNER_WRITE_ERROR",
+                suggested_action="Check owner acknowledgement, path, denied-path policy, and operator level/apply mode.",
+            ),
+            indent=2,
+        )

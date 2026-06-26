@@ -228,7 +228,15 @@ def hermes_cron_list(
         }
         return json.dumps(result, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="cron",
+                code="CRON_LIST_ERROR",
+                suggested_action="Check cron/jobs.json and profile name.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_cron_status(
@@ -268,7 +276,15 @@ def hermes_cron_status(
         }
         return json.dumps(result, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="cron",
+                code="CRON_STATUS_ERROR",
+                suggested_action="Check cron/jobs.json and profile name.",
+            ),
+            indent=2,
+        )
 
 
 def _hermes_argv(profile: str, sub: list[str]) -> list[str]:
@@ -369,7 +385,15 @@ def hermes_cron_run(
             profile=profile,
             job_id=job_id,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="cron",
+                code="CRON_RUN_ERROR",
+                suggested_action="Check job_id, profile, Hermes CLI availability, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_cron_pause(
@@ -461,7 +485,15 @@ def hermes_cron_pause(
             profile=profile,
             job_id=job_id,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="cron",
+                code="CRON_PAUSE_ERROR",
+                suggested_action="Check job_id, profile, Hermes CLI availability, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def _build_copy_job(source_job: dict[str, Any], new_id: str) -> dict[str, Any]:
@@ -598,7 +630,15 @@ def hermes_cron_copy(
             target_profile=target_profile,
             job_id=job_id,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="cron",
+                code="CRON_COPY_ERROR",
+                suggested_action="Check source/target profiles, job_id, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_cron_move(
@@ -833,4 +873,12 @@ def hermes_cron_move(
             target_profile=target_profile,
             job_id=job_id,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="cron",
+                code="CRON_MOVE_ERROR",
+                suggested_action="Check source/target profiles, job_id, disk permissions, and operator level/apply mode.",
+            ),
+            indent=2,
+        )

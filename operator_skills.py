@@ -314,7 +314,15 @@ def hermes_skill_diff(
         )
         return json.dumps(result, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="skills",
+                code="SKILL_DIFF_ERROR",
+                suggested_action="Check skill name, file_path, and that the skill exists.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_skill_create(
@@ -416,7 +424,15 @@ def hermes_skill_create(
             profile=profile,
             skill_name=name,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="skills",
+                code="SKILL_CREATE_ERROR",
+                suggested_action="Check skill name, frontmatter, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_skill_edit(
@@ -517,7 +533,15 @@ def hermes_skill_edit(
             profile=profile,
             skill_name=name,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="skills",
+                code="SKILL_EDIT_ERROR",
+                suggested_action="Check skill name, frontmatter, skill existence, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_skill_patch(
@@ -647,7 +671,15 @@ def hermes_skill_patch(
             profile=profile,
             skill_name=name,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="skills",
+                code="SKILL_PATCH_ERROR",
+                suggested_action="Check skill name, file_path, old_string/new_string, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_skill_write_file(
@@ -754,7 +786,15 @@ def hermes_skill_write_file(
             profile=profile,
             skill_name=name,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="skills",
+                code="SKILL_WRITE_FILE_ERROR",
+                suggested_action="Check skill name, file_path, content size, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def _copy_skill_tree(source_dir: Path, target_dir: Path) -> list[Path]:
@@ -863,7 +903,15 @@ def hermes_skill_copy(
             target_profile=target_profile,
             skill_name=name,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="skills",
+                code="SKILL_COPY_ERROR",
+                suggested_action="Check source/target profiles, skill name, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_skill_sync_to_default(
@@ -995,4 +1043,12 @@ def hermes_skill_delete(
             profile=profile,
             skill_name=name,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="skills",
+                code="SKILL_DELETE_ERROR",
+                suggested_action="Check skill name, pin status, skill manager availability, and operator level/apply mode.",
+            ),
+            indent=2,
+        )

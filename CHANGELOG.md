@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 - 2026-06-25
+
+- Added operator diagnostics and recovery tools: `hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, and `hermes_operator_recover`.
+- Introduced a structured error envelope (`success`, `ok`, `error`, `layer`, `code`, `safe_message`, `suggested_action`, `trace_id`) for all operator-facing failures.
+- Converted operator exception handlers in `operator_config`, `operator_cron`, `operator_skills`, `operator_workspace`, and `server` to the new envelope while preserving legacy `success:false` and `error` fields.
+- Added PASS/WARN/FAIL/UNSUPPORTED status vocabulary across diagnostic tools.
+- Implemented conservative recovery with dry-run default and `apply=true` gating; connector re-registration is explicitly reported as unsupported.
+- Added secret-value and absolute-path redaction in structured error messages.
+- Added comprehensive tests for diagnostics, recovery, release readiness, and error-envelope safety.
+- Updated operator-mode docs, README, release checklist, and release notes for v0.3.0.
+
 ## 0.2.0 - 2026-06-21
 
 - Added tiered Operator / Owner Mode tooling for trusted MCP clients.

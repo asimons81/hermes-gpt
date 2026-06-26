@@ -14,6 +14,7 @@ import operator_cron as op_cron
 import operator_skills as op_skills
 import operator_config as op_config
 import operator_workspace as op_workspace
+import operator_diagnostics as op_diagnostics
 
 
 LOCAL_DEV_PROFILE = "local-dev"
@@ -508,7 +509,15 @@ def hermes_operator_policy() -> str:
         summary["success"] = True
         return json.dumps(summary, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op_policy.error_from_exception(
+                exc,
+                layer="operator",
+                code="POLICY_SUMMARY_ERROR",
+                suggested_action="Check operator environment variables.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_operator_status() -> str:
@@ -526,6 +535,10 @@ def hermes_operator_status() -> str:
             "hermes_operator_policy",
             "hermes_operator_status",
             "hermes_operator_audit_tail",
+            "hermes_operator_doctor",
+            "hermes_operator_snapshot",
+            "hermes_release_doctor",
+            "hermes_operator_recover",
             "hermes_cron_list",
             "hermes_cron_status",
             "hermes_skill_diff",
@@ -573,7 +586,15 @@ def hermes_operator_status() -> str:
         }
         return json.dumps(result, indent=2)
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op_policy.error_from_exception(
+                exc,
+                layer="operator",
+                code="OPERATOR_STATUS_ERROR",
+                suggested_action="Check HERMES_HOME and operator environment variables.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_operator_audit_tail(limit: int = 20) -> str:
@@ -584,7 +605,43 @@ def hermes_operator_audit_tail(limit: int = 20) -> str:
             {"success": True, "count": len(records), "records": records}, indent=2
         )
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op_policy.error_from_exception(
+                exc,
+                layer="audit",
+                code="AUDIT_TAIL_ERROR",
+                suggested_action="Check audit log path and permissions.",
+            ),
+            indent=2,
+        )
+
+
+def hermes_operator_doctor(profile: str = "default") -> str:
+    """Run a read-only health check across operator surfaces."""
+    return op_diagnostics.hermes_operator_doctor(
+        profile=profile, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_operator_snapshot(profile: str = "default") -> str:
+    """Return a single current-state summary of the operator."""
+    return op_diagnostics.hermes_operator_snapshot(
+        profile=profile, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_release_doctor(workdir: str | None = None, full_tests: bool = False, timeout: int = 180) -> str:
+    """Check whether the repo/operator is safe to ship."""
+    return op_diagnostics.hermes_release_doctor(
+        workdir=workdir, full_tests=full_tests, timeout=timeout
+    )
+
+
+def hermes_operator_recover(profile: str = "default", apply: bool = False) -> str:
+    """Conservative recovery sequence. Dry-run by default."""
+    return op_diagnostics.hermes_operator_recover(
+        profile=profile, apply=apply, hermes_root=_default_hermes_root()
+    )
 
 
 # --- Cron wrappers (pass hermes_root through) ----------------------------
@@ -885,6 +942,10 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_operator_policy, meta=tool_meta())
     server.add_tool(hermes_operator_status, meta=tool_meta())
     server.add_tool(hermes_operator_audit_tail, meta=tool_meta())
+    server.add_tool(hermes_operator_doctor, meta=tool_meta())
+    server.add_tool(hermes_operator_snapshot, meta=tool_meta())
+    server.add_tool(hermes_release_doctor, meta=tool_meta())
+    server.add_tool(hermes_operator_recover, meta=tool_meta())
 
     # Cron
     server.add_tool(hermes_cron_list, meta=tool_meta())

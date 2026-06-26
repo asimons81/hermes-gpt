@@ -6,6 +6,21 @@
 
 This is a **local-dev release**. It is not a hosted service, not a fork of Hermes Agent, not a generic remote dev container, and not a replacement for DevSpace.
 
+## What’s New in v0.3.0
+
+v0.3.0 is the Operator Reliability Release. It makes Hermes GPT self-diagnosing, safely recoverable, and release-checkable.
+
+- New operator diagnostics tools:
+  - `hermes_operator_doctor` — read-only deep health check across operator, gateway, config, env, cron, skills, policy, audit, and connector surfaces.
+  - `hermes_operator_snapshot` — single current-state summary.
+  - `hermes_release_doctor` — release readiness checks with PASS / WARN / BLOCKED classification.
+  - `hermes_operator_recover` — conservative dry-run-first recovery sequence.
+- All operator-facing failures now return a structured error envelope:
+  `{success, ok, error, layer, code, safe_message, suggested_action, trace_id}`.
+- Diagnostic and recovery statuses use PASS / WARN / FAIL / UNSUPPORTED.
+- Connector re-registration is explicitly reported as unsupported unless a real supported command/API exists.
+- `hermes_operator_recover` is dry-run by default and requires `apply=true` for mutations.
+
 ## What’s New in v0.2.0
 
 v0.2.0 adds tiered Operator / Owner Mode so trusted MCP clients can see the full Hermes GPT surface while the default posture stays safe.

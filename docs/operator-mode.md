@@ -236,6 +236,85 @@ What is never logged:
 
 Prompt/content is represented by length and hash only, not raw text.
 
+## Diagnostics and recovery
+
+v0.3.0 adds reliability tools to inspect and recover the operator surface safely.
+
+### hermes_operator_doctor
+
+Run this when something feels off: gateway not responding, cron jobs not firing, skills missing, or tools return unexpected failures.
+
+It checks:
+
+- operator runtime reachability
+- gateway PID / heartbeat
+- config.yaml readability
+- .env readability (names only)
+- cron registry readability
+- skills registry readability
+- operator policy validity
+- last audit record readability
+- connector / API bridge capability (reported as UNSUPPORTED unless a real command/API exists)
+
+Each check returns one of: `PASS`, `WARN`, `FAIL`, `UNSUPPORTED`. The overall result is the worst non-unsupported status. If anything fails, the tool recommends `hermes_operator_recover` with `apply=false` first.
+
+Example overall statuses:
+
+- `PASS` — everything looks healthy.
+- `WARN` — attention recommended (e.g., stale heartbeat, missing optional files).
+- `FAIL` — action required (e.g., dead gateway PID, unreadable cron registry).
+- `UNSUPPORTED` — a capability is not implemented; not a failure.
+
+### hermes_operator_snapshot
+
+Returns a single JSON summary of current state: version, profile, gateway status, cron summary, env summary, skills count, last audit timestamp, repo status, known issues, and a recommended next action. Use it for quick status checks or before running recovery.
+
+### hermes_operator_recover
+
+Dry-run by default. It plans a recovery sequence:
+
+1. read config
+2. validate env
+3. restart gateway if the doctor check failed
+4. check connector routes (reported as UNSUPPORTED)
+5. recheck cron
+6. recheck skill index
+7. write audit record
+
+To actually mutate, pass `apply=true` and ensure the server is in direct operator mode with level `workspace` or higher. Without those gates, recovery stays a plan.
+
+### hermes_release_doctor
+
+Run before tagging a release. Fast checks by default:
+
+- git repo / branch / dirty tree
+- secret-file scan (`.env`, `*.pem`, `*.key`, auth/token files, etc.)
+- `pyproject.toml` version
+- CHANGELOG/README/docs mention v0.3.0
+- import / py_compile checks
+- operator apply mode is not direct
+
+Pass `full_tests=true` to also run the pytest suite. Results are classified as `PASS`, `WARN`, or `BLOCKED`. For v0.3.0 the recommended release type is `minor`.
+
+### Structured errors
+
+Operator-facing failures now return a safe envelope:
+
+```json
+{
+  "success": false,
+  "ok": false,
+  "error": "safe human message",
+  "layer": "gateway",
+  "code": "GATEWAY_UNREACHABLE",
+  "safe_message": "Gateway status could not be verified.",
+  "suggested_action": "Run hermes_operator_recover with apply=false first.",
+  "trace_id": "..."
+}
+```
+
+Legacy fields (`success`, `error`) are preserved. Secrets, env values, and absolute paths are redacted.
+
 ## What is still denied
 
 The server still refuses or redacts access to:

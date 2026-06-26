@@ -81,6 +81,124 @@ def env_truthy(name: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Structured error envelope
+# ---------------------------------------------------------------------------
+
+# Allowed layer values. New layers should be added here so callers stay
+# consistent and tooling can rely on a bounded vocabulary.
+_ERROR_LAYERS: frozenset[str] = frozenset(
+    {
+        "operator",
+        "policy",
+        "config",
+        "env",
+        "cron",
+        "skills",
+        "gateway",
+        "workspace",
+        "owner",
+        "audit",
+        "connector",
+        "release",
+        "system",
+    }
+)
+
+def new_trace_id() -> str:
+    """Return a short random trace id for correlating operator failures."""
+    import uuid
+
+    return uuid.uuid4().hex[:16]
+
+
+def _sanitize_exception_message(exc: Exception) -> str:
+    """Return a safe exception message.
+
+    Applies best-effort redaction of secret-looking values (API keys, tokens,
+    bearer headers, AWS keys) and absolute filesystem paths while preserving
+    human-readable error text such as "denied", "blocked", or "not found".
+    The result is capped to avoid accidental dumps.
+    """
+    raw = str(exc)
+    # Redact known secret value patterns.
+    redacted = redact_output(raw)
+    # Redact absolute filesystem paths.
+    redacted = re.sub(
+        r"(?i)([a-z]:\\[^\s]*|\\\\[^\s]*|/[^\s]*)",
+        "[REDACTED_PATH]",
+        redacted,
+    )
+    # Cap length to avoid accidental dumps.
+    return redacted[:500]
+
+
+def make_error_envelope(
+    *,
+    layer: str,
+    code: str,
+    safe_message: str,
+    suggested_action: str,
+    trace_id: str | None = None,
+    legacy_error: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return a safe structured error envelope for operator-facing failures.
+
+    Backward compatibility: the envelope still includes ``success: false`` and
+    ``error`` so existing callers continue to work.
+    """
+    if layer not in _ERROR_LAYERS:
+        layer = "operator"
+    if not code:
+        code = "UNKNOWN_ERROR"
+    if not safe_message:
+        safe_message = "An operator error occurred."
+    if not suggested_action:
+        suggested_action = "Run hermes_operator_doctor for more details."
+    tid = trace_id or new_trace_id()
+    error = legacy_error or safe_message
+    envelope: dict[str, Any] = {
+        "success": False,
+        "ok": False,
+        "error": error,
+        "layer": layer,
+        "code": code,
+        "safe_message": safe_message,
+        "suggested_action": suggested_action,
+        "trace_id": tid,
+    }
+    if extra:
+        for key, value in extra.items():
+            if isinstance(value, str):
+                envelope[key] = value[:500]
+            else:
+                envelope[key] = value
+    return envelope
+
+
+def error_from_exception(
+    exc: Exception,
+    *,
+    layer: str,
+    code: str,
+    suggested_action: str,
+    trace_id: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build an error envelope from an exception, sanitizing the message."""
+    safe_message = _sanitize_exception_message(exc)
+    return make_error_envelope(
+        layer=layer,
+        code=code,
+        safe_message=safe_message,
+        suggested_action=suggested_action,
+        trace_id=trace_id,
+        legacy_error=safe_message,
+        extra=extra,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Operator levels
 # ---------------------------------------------------------------------------
 

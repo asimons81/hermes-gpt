@@ -222,7 +222,15 @@ def hermes_config_get(
             default=str,
         )
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="config",
+                code="CONFIG_READ_ERROR",
+                suggested_action="Check that config.yaml exists, is readable, and is valid YAML.",
+            ),
+            indent=2,
+        )
 
 
 def _backup_file(path: Path) -> Path | None:
@@ -355,7 +363,15 @@ def hermes_config_set(
             profile=profile,
             key=key_path,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="config",
+                code="CONFIG_WRITE_ERROR",
+                suggested_action="Check config.yaml permissions, key path, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def hermes_config_patch(
@@ -451,7 +467,15 @@ def hermes_config_patch(
             error=str(exc),
             profile=profile,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="config",
+                code="CONFIG_PATCH_ERROR",
+                suggested_action="Check config.yaml contents, patch strings, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -527,7 +551,15 @@ def hermes_env_status(
             {"success": True, "profile": profile, "keys": results}, indent=2
         )
     except Exception as exc:
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="env",
+                code="ENV_READ_ERROR",
+                suggested_action="Check .env file permissions and profile name.",
+            ),
+            indent=2,
+        )
 
 
 def _validate_env_key_for_write(key: str) -> None:
@@ -661,7 +693,15 @@ def hermes_env_set_nonsecret(
             profile=profile,
             key=key,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="env",
+                code="ENV_WRITE_ERROR",
+                suggested_action="Check .env permissions, key name, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
 
 
 def _read_env_value(env_path: Path, key: str) -> str | None:
@@ -776,4 +816,12 @@ def hermes_env_copy_nonsecret(
             target_profile=target_profile,
             key=key,
         )
-        return json.dumps({"success": False, "error": str(exc)}, indent=2)
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="env",
+                code="ENV_COPY_ERROR",
+                suggested_action="Check source/target profiles, key name, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
