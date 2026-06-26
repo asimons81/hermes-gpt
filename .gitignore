@@ -23,3 +23,6 @@ logs/
 tunnel-url.txt
 
 .vercel
+
+# Live deployment scripts (customized from examples/)
+*.ps1
