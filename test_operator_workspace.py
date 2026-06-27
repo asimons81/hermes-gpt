@@ -352,6 +352,31 @@ def test_owner_run_command_direct_runs(workspace_tree, clean_env, audit_override
     assert captured["argv"] == ["echo", "hello"]
 
 
+def test_owner_run_command_windows_quoted_argument(monkeypatch, clean_env, audit_override):
+    monkeypatch.setattr(ows.os, "name", "nt", raising=False)
+    _enable_owner(monkeypatch)
+    captured = {}
+
+    def fake_runner(argv, timeout=120, workdir=None):
+        captured["argv"] = argv
+        return (0, "ok", "")
+
+    out = ows.hermes_owner_run_command(
+        command='hermes cron create "45 5 * * *" probe',
+        dry_run=False,
+        runner=fake_runner,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert captured["argv"] == ["hermes", "cron", "create", "45 5 * * *", "probe"]
+
+
+def test_split_command_argv_preserves_unquoted_windows_backslashes(monkeypatch):
+    monkeypatch.setattr(ows.os, "name", "nt", raising=False)
+    argv = ows._split_command_argv(r"python C:\Users\asimo\probe.py")
+    assert argv == ["python", r"C:\Users\asimo\probe.py"]
+
+
 @pytest.mark.parametrize(
     "bad_cmd",
     [
