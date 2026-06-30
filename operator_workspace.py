@@ -35,7 +35,7 @@ import shlex
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import operator_policy as op
 
@@ -99,10 +99,168 @@ def _gateway_state_path(profile_home: Path) -> Path:
     return profile_home / "gateway_state.json"
 
 
+def _read_gateway_state(state_path: Path) -> dict[str, Any]:
+    """Read gateway_state.json safely.
+
+    Never raises. Returns an empty dict if the file is missing, invalid,
+    unreadable, or not a JSON object.
+    """
+    if not state_path.exists():
+        return {}
+    try:
+        loaded = json.loads(state_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            return loaded
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _read_gateway_pid_from_pid_file(pid_path: Path) -> int | None:
+    """Read gateway.pid as a plain integer.
+
+    Older Hermes Gateway versions store only a raw PID here.
+    If the file is absent, empty, or not parseable, return None.
+    """
+    if not pid_path.exists():
+        return None
+    try:
+        raw = pid_path.read_text(encoding="utf-8").strip()
+        if not raw:
+            return None
+        return int(raw)
+    except (OSError, ValueError):
+        return None
+
+
+def _read_gateway_pid_from_state(state: dict[str, Any]) -> int | None:
+    """Read PID from gateway_state.json.
+
+    Newer Hermes Gateway versions may store the actual PID in:
+    {
+      "pid": 9818,
+      "kind": "hermes-gateway",
+      "gateway_state": "running"
+    }
+
+    Accept int or numeric string. Otherwise return None.
+    """
+    value = state.get("pid")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _is_pid_alive(pid: int | None) -> bool:
+    """Best-effort process liveness probe.
+
+    Prefer psutil when available. Fall back to os.kill(pid, 0).
+    Never raises.
+    """
+    if pid is None:
+        return False
+
+    try:
+        import psutil  # type: ignore
+
+        return psutil.pid_exists(pid)
+    except ImportError:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+        except Exception:
+            return False
+    except Exception:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+        except Exception:
+            return False
+
+
+def _read_ticker_heartbeat(profile_home: Path) -> float | None:
+    hb_path = profile_home / "cron" / "ticker_heartbeat"
+    if not hb_path.exists():
+        return None
+    try:
+        return hb_path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _gateway_adapters_summary(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return sanitized adapter/platform summary.
+
+    Supports both formats:
+
+    Legacy:
+    {
+      "telegram": {"connected": true}
+    }
+
+    Newer:
+    {
+      "platforms": {
+        "telegram": {"connected": true}
+      }
+    }
+
+    No tokens, URLs, or secret-like values are surfaced.
+    """
+    adapters: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    legacy_keys = ("telegram", "discord", "slack", "signal", "whatsapp", "api_server")
+    for key in legacy_keys:
+        entry = state.get(key)
+        if isinstance(entry, dict):
+            adapters.append(
+                {
+                    "name": key,
+                    "connected": bool(entry.get("connected", False)),
+                }
+            )
+            seen.add(key)
+
+    platforms = state.get("platforms")
+    if isinstance(platforms, dict):
+        for key, entry in platforms.items():
+            name = str(key)
+            if name in seen:
+                continue
+            if isinstance(entry, dict):
+                adapters.append(
+                    {
+                        "name": name,
+                        "connected": bool(entry.get("connected", False)),
+                    }
+                )
+                seen.add(name)
+
+    return adapters
+
+
 def hermes_gateway_status(
     profile: str = "default",
     hermes_root: Path | None = None,
 ) -> str:
+    """Return Hermes Gateway status.
+
+    Important behavior:
+    - First try ~/.hermes/gateway.pid.
+    - If gateway.pid is missing or unparsable, fall back to gateway_state.json["pid"].
+    - This fixes the case where Hermes Gateway is actually running but the PID
+      file is absent/stale while gateway_state.json contains the correct PID.
+    """
     try:
         policy = op.OperatorPolicy()
         policy.require_profile(profile, hermes_root)
@@ -110,63 +268,32 @@ def hermes_gateway_status(
 
         pid_path = _gateway_pid_path(profile_home)
         state_path = _gateway_state_path(profile_home)
-        pid = None
-        if pid_path.exists():
-            try:
-                pid = int(pid_path.read_text(encoding="utf-8").strip())
-            except (OSError, ValueError):
-                pid = None
-        running = False
-        if pid is not None:
-            try:
-                import psutil  # type: ignore
 
-                running = psutil.pid_exists(pid)
-            except ImportError:
-                # Fall back to OS kill 0 probe.
-                try:
-                    os.kill(pid, 0)
-                    running = True
-                except (OSError, ProcessLookupError):
-                    running = False
-                except Exception:
-                    running = False
+        state = _read_gateway_state(state_path)
 
-        state: dict[str, Any] = {}
-        if state_path.exists():
-            try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                state = {}
+        pid = _read_gateway_pid_from_pid_file(pid_path)
+        pid_source = "gateway.pid" if pid is not None else None
 
-        # Cron ticker heartbeat.
-        cron_dir = profile_home / "cron"
-        ticker_heartbeat = None
-        hb_path = cron_dir / "ticker_heartbeat"
-        if hb_path.exists():
-            try:
-                ticker_heartbeat = hb_path.stat().st_mtime
-            except OSError:
-                ticker_heartbeat = None
+        if pid is None:
+            pid = _read_gateway_pid_from_state(state)
+            pid_source = "gateway_state.json" if pid is not None else None
 
-        # Adapter / telegram / discord connection info: surface only
-        # connected/unconnected booleans, no tokens.
-        adapters_summary: list[dict[str, Any]] = []
-        for key in ("telegram", "discord", "slack", "signal", "whatsapp", "api_server"):
-            entry = state.get(key)
-            if isinstance(entry, dict):
-                adapters_summary.append(
-                    {
-                        "name": key,
-                        "connected": bool(entry.get("connected", False)),
-                    }
-                )
+        running = _is_pid_alive(pid)
+        ticker_heartbeat = _read_ticker_heartbeat(profile_home)
+        adapters_summary = _gateway_adapters_summary(state)
 
         result = {
             "success": True,
             "profile": profile,
             "gateway_pid": pid,
+            "gateway_pid_source": pid_source,
             "gateway_running": running,
+            "gateway_state": state.get("gateway_state"),
+            "gateway_kind": state.get("kind"),
+            "gateway_updated_at": state.get("updated_at"),
+            "gateway_restart_requested": state.get("restart_requested"),
+            "gateway_exit_reason": state.get("exit_reason"),
+            "gateway_active_agents": state.get("active_agents"),
             "ticker_heartbeat_mtime": ticker_heartbeat,
             "adapters": adapters_summary,
         }
