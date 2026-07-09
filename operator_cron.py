@@ -7,6 +7,7 @@ All operations are tier-gated by ``OperatorPolicy``:
 - ``hermes_cron_run``     : cron       — run a job immediately (fixed argv)
 - ``hermes_cron_pause``   : cron       — pause a job (fixed argv)
 - ``hermes_cron_copy``    : cron       — copy a job across profiles (reset state)
+- ``hermes_cron_create``  : cron       — create a new cron job from scratch
 - ``hermes_cron_move``    : cron       — copy + pause source (atomic-ish)
 
 Safety rules:
@@ -879,6 +880,151 @@ def hermes_cron_move(
                 layer="cron",
                 code="CRON_MOVE_ERROR",
                 suggested_action="Check source/target profiles, job_id, disk permissions, and operator level/apply mode.",
+            ),
+            indent=2,
+        )
+
+
+def hermes_cron_create(
+    profile: str = "default",
+    schedule: str = "",
+    prompt: str = "",
+    name: str | None = None,
+    skills: list[str] | None = None,
+    deliver: str | None = None,
+    repeat: int | None = None,
+    script: str | None = None,
+    workdir: str | None = None,
+    no_agent: bool | None = None,
+    context_from: list[str] | None = None,
+    enabled_toolsets: list[str] | None = None,
+    model_provider: str | None = None,
+    model_name: str | None = None,
+    dry_run: bool = True,
+    hermes_root: Path | None = None,
+) -> str:
+    """Create a new cron job. Requires level >= cron."""
+    try:
+        policy = op.OperatorPolicy()
+        policy.require_level("cron")
+        policy.require_profile(profile, hermes_root)
+
+        if not schedule:
+            raise ValueError("schedule is required for creating a cron job.")
+        if not prompt and not skills and not script:
+            raise ValueError(
+                "At least one of prompt, skills, or script is required."
+            )
+
+        profile_home = op.resolve_profile_home(profile, hermes_root)
+        jobs = _read_jobs(profile_home)
+
+        new_id = _new_job_id()
+        job_name = (
+            name
+            or (prompt[:50] if prompt else "")
+            or (skills[0] if skills else "")
+            or "cron job"
+        )
+
+        new_job: dict[str, Any] = {
+            "id": new_id,
+            "name": job_name,
+            "prompt": prompt,
+            "schedule": schedule,
+            "schedule_display": schedule,
+            "skills": skills or [],
+            "deliver": deliver or "local",
+            "enabled": True,
+            "state": "scheduled",
+        }
+        if repeat is not None:
+            new_job["repeat"] = {"times": repeat}
+        if script:
+            new_job["script"] = script
+        if workdir:
+            new_job["workdir"] = workdir
+        if no_agent is not None:
+            new_job["no_agent"] = no_agent
+        if context_from:
+            new_job["context_from"] = list(context_from)
+        if enabled_toolsets:
+            new_job["enabled_toolsets"] = list(enabled_toolsets)
+        if model_provider or model_name:
+            model: dict[str, str] = {}
+            if model_provider:
+                model["provider"] = model_provider
+            if model_name:
+                model["model"] = model_name
+            new_job["model"] = model
+
+        if policy.effective_dry_run(dry_run):
+            plan = {
+                "would_create": True,
+                "profile": profile,
+                "job_id": new_id,
+                "name": job_name,
+                "schedule": schedule,
+                "prompt_len": len(prompt),
+                "skills": skills or [],
+                "deliver": deliver or "local",
+            }
+            op.audit_record(
+                tool="hermes_cron_create",
+                level=policy.level,
+                apply_mode=policy.apply_mode,
+                dry_run=True,
+                success=True,
+                changed=False,
+                summary="dry-run plan",
+                profile=profile,
+                job_id=new_id,
+                prompt=prompt,
+            )
+            return json.dumps(
+                {"success": True, "dry_run": True, "plan": plan}, indent=2
+            )
+
+        policy.require_mutation(dry_run)
+        jobs.append(new_job)
+        _write_jobs(profile_home, jobs)
+
+        result = {
+            "success": True,
+            "dry_run": False,
+            "profile": profile,
+            "job_id": new_id,
+            "job": _format_job_safe(new_job),
+        }
+        op.audit_record(
+            tool="hermes_cron_create",
+            level=policy.level,
+            apply_mode=policy.apply_mode,
+            dry_run=False,
+            success=True,
+            changed=True,
+            summary=f"created {new_id} in {profile}",
+            profile=profile,
+            job_id=new_id,
+            prompt=prompt,
+        )
+        return json.dumps(result, indent=2)
+    except Exception as exc:
+        op.audit_record(
+            tool="hermes_cron_create",
+            level="unknown",
+            apply_mode="unknown",
+            dry_run=dry_run,
+            success=False,
+            error=str(exc),
+            profile=profile,
+        )
+        return json.dumps(
+            op.error_from_exception(
+                exc,
+                layer="cron",
+                code="CRON_CREATE_ERROR",
+                suggested_action="Check profile, operator level/apply mode, and parameters.",
             ),
             indent=2,
         )

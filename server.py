@@ -7,7 +7,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 import operator_policy as op_policy
 import operator_cron as op_cron
@@ -25,6 +25,8 @@ ENABLE_WRITE_ENV = "HERMES_GPT_ENABLE_WRITE"
 ENABLE_MEMORY_WRITE_ENV = "HERMES_GPT_ENABLE_MEMORY_WRITE"
 ENABLE_SESSION_SEARCH_ENV = "HERMES_GPT_ENABLE_SESSION_SEARCH"
 ENABLE_TERMINAL_ENV = "HERMES_GPT_ENABLE_TERMINAL"
+ENABLE_VISION_ENV = "HERMES_GPT_ENABLE_VISION"
+ENABLE_WEB_ENV = "HERMES_GPT_ENABLE_WEB"
 NOAUTH_META = {"securitySchemes": [{"type": "noauth"}]}
 
 HERMES_ROOT: Path | None = None
@@ -35,6 +37,8 @@ memory_tool: Any = None
 skill_manager_tool: Any = None
 SessionDB: Any = None
 get_hermes_home: Any = None
+vision_tool: Any = None
+web_tool: Any = None
 
 
 def eprint(message: str) -> None:
@@ -126,6 +130,7 @@ def add_hermes_to_syspath(root: Path) -> None:
 def import_hermes() -> None:
     global HERMES_ROOT, IMPORT_ERROR, file_tools, terminal_tool, memory_tool
     global skill_manager_tool, SessionDB, get_hermes_home
+    global vision_tool, web_tool
     try:
         HERMES_ROOT = find_hermes_root()
         add_hermes_to_syspath(HERMES_ROOT)
@@ -136,6 +141,20 @@ def import_hermes() -> None:
         file_tools = ft
         terminal_tool = tt
         memory_tool = mt
+
+        try:
+            from tools import vision_tools as vt
+
+            vision_tool = vt
+        except Exception as exc:
+            eprint(f"hermes-gpt: vision tool unavailable: {exc}")
+
+        try:
+            from tools import web_tools as wt
+
+            web_tool = wt
+        except Exception as exc:
+            eprint(f"hermes-gpt: web tool unavailable: {exc}")
 
         try:
             from tools import skill_manager_tool as smt
@@ -436,6 +455,81 @@ def hermes_session_search(query: str, limit: int = 20, offset: int = 0) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Hermes tool wrappers (env-gated)
+# ---------------------------------------------------------------------------
+
+
+def hermes_vision_analyze(image_url: str, question: str = "") -> str:
+    """Analyze an image using Hermes Agent vision. Env-gated."""
+    try:
+        require_imports()
+        if not env_enabled(ENABLE_VISION_ENV):
+            raise RuntimeError(
+                f"Vision analysis is disabled. Set {ENABLE_VISION_ENV}=1 to enable it."
+            )
+        if vision_tool is None:
+            raise RuntimeError(
+                "Vision tool is not available (import failed at startup)."
+            )
+        import asyncio
+
+        user_prompt = question if question else "Describe this image in detail."
+        result = asyncio.run(
+            vision_tool.vision_analyze_tool(
+                image_url=image_url, user_prompt=user_prompt
+            )
+        )
+        return result
+    except Exception as exc:
+        raise clean_error("hermes_vision_analyze", exc) from exc
+
+
+def hermes_web_search(query: str, limit: int = 5) -> str:
+    """Search the web using Hermes Agent web_search. Env-gated."""
+    try:
+        require_imports()
+        if not env_enabled(ENABLE_WEB_ENV):
+            raise RuntimeError(
+                f"Web search is disabled. Set {ENABLE_WEB_ENV}=1 to enable it."
+            )
+        if web_tool is None:
+            raise RuntimeError(
+                "Web tool is not available (import failed at startup)."
+            )
+        return web_tool.web_search_tool(query=query, limit=limit)
+    except Exception as exc:
+        raise clean_error("hermes_web_search", exc) from exc
+
+
+def hermes_web_extract(
+    urls: List[str],
+    char_limit: int | None = None,
+) -> str:
+    """Extract content from web pages using Hermes Agent web_extract. Env-gated."""
+    try:
+        require_imports()
+        if not env_enabled(ENABLE_WEB_ENV):
+            raise RuntimeError(
+                f"Web extract is disabled. Set {ENABLE_WEB_ENV}=1 to enable it."
+            )
+        if web_tool is None:
+            raise RuntimeError(
+                "Web tool is not available (import failed at startup)."
+            )
+        import asyncio
+
+        kwargs = {}
+        if char_limit is not None:
+            kwargs["char_limit"] = char_limit
+        result = asyncio.run(
+            web_tool.web_extract_tool(urls=urls, **kwargs)
+        )
+        return result
+    except Exception as exc:
+        raise clean_error("hermes_web_extract", exc) from exc
+
+
+# ---------------------------------------------------------------------------
 # Operator / Owner Mode tools
 # ---------------------------------------------------------------------------
 #
@@ -549,6 +643,7 @@ def hermes_operator_status() -> str:
             "hermes_git_diff",
             "hermes_cron_run",
             "hermes_cron_pause",
+            "hermes_cron_create",
             "hermes_cron_copy",
             "hermes_cron_move",
             "hermes_skill_create",
@@ -676,6 +771,34 @@ def hermes_cron_copy(source_profile: str, target_profile: str, job_id: str, dry_
     return op_cron.hermes_cron_copy(
         source_profile=source_profile, target_profile=target_profile,
         job_id=job_id, dry_run=dry_run, hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_cron_create(
+    profile: str = "default",
+    schedule: str = "",
+    prompt: str = "",
+    name: str | None = None,
+    skills: list[str] | None = None,
+    deliver: str | None = None,
+    repeat: int | None = None,
+    script: str | None = None,
+    workdir: str | None = None,
+    no_agent: bool | None = None,
+    context_from: list[str] | None = None,
+    enabled_toolsets: list[str] | None = None,
+    model_provider: str | None = None,
+    model_name: str | None = None,
+    dry_run: bool = True,
+) -> str:
+    return op_cron.hermes_cron_create(
+        profile=profile, schedule=schedule, prompt=prompt, name=name,
+        skills=skills, deliver=deliver, repeat=repeat,
+        script=script, workdir=workdir, no_agent=no_agent,
+        context_from=context_from, enabled_toolsets=enabled_toolsets,
+        model_provider=model_provider, model_name=model_name,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
     )
 
 
@@ -931,6 +1054,11 @@ def register_tools(server: FastMCP) -> None:
         server.add_tool(hermes_run_command, meta=tool_meta())
     if env_enabled(ENABLE_SESSION_SEARCH_ENV):
         server.add_tool(hermes_session_search, meta=tool_meta())
+    if env_enabled(ENABLE_VISION_ENV):
+        server.add_tool(hermes_vision_analyze, meta=tool_meta())
+    if env_enabled(ENABLE_WEB_ENV):
+        server.add_tool(hermes_web_search, meta=tool_meta())
+        server.add_tool(hermes_web_extract, meta=tool_meta())
 
     # --- Operator / Owner Mode tools -----------------------------------
     #
@@ -950,6 +1078,7 @@ def register_tools(server: FastMCP) -> None:
     # Cron
     server.add_tool(hermes_cron_list, meta=tool_meta())
     server.add_tool(hermes_cron_status, meta=tool_meta())
+    server.add_tool(hermes_cron_create, meta=tool_meta())
     server.add_tool(hermes_cron_run, meta=tool_meta())
     server.add_tool(hermes_cron_pause, meta=tool_meta())
     server.add_tool(hermes_cron_copy, meta=tool_meta())

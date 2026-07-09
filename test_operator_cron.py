@@ -543,3 +543,99 @@ def test_cron_move_does_not_pause_source_when_copy_fails(hermes_root, clean_env,
     parsed = json.loads(out)
     assert parsed["success"] is False
     assert pause_called == [], "pause was called even though copy refused"
+
+
+# ---------------------------------------------------------------------------
+# Cron create
+# ---------------------------------------------------------------------------
+
+
+def test_cron_create_refuses_without_schedule(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    out = oc.hermes_cron_create(
+        profile="default", schedule="", prompt="do stuff",
+        dry_run=True, hermes_root=hermes_root,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is False
+    assert "schedule is required" in parsed["error"].lower()
+
+
+def test_cron_create_refuses_without_prompt_or_skills(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    out = oc.hermes_cron_create(
+        profile="default", schedule="every 30m", prompt="",
+        dry_run=True, hermes_root=hermes_root,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is False
+    assert "prompt, skills, or script" in parsed["error"].lower()
+
+
+def test_cron_create_dry_run_returns_plan(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    out = oc.hermes_cron_create(
+        profile="default", schedule="every 30m", prompt="run report",
+        name="my-job", skills=["report-skill"], deliver="telegram",
+        repeat=5, dry_run=True, hermes_root=hermes_root,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["dry_run"] is True
+    plan = parsed["plan"]
+    assert plan["would_create"] is True
+    assert plan["name"] == "my-job"
+    assert plan["schedule"] == "every 30m"
+    assert plan["prompt_len"] == len("run report")
+    assert plan["skills"] == ["report-skill"]
+    assert plan["deliver"] == "telegram"
+
+
+def test_cron_create_direct_writes_job(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    out = oc.hermes_cron_create(
+        profile="default", schedule="0 9 * * *", prompt="daily briefing",
+        name="daily-brief", dry_run=False, hermes_root=hermes_root,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["dry_run"] is False
+    assert parsed["profile"] == "default"
+    assert parsed["job_id"]
+    job = parsed["job"]
+    assert job["name"] == "daily-brief"
+    assert job["schedule"] == "0 9 * * *"
+    assert job["enabled"] is True
+    assert job["state"] == "scheduled"
+
+    # Verify the job was written to disk.
+    jobs = oc._read_jobs(hermes_root)
+    assert len(jobs) == 1
+    assert jobs[0]["id"] == parsed["job_id"]
+    assert jobs[0]["name"] == "daily-brief"
+
+
+def test_cron_create_direct_with_named_profile(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PROFILES_ENV, "default,hermes-researcher")
+    target_home = hermes_root / "profiles" / "hermes-researcher"
+
+    out = oc.hermes_cron_create(
+        profile="hermes-researcher", schedule="every 1h",
+        prompt="check status", name="health-check",
+        dry_run=False, hermes_root=hermes_root,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["profile"] == "hermes-researcher"
+
+    jobs = oc._read_jobs(target_home)
+    assert len(jobs) == 1
+    assert jobs[0]["name"] == "health-check"
