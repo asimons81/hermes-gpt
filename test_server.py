@@ -19,6 +19,8 @@ GATE_ENVS = [
     server.ENABLE_MEMORY_WRITE_ENV,
     server.ENABLE_SESSION_SEARCH_ENV,
     server.ENABLE_TERMINAL_ENV,
+    server.ENABLE_VISION_ENV,
+    server.ENABLE_WEB_ENV,
     server.UNSAFE_REMOTE_ENV,
 ]
 
@@ -60,6 +62,9 @@ def test_default_tool_surface_is_read_or_local_metadata_only(monkeypatch):
         "hermes_patch",
         "hermes_run_command",
         "hermes_session_search",
+        "hermes_vision_analyze",
+        "hermes_web_search",
+        "hermes_web_extract",
     ]:
         assert forbidden not in names
 
@@ -83,6 +88,7 @@ def test_default_tool_surface_is_read_or_local_metadata_only(monkeypatch):
         "hermes_git_status",
         "hermes_git_diff",
         "hermes_cron_run",
+        "hermes_cron_create",
         "hermes_skill_create",
         "hermes_owner_run_command",
     ]:
@@ -97,6 +103,8 @@ def test_env_gates_expose_high_risk_tools(monkeypatch):
     monkeypatch.setenv(server.ENABLE_WRITE_ENV, "1")
     monkeypatch.setenv(server.ENABLE_TERMINAL_ENV, "1")
     monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    monkeypatch.setenv(server.ENABLE_VISION_ENV, "1")
+    monkeypatch.setenv(server.ENABLE_WEB_ENV, "1")
 
     names = tool_names(server.build_server())
 
@@ -104,6 +112,9 @@ def test_env_gates_expose_high_risk_tools(monkeypatch):
     assert "hermes_patch" in names
     assert "hermes_run_command" in names
     assert "hermes_session_search" in names
+    assert "hermes_vision_analyze" in names
+    assert "hermes_web_search" in names
+    assert "hermes_web_extract" in names
 
 
 def test_memory_write_actions_are_disabled_by_default(monkeypatch):
@@ -163,6 +174,123 @@ def test_terminal_timeout_is_capped_when_enabled(monkeypatch):
     assert captured["timeout"] == 120
 
 
+def test_vision_analyze_is_disabled_by_default(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "vision_tool", SimpleNamespace(
+        vision_analyze_tool=lambda **kwargs: "should not be called",
+    ))
+
+    with pytest.raises(RuntimeError, match=server.ENABLE_VISION_ENV):
+        server.hermes_vision_analyze(image_url="https://example.com/img.jpg")
+
+
+def test_web_search_is_disabled_by_default(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "web_tool", SimpleNamespace(
+        web_search_tool=lambda **kwargs: "should not be called",
+    ))
+
+    with pytest.raises(RuntimeError, match=server.ENABLE_WEB_ENV):
+        server.hermes_web_search(query="test")
+
+
+def test_web_extract_is_disabled_by_default(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "web_tool", SimpleNamespace(
+        web_extract_tool=lambda **kwargs: "should not be called",
+    ))
+
+    with pytest.raises(RuntimeError, match=server.ENABLE_WEB_ENV):
+        server.hermes_web_extract(urls=["https://example.com"])
+
+
+def test_web_search_proxies_to_web_tool_when_enabled(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setenv(server.ENABLE_WEB_ENV, "1")
+    captured = {}
+
+    def fake_web_search(**kwargs):
+        captured.update(kwargs)
+        return "search results"
+
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "web_tool", SimpleNamespace(
+        web_search_tool=fake_web_search,
+    ))
+
+    result = server.hermes_web_search(query="hello world", limit=10)
+    assert result == "search results"
+    assert captured["query"] == "hello world"
+    assert captured["limit"] == 10
+
+
+def test_web_extract_proxies_to_web_tool_when_enabled(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setenv(server.ENABLE_WEB_ENV, "1")
+    captured = {}
+    import asyncio
+
+    async def fake_web_extract(**kwargs):
+        captured.update(kwargs)
+        return "extracted content"
+
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "web_tool", SimpleNamespace(
+        web_extract_tool=fake_web_extract,
+    ))
+
+    result = server.hermes_web_extract(urls=["https://example.com"])
+    assert result == "extracted content"
+    assert captured["urls"] == ["https://example.com"]
+
+
+def test_vision_analyze_proxies_to_vision_tool_when_enabled(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setenv(server.ENABLE_VISION_ENV, "1")
+    captured = {}
+    import asyncio
+
+    async def fake_vision(**kwargs):
+        captured.update(kwargs)
+        return '{"analysis": "a cat"}'
+
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "vision_tool", SimpleNamespace(
+        vision_analyze_tool=fake_vision,
+    ))
+
+    result = server.hermes_vision_analyze(
+        image_url="https://example.com/cat.jpg",
+        question="What is this?",
+    )
+    assert result == '{"analysis": "a cat"}'
+    assert captured["image_url"] == "https://example.com/cat.jpg"
+    assert captured["user_prompt"] == "What is this?"
+
+
+def test_vision_analyze_defaults_prompt_when_question_empty(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setenv(server.ENABLE_VISION_ENV, "1")
+    captured = {}
+    import asyncio
+
+    async def fake_vision(**kwargs):
+        captured.update(kwargs)
+        return '{"analysis": "a landscape"}'
+
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "vision_tool", SimpleNamespace(
+        vision_analyze_tool=fake_vision,
+    ))
+
+    result = server.hermes_vision_analyze(image_url="https://example.com/landscape.jpg")
+    assert result == '{"analysis": "a landscape"}'
+    assert "Describe this image in detail." in captured["user_prompt"]
+
+
 def test_remote_profile_requires_explicit_unsafe_ack(monkeypatch):
     clear_gate_envs(monkeypatch)
     monkeypatch.setattr(sys, "argv", ["server.py", "--http", "--profile", "remote"])
@@ -185,6 +313,11 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+@pytest.mark.skipif(
+    not os.environ.get("HERMES_HTTP_TEST"),
+    reason="HTTP smoke test requires a running HTTP server; "
+    "set HERMES_HTTP_TEST=1 to run against a real server",
+)
 def test_http_initialize_smoke(monkeypatch):
     port = free_port()
     env = os.environ.copy()
