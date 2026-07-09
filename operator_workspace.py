@@ -169,22 +169,16 @@ def _is_pid_alive(pid: int | None) -> bool:
         import psutil  # type: ignore
 
         return psutil.pid_exists(pid)
-    except ImportError:
-        try:
-            os.kill(pid, 0)
-            return True
-        except (OSError, ProcessLookupError):
-            return False
-        except Exception:
-            return False
     except Exception:
-        try:
-            os.kill(pid, 0)
-            return True
-        except (OSError, ProcessLookupError):
-            return False
-        except Exception:
-            return False
+        pass  # Fall through to os.kill fallback
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+    except Exception:
+        return False
 
 
 def _read_ticker_heartbeat(profile_home: Path) -> float | None:
