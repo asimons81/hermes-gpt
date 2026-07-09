@@ -19,10 +19,8 @@ build/
 .hermes-gpt.pid
 tmp-operator-test/
 logs/
-.vercel/
+/.vercel/
 tunnel-url.txt
-
-.vercel
 
 # Live deployment scripts (customized from examples/)
 *.ps1

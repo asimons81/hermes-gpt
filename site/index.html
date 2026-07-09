@@ -301,6 +301,14 @@
             Binds to loopback (127.0.0.1) by default. If bound to a public interface without authentication enabled, the server alerts you on startup.
           </p>
         </article>
+
+        <article class="bento-card col-span-3">
+          <span class="card-num">06</span>
+          <h3>Operator Diagnostics Suite</h3>
+          <p>
+            Proactive health checks (<code>hermes_operator_doctor</code>), state snapshots (<code>hermes_operator_snapshot</code>), release readiness assessment (<code>hermes_release_doctor</code>), and safe dry-run-first recovery (<code>hermes_operator_recover</code>). Structured error envelopes provide <code>{success, ok, error, layer, code, safe_message, suggested_action, trace_id}</code> on every failure, with PASS/WARN/FAIL/UNSUPPORTED statuses and automatic secret/path redaction.
+          </p>
+        </article>
       </div>
     </section>
 
@@ -401,6 +409,16 @@ python server.py</code></pre>
       </div>
 
       <div class="release-list">
+        <div class="release-item">
+          <div class="release-meta">
+            <span class="rel-version">v0.3.0</span>
+            <span class="rel-date">2026-06-25</span>
+          </div>
+          <div class="release-content">
+            <h4>Operator Reliability Release</h4>
+            <p>Added four new operator diagnostics tools: <code>hermes_operator_doctor</code> (deep health check), <code>hermes_operator_snapshot</code> (single state summary), <code>hermes_release_doctor</code> (release readiness with PASS/WARN/BLOCKED classification), and <code>hermes_operator_recover</code> (conservative dry-run-first recovery). Introduced structured error envelopes with <code>{success, ok, error, layer, code, safe_message, suggested_action, trace_id}</code> and PASS/WARN/FAIL/UNSUPPORTED status vocabulary across all operator surfaces.</p>
+          </div>
+        </div>
         <div class="release-item">
           <div class="release-meta">
             <span class="rel-version">v0.2.0</span>
