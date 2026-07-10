@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-gpt"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local-dev MCP sidecar for exposing selected Hermes Agent capabilities."
 readme = "README.md"
 requires-python = ">=3.10"

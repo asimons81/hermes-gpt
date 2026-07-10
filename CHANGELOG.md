@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 - 2026-07-09
+
+- Added env-gated Hermes tool wrappers: `hermes_vision_analyze` (HERMES_GPT_ENABLE_VISION), `hermes_web_search` / `hermes_web_extract` (HERMES_GPT_ENABLE_WEB).
+- Added `hermes_cron_create` operator tool with full field support: schedule, prompt, script, skills, deliver, repeat, workdir, no_agent, model, context_from, enabled_toolsets.
+- Fixed gateway status PID fallback on macOS — falls back to gateway_state.json when gateway.pid is missing or unparsable.
+- Expanded gateway status diagnostics: exposes gateway_state, gateway_kind, gateway_pid_source, gateway_updated_at, gateway_exit_reason, gateway_active_agents.
+- Fixed Vercel static site deployment configuration.
+- Updated landing page with v0.3.0 and v0.4.0 feature summaries.
+- Fixed flaky HTTP smoke test — now skips by default unless HERMES_HTTP_TEST=1 is set.
+- Consolidated duplicate exception handling in `_is_pid_alive`.
+
 ## 0.3.0 - 2026-06-25
 
 - Added operator diagnostics and recovery tools: `hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, and `hermes_operator_recover`.
