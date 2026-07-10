@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.5.0b2 - Unreleased
+## 0.5.0 - 2026-07-10
+
+- Completed the two-way Codex bridge: opt-in Operator toolsets for Codex and gated asynchronous Codex jobs for trusted Hermes GPT clients.
+- Added core/operator connector installation, explicit refresh semantics, toolset-aware doctor checks, and shared runtime version discovery.
+- Added Windows/Linux CI across Python 3.10-3.12, publish-after-test enforcement, package checks, and final v0.5.0 release notes.
 
 - Added `hermes-gpt update`: check-first, safe fast-forward updates for clean Git checkouts and explicit pip upgrades for installed packages.
 - Added update documentation and aligned the README, Codex guide, release notes, package data, and release checklist.

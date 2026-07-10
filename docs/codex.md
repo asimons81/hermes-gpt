@@ -9,11 +9,20 @@ Set the base gates in the environment that will launch Codex, then install the M
 ```powershell
 $env:HERMES_GPT_ENABLE_CODEX="1"
 $env:HERMES_GPT_ENABLE_MCP="1"
-hermes-gpt codex install
+hermes-gpt codex install --toolset core
 hermes-gpt codex doctor
 ```
 
 `install` uses `codex mcp add hermes-gpt -- ...` when the Codex CLI is available. If it must edit TOML directly, it first validates the config, creates a timestamped backup, preserves unrelated configuration, and adds only `[mcp_servers."hermes-gpt"]` plus its environment table. It is idempotent.
+
+`core` is the backward-compatible default. For the opt-in Operator control plane:
+
+```powershell
+hermes-gpt codex install --toolset operator --refresh
+hermes-gpt codex doctor
+```
+
+Different requested settings require `--refresh`, which backs up and replaces only the Hermes GPT entry. Existing entries without a toolset are treated as `core`.
 
 For a repository-local entry, run the command from inside that repository:
 
@@ -49,6 +58,16 @@ Before reinstalling a connector after a release, run `hermes-gpt update` to chec
 | `hermes_cron_create` | Explicitly confirmed, tightly gated creation. |
 | `hermes_author_skill` | Skill draft by default; write requires explicit gates. |
 | `hermes_gateway_diagnostics` | Read-only gateway and PID diagnostics. |
+
+The `operator` toolset adds namespaced aliases for Operator diagnostics, audit, cron, skills, non-secret config/environment, and gateway operations. It excludes workspace, git, raw command, Owner patch, and Owner write tools. Existing Operator gates remain authoritative.
+
+## Codex jobs through Hermes GPT
+
+The normal Operator server exposes `hermes_codex_status`, `hermes_codex_plan`, `hermes_codex_start`, `hermes_codex_review_start`, `hermes_codex_jobs`, `hermes_codex_job_status`, `hermes_codex_job_result`, and `hermes_codex_cancel`.
+
+Execution requires Operator Mode at `workspace` or acknowledged `owner` level, direct apply mode, an approved work directory, `HERMES_GPT_ENABLE_CODEX_RUNNER=1`, `confirm=true`, and `dry_run=false`. Add `HERMES_GPT_ALLOW_CODEX_WRITE=1` only for `workspace-write`; read-only jobs do not need it.
+
+Jobs use fixed arguments, `shell=False`, bounded timeouts, prompt hashes instead of raw prompt persistence, and redacted bounded results. Danger-full-access, bypass flags, arbitrary commands/config, executable paths, and extra directories are unsupported. Operator Mode is not a sandbox, and these tools do not bypass Codex permissions.
 
 ## Safety model
 

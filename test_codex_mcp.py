@@ -34,6 +34,32 @@ def test_codex_mcp_registry_is_curated_and_complete():
         assert tool.meta == {"securitySchemes": [{"type": "noauth"}]}
 
 
+def test_operator_toolset_is_opt_in_and_namespaced(monkeypatch):
+    monkeypatch.setenv(codex_core.CODEX_TOOLSET_ENV, "operator")
+    core = codex_core.CodexToolCore(
+        version="test", imports_ready=lambda: True, gateway_snapshot=lambda: {},
+        gateway_diagnostics_callback=lambda: {}, vision_analyze=lambda path, prompt: {},
+        web_search=lambda query, limit: {}, web_extract=lambda urls, limit: {},
+        cron_create_callback=lambda schedule, prompt, dry_run: {},
+        skill_create_callback=lambda name, content, dry_run: {},
+    )
+    def policy() -> str:
+        return json.dumps({"success": True, "token": "secret-token-123456789"})
+    server = codex_mcp.build_codex_server(core, operator_tools={"hermes_operator_policy": policy})
+    names = {tool.name for tool in asyncio.run(server.list_tools())}
+    assert "hermes_operator_policy" in names
+
+
+def test_invalid_toolset_fails_safely(monkeypatch):
+    monkeypatch.setenv(codex_core.CODEX_TOOLSET_ENV, "everything")
+    try:
+        codex_core.codex_toolset()
+    except ValueError as exc:
+        assert "expected core or operator" in str(exc)
+    else:
+        raise AssertionError("invalid toolset was accepted")
+
+
 def _readline_with_timeout(stream, seconds: float = 8.0) -> str:
     result: list[str] = []
     worker = threading.Thread(target=lambda: result.append(stream.readline()), daemon=True)

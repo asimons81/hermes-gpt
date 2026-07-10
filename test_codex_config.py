@@ -63,3 +63,15 @@ def test_doctor_reports_registry_and_redaction_checks(tmp_path):
     assert result["checks"]["mcp_tool_registry"]["status"] == "PASS"
     assert result["checks"]["redaction_smoke"]["status"] == "PASS"
     assert result["checks"]["gateway"]["status"] == "PASS"
+
+
+def test_install_toolset_difference_requires_refresh(tmp_path):
+    first = codex_config.install(project=True, cwd=tmp_path, prefer_cli=False, toolset="core")
+    assert first["ok"] is True
+    blocked = codex_config.install(project=True, cwd=tmp_path, prefer_cli=False, toolset="operator")
+    assert blocked["code"] == "REFRESH_REQUIRED"
+    refreshed = codex_config.install(project=True, cwd=tmp_path, prefer_cli=False, toolset="operator", refresh=True)
+    assert refreshed["ok"] is True and refreshed["changed"] is True
+    entry = codex_config.get_server_entry(tmp_path / ".codex" / "config.toml")
+    assert entry["env"][codex_config.CODEX_TOOLSET_ENV] == "operator"
+    assert refreshed["backup"]

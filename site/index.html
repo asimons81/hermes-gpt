@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hermes GPT — Standalone Local MCP Sidecar for Hermes Agent</title>
-  <meta name="description" content="Expose your local Hermes Agent tools—including terminal commands, file access, and memory—to ChatGPT and other MCP clients via a secure local-dev sidecar.">
+  <meta name="description" content="Expose your local Hermes Agent tools—including terminal commands, file access, and memory—to ChatGPT, Codex CLI, and other MCP clients via a secure local-dev sidecar with a two-way Codex bridge.">
   <meta name="theme-color" content="#030303">
-  <meta property="og:title" content="Hermes GPT">
-  <meta property="og:description" content="Local Model Context Protocol (MCP) sidecar for ChatGPT and Hermes Agent.">
-  <meta property="og:image" content="./assets/hermes-gpt-v0.4.0-branding.png">
+  <meta property="og:title" content="Hermes GPT v0.5.0 — Two-Way Codex Bridge">
+  <meta property="og:description" content="Bidirectional MCP bridge between Hermes Agent and Codex. Local-dev sidecar for ChatGPT, Cursor, Claude Desktop, and Codex CLI.">
+  <meta property="og:image" content="./assets/hermes-gpt-v0.5.0-two-way-codex-bridge.png">
   <meta name="twitter:card" content="summary_large_image">
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,9 +46,9 @@
     <section class="hero section-pad reveal">
       <div class="hero-copy">
         <p class="eyebrow">Local-first MCP Sidecar &bull; Python &bull; FastMCP</p>
-        <h1>Expose Hermes brain to <span>ChatGPT</span>.</h1>
+        <h1>Two-way bridge between <span>Hermes and Codex</span>.</h1>
         <p class="lede">
-          Connect your local Hermes Agent to ChatGPT Desktop, Cursor, or Claude Desktop. A standalone companion sidecar that imports Hermes's internal toolsets at runtime to let you search files, execute local commands, read memories, and view skills safely without copying files or code.
+          Hermes GPT v0.5.0 connects your local Hermes Agent to ChatGPT, Cursor, Claude Desktop, and Codex CLI. A standalone companion sidecar that imports Hermes internals at runtime to let you search files, execute local commands, read memories, view skills, and delegate work to Codex — safely, without copying files or code.
         </p>
 
         <div class="cta-row">
@@ -83,7 +83,7 @@
         <div class="double-bezel-outer">
           <div class="double-bezel-inner">
             <figure class="brand-image-wrapper">
-              <img src="./assets/hermes-gpt-v0.4.0-branding.png" alt="Hermes GPT v0.4.0 branding with vision, web search, cron, and gateway diagnostics features">
+              <img src="./assets/hermes-gpt-v0.5.0-two-way-codex-bridge.png" alt="Hermes GPT v0.5.0 — Two-Way Codex Bridge: Hermes Agent and Codex connected through a bidirectional data channel">
             </figure>
           </div>
         </div>
@@ -409,6 +409,16 @@ python server.py</code></pre>
       </div>
 
       <div class="release-list">
+        <div class="release-item">
+          <div class="release-meta">
+            <span class="rel-version">v0.5.0</span>
+            <span class="rel-date">2026-07-10</span>
+          </div>
+          <div class="release-content">
+            <h4>Two-Way Codex Bridge</h4>
+            <p>Codex can opt into a namespaced Hermes Operator toolset, while trusted Hermes GPT clients can run asynchronous, policy-gated Codex tasks and reviews. Core stays the default; updates and mutations stay check-first and dry-run-first.</p>
+          </div>
+        </div>
         <div class="release-item">
           <div class="release-meta">
             <span class="rel-version">v0.4.0</span>

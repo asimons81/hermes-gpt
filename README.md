@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.4.0 branding](assets/hermes-gpt-v0.4.0-branding.png)
+![Hermes GPT v0.5.0 — Two-Way Codex Bridge](assets/hermes-gpt-v0.5.0-two-way-codex-bridge.png)
 
 `hermes-gpt` is a standalone MCP sidecar for Hermes Agent. It imports selected local Hermes Agent internals at runtime and exposes them to MCP clients without modifying Hermes Agent source files.
 
@@ -15,9 +15,9 @@ Or clone from [GitHub](https://github.com/asimons81/hermes-gpt).
 
 This is a **local-dev release**.
 
-## v0.5.0 beta updates
+## v0.5.0 Two-Way Codex Bridge
 
-The v0.5.0 beta adds a curated Codex MCP connector and a safe, check-first updater. See [Codex setup](docs/codex.md), [updating](docs/updating.md), and the existing [Operator Mode guide](docs/operator-mode.md) for the focused workflows.
+v0.5.0 adds a two-way bridge: Codex can opt into Hermes Operator tools, and trusted Hermes GPT clients can delegate asynchronous tasks and reviews to Codex. Updates remain check-first and mutations remain gated and dry-run-first. See [Codex setup](docs/codex.md), [Operator Mode](docs/operator-mode.md), [updating](docs/updating.md), and the [v0.5.0 release notes](docs/release-notes-v0.5.0.md).
 
 ### Updating Hermes GPT
 
@@ -30,16 +30,16 @@ The first command only checks. `--apply` fast-forwards a clean checkout on its d
 
 ## Codex App / Codex CLI Support
 
-The first v0.5.0 batch adds a local Codex connector built on MCP. It is a curated tool surface for planning, local vision analysis, web search/extraction, cron planning, skill drafts, and gateway diagnostics; it does not modify Codex itself or bypass its permissions.
+The v0.5.0 core connector is a curated tool surface for planning, local vision analysis, web search/extraction, cron planning, skill drafts, and gateway diagnostics; it does not modify Codex itself or bypass its permissions.
 
 ```powershell
 $env:HERMES_GPT_ENABLE_CODEX="1"
 $env:HERMES_GPT_ENABLE_MCP="1"
-hermes-gpt codex install
+hermes-gpt codex install --toolset core
 hermes-gpt codex doctor
 ```
 
-The installer prefers `codex mcp add` when available and otherwise creates a backup before adding only the Hermes GPT entry. Use `hermes-gpt codex install --project` for `<repo>/.codex/config.toml`, and `hermes-gpt codex uninstall` to remove only that entry. Full setup, safety gates, and troubleshooting live in [docs/codex.md](docs/codex.md).
+Use `hermes-gpt codex install --toolset operator --refresh` for the opt-in Operator control plane. The installer creates a backup before refreshing only the Hermes GPT entry. Use `--project` for `<repo>/.codex/config.toml`, and `uninstall` to remove only that entry. Full setup, runner gates, and troubleshooting live in [docs/codex.md](docs/codex.md).
 
 ## What's New in v0.4.0
 

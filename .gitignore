@@ -20,6 +20,7 @@ build/
 tmp-operator-test/
 logs/
 /.vercel/
+
 tunnel-url.txt
 
 # Live deployment scripts (customized from examples/)

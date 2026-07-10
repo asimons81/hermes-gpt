@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -29,28 +28,7 @@ import operator_config as op_config
 import operator_cron as op_cron
 import operator_skills as op_skills
 import operator_workspace as op_workspace
-
-# ---------------------------------------------------------------------------
-# Release version
-# ---------------------------------------------------------------------------
-
-def _source_version() -> str:
-    """Read the checked-out package version without depending on install state."""
-    try:
-        pyproject = Path(__file__).with_name("pyproject.toml")
-        match = re.search(
-            r'^version\s*=\s*["\']([^"\']+)["\']',
-            pyproject.read_text(encoding="utf-8"),
-            re.MULTILINE,
-        )
-        if match:
-            return match.group(1)
-    except OSError:
-        pass
-    return "unknown"
-
-
-VERSION = _source_version()
+from versioning import VERSION
 
 # ---------------------------------------------------------------------------
 # Check statuses
@@ -871,7 +849,7 @@ def hermes_release_doctor(
     timeout: int = 180,
     runner=None,
 ) -> str:
-    """Check whether the repo/operator is safe to ship as v0.3.0."""
+    """Check whether the repo/operator is safe to ship at the current version."""
     trace_id = op.new_trace_id()
     try:
         wd = Path(workdir).expanduser().resolve() if workdir else Path(__file__).resolve().parent
@@ -958,7 +936,7 @@ def hermes_release_doctor(
             recommended = "Review warnings, then run with full_tests=true before tagging."
         else:
             status = "PASS"
-            recommended = "Ready to tag v0.3.0."
+            recommended = f"Ready to tag v{VERSION}."
 
         return json.dumps(
             {

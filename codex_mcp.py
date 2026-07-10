@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Any, Callable
 
 from mcp.server.fastmcp import FastMCP
 
-from codex_core import CodexToolCore
+from codex_core import CodexToolCore, codex_toolset
 
 
 NOAUTH_META = {"securitySchemes": [{"type": "noauth"}]}
 
 
-def build_codex_server(core: CodexToolCore, *, host: str = "127.0.0.1", port: int = 7677, http: bool = False) -> FastMCP:
+def _structured_redacted(value: Any) -> Any:
+    from codex_core import redact_value
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            pass
+    return redact_value(value)
+
+
+def build_codex_server(core: CodexToolCore, *, host: str = "127.0.0.1", port: int = 7677, http: bool = False,
+                       operator_tools: dict[str, Callable[..., Any]] | None = None) -> FastMCP:
     server = FastMCP(
         "hermes-gpt",
         host=host,
@@ -70,4 +82,13 @@ def build_codex_server(core: CodexToolCore, *, host: str = "127.0.0.1", port: in
         hermes_cron_create, hermes_gateway_diagnostics,
     ):
         server.add_tool(tool, meta=NOAUTH_META)
+    active = codex_toolset()
+    if active == "operator":
+        for alias, callback in (operator_tools or {}).items():
+            def wrapper(*args: Any, __callback: Callable[..., Any] = callback, **kwargs: Any) -> Any:
+                return _structured_redacted(__callback(*args, **kwargs))
+            wrapper.__name__ = alias
+            wrapper.__doc__ = callback.__doc__ or f"Hermes Operator tool alias for {callback.__name__}."
+            wrapper.__signature__ = __import__("inspect").signature(callback)  # type: ignore[attr-defined]
+            server.add_tool(wrapper, name=alias, meta=NOAUTH_META)
     return server

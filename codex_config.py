@@ -15,11 +15,22 @@ from pathlib import Path
 from typing import Any, Callable
 
 import operator_policy as op_policy
-from codex_core import ENABLE_CODEX_ENV, ENABLE_MCP_ENV, redact_value
+from codex_core import CODEX_TOOLSET_ENV, CODEX_TOOLSETS, ENABLE_CODEX_ENV, ENABLE_MCP_ENV, redact_value
 
 
 SERVER_NAME = "hermes-gpt"
 DEFAULT_STARTUP_TIMEOUT = 30
+
+CORE_EXPECTED_TOOLS = {"hermes_status", "hermes_capabilities", "hermes_plan", "hermes_gateway_diagnostics"}
+OPERATOR_EXPECTED_TOOLS = CORE_EXPECTED_TOOLS | {
+    "hermes_operator_policy", "hermes_operator_status", "hermes_operator_doctor",
+    "hermes_operator_cron_list", "hermes_operator_skill_list",
+    "hermes_operator_config_get", "hermes_operator_gateway_status",
+}
+
+
+def expected_tools(toolset: str) -> set[str]:
+    return set(OPERATOR_EXPECTED_TOOLS if toolset == "operator" else CORE_EXPECTED_TOOLS)
 
 
 def config_path(*, project: bool = False, cwd: Path | None = None) -> Path:
@@ -69,7 +80,7 @@ def _toml_array(values: list[str]) -> str:
     return "[" + ", ".join(_toml_quote(value) for value in values) + "]"
 
 
-def _render_server_entry(argv: list[str], name: str = SERVER_NAME) -> str:
+def _render_server_entry(argv: list[str], name: str = SERVER_NAME, toolset: str = "core") -> str:
     quoted_name = _toml_quote(name)
     command, *args = argv
     return (
@@ -80,6 +91,7 @@ def _render_server_entry(argv: list[str], name: str = SERVER_NAME) -> str:
         f"[mcp_servers.{quoted_name}.env]\n"
         f"{ENABLE_CODEX_ENV} = \"1\"\n"
         f"{ENABLE_MCP_ENV} = \"1\"\n"
+        f"{CODEX_TOOLSET_ENV} = {_toml_quote(toolset)}\n"
     )
 
 
@@ -131,13 +143,13 @@ def _backup(path: Path) -> Path | None:
     return backup
 
 
-def _write_direct(path: Path, argv: list[str], name: str = SERVER_NAME) -> dict[str, Any]:
+def _write_direct(path: Path, argv: list[str], name: str = SERVER_NAME, toolset: str = "core") -> dict[str, Any]:
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     without_old, removed = _drop_server_entry(existing, name)
     updated = without_old.rstrip()
     if updated:
         updated += "\n\n"
-    updated += _render_server_entry(argv, name)
+    updated += _render_server_entry(argv, name, toolset)
     if updated == existing:
         return {"changed": False, "backup": None}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,12 +165,16 @@ def _write_direct(path: Path, argv: list[str], name: str = SERVER_NAME) -> dict[
     return {"changed": True, "backup": str(backup) if backup else None, "replaced_existing_entry": removed}
 
 
-def _run_codex_add(codex: str, name: str, argv: list[str]) -> subprocess.CompletedProcess[str]:
-    command = [codex, "mcp", "add", name, "--env", f"{ENABLE_CODEX_ENV}=1", "--env", f"{ENABLE_MCP_ENV}=1", "--", *argv]
+def _run_codex_add(codex: str, name: str, argv: list[str], toolset: str) -> subprocess.CompletedProcess[str]:
+    command = [codex, "mcp", "add", name, "--env", f"{ENABLE_CODEX_ENV}=1", "--env", f"{ENABLE_MCP_ENV}=1", "--env", f"{CODEX_TOOLSET_ENV}={toolset}", "--", *argv]
     return subprocess.run(command, text=True, capture_output=True, shell=False, timeout=30)
 
 
-def install(*, project: bool = False, cwd: Path | None = None, name: str = SERVER_NAME, server_path: Path | None = None, prefer_cli: bool = True) -> dict[str, Any]:
+def install(*, project: bool = False, cwd: Path | None = None, name: str = SERVER_NAME, server_path: Path | None = None,
+            prefer_cli: bool = True, toolset: str = "core", refresh: bool = False) -> dict[str, Any]:
+    toolset = toolset.strip().lower()
+    if toolset not in CODEX_TOOLSETS:
+        return {"ok": False, "changed": False, "code": "INVALID_TOOLSET", "message": "toolset must be core or operator."}
     path = config_path(project=project, cwd=cwd)
     argv = launcher_argv(server_path)
     try:
@@ -168,13 +184,21 @@ def install(*, project: bool = False, cwd: Path | None = None, name: str = SERVE
     existing = get_server_entry(path, name)
     if existing:
         if _is_hermes_entry(existing):
-            return redact_value({"ok": True, "changed": False, "method": "existing", "config_path": str(path), "message": f"{name} is already configured.", "entry": existing})
+            configured = str(existing.get("env", {}).get(CODEX_TOOLSET_ENV, "core")).lower()
+            expected_argv = launcher_argv(server_path)
+            same = configured == toolset and existing.get("command") == expected_argv[0] and existing.get("args") == expected_argv[1:]
+            if same:
+                return redact_value({"ok": True, "changed": False, "method": "existing", "toolset": configured, "config_path": str(path), "message": f"{name} is already configured with the requested settings.", "entry": existing})
+            if not refresh:
+                return redact_value({"ok": False, "changed": False, "code": "REFRESH_REQUIRED", "config_path": str(path), "configured_toolset": configured, "requested_toolset": toolset, "message": "The Hermes GPT entry differs from the requested settings; rerun with --refresh."})
+            direct = _write_direct(path, argv, name, toolset)
+            return redact_value({"ok": True, "method": "toml-refresh", "toolset": toolset, "config_path": str(path), "launcher": argv, **direct})
         return {"ok": False, "changed": False, "code": "NAME_CONFLICT", "config_path": str(path), "message": f"{name} is owned by a different MCP configuration; no changes were made."}
 
     codex = shutil.which("codex") if prefer_cli and not project else None
     if codex:
         try:
-            completed = _run_codex_add(codex, name, argv)
+            completed = _run_codex_add(codex, name, argv, toolset)
             if completed.returncode == 0:
                 return redact_value({"ok": True, "changed": True, "method": "codex-cli", "config_path": str(path), "command": [codex, "mcp", "add", name], "output": completed.stdout.strip()})
             cli_error = op_policy.redact_output(completed.stderr.strip() or completed.stdout.strip())
@@ -183,8 +207,8 @@ def install(*, project: bool = False, cwd: Path | None = None, name: str = SERVE
     else:
         cli_error = "Codex CLI unavailable" if not project else "Project install uses safe TOML editing"
 
-    direct = _write_direct(path, argv, name)
-    return redact_value({"ok": True, "method": "toml-fallback", "config_path": str(path), "launcher": argv, "cli_note": cli_error, **direct})
+    direct = _write_direct(path, argv, name, toolset)
+    return redact_value({"ok": True, "method": "toml-fallback", "toolset": toolset, "config_path": str(path), "launcher": argv, "cli_note": cli_error, **direct})
 
 
 def uninstall(*, project: bool = False, cwd: Path | None = None, name: str = SERVER_NAME) -> dict[str, Any]:
@@ -217,7 +241,9 @@ def uninstall(*, project: bool = False, cwd: Path | None = None, name: str = SER
 
 def print_config(*, project: bool = False, cwd: Path | None = None, name: str = SERVER_NAME) -> dict[str, Any]:
     path = config_path(project=project, cwd=cwd)
-    return redact_value({"ok": True, "config_path": str(path), "server_name": name, "entry": get_server_entry(path, name), "present": get_server_entry(path, name) is not None})
+    entry = get_server_entry(path, name)
+    toolset = str((entry or {}).get("env", {}).get(CODEX_TOOLSET_ENV, "core")).lower()
+    return redact_value({"ok": True, "config_path": str(path), "server_name": name, "entry": entry, "present": entry is not None, "toolset": toolset})
 
 
 def _readline_with_timeout(stream: Any, seconds: float = 8.0) -> str:
@@ -230,7 +256,7 @@ def _readline_with_timeout(stream: Any, seconds: float = 8.0) -> str:
     return result[0]
 
 
-def _mcp_smoke(argv: list[str]) -> dict[str, Any]:
+def _mcp_smoke(argv: list[str], toolset: str = "core") -> dict[str, Any]:
     """Initialize a short-lived local stdio server and issue tools/list."""
     proc = subprocess.Popen(
         argv,
@@ -238,7 +264,7 @@ def _mcp_smoke(argv: list[str]) -> dict[str, Any]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=os.environ.copy(),
+        env={**os.environ, CODEX_TOOLSET_ENV: toolset},
     )
 
     def send(payload: dict[str, Any]) -> None:
@@ -256,7 +282,7 @@ def _mcp_smoke(argv: list[str]) -> dict[str, Any]:
         send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
         listed = json.loads(_readline_with_timeout(proc.stdout))
         names = {item.get("name") for item in listed.get("result", {}).get("tools", [])}
-        expected = {"hermes_status", "hermes_capabilities", "hermes_plan", "hermes_gateway_diagnostics"}
+        expected = expected_tools(toolset)
         return {"status": "PASS" if expected.issubset(names) else "FAIL", "tool_count": len(names), "missing": sorted(expected - names)}
     except (OSError, ValueError, TimeoutError, subprocess.SubprocessError) as exc:
         return {"status": "FAIL", "detail": op_policy.redact_output(str(exc))}
@@ -271,11 +297,15 @@ def _mcp_smoke(argv: list[str]) -> dict[str, Any]:
 
 def doctor(*, project: bool = False, cwd: Path | None = None, list_tools: Callable[[], list[str]] | None = None, status: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
     path = config_path(project=project, cwd=cwd)
+    entry = get_server_entry(path)
+    toolset = str((entry or {}).get("env", {}).get(CODEX_TOOLSET_ENV, "core")).lower()
+    valid_toolset = toolset in CODEX_TOOLSETS
     codex = shutil.which("codex")
     checks: dict[str, Any] = {
         "codex_binary": {"status": "PASS" if codex else "WARN", "path": codex},
         "codex_config": {"status": "PASS" if path.exists() else "WARN", "path": str(path)},
-        "hermes_gpt_entry": {"status": "PASS" if get_server_entry(path) else "WARN"},
+        "hermes_gpt_entry": {"status": "PASS" if entry and _is_hermes_entry(entry) else "WARN"},
+        "toolset": {"status": "PASS" if valid_toolset else "FAIL", "configured": toolset, "available": list(CODEX_TOOLSETS)},
         "env_gates": {"status": "PASS" if os.environ.get(ENABLE_CODEX_ENV) == "1" and os.environ.get(ENABLE_MCP_ENV) == "1" else "WARN", "required": [ENABLE_CODEX_ENV, ENABLE_MCP_ENV]},
     }
     if codex:
@@ -287,11 +317,11 @@ def doctor(*, project: bool = False, cwd: Path | None = None, list_tools: Callab
     if list_tools:
         try:
             tools = list_tools()
-            expected = {"hermes_status", "hermes_capabilities", "hermes_plan", "hermes_gateway_diagnostics"}
+            expected = expected_tools(toolset if valid_toolset else "core")
             checks["mcp_tool_registry"] = {"status": "PASS" if expected.issubset(set(tools)) else "FAIL", "tool_count": len(tools), "missing": sorted(expected - set(tools))}
         except Exception:
             checks["mcp_tool_registry"] = {"status": "FAIL", "detail": "Could not list the local MCP tool registry."}
-    checks["mcp_stdio_smoke"] = _mcp_smoke(launcher_argv())
+    checks["mcp_stdio_smoke"] = _mcp_smoke(launcher_argv(), toolset if valid_toolset else "core")
     redaction = op_policy.redact_output("token=secret-token-123456789")
     checks["redaction_smoke"] = {"status": "PASS" if "secret-token" not in redaction else "FAIL"}
     if status:
@@ -311,12 +341,17 @@ def main(argv: list[str], *, list_tools: Callable[[], list[str]] | None = None, 
         child = subparsers.add_parser(command)
         child.add_argument("--project", action="store_true", help="Use .codex/config.toml in the current project.")
         child.add_argument("--global", dest="project", action="store_false", help="Use ~/.codex/config.toml (default).")
+        if command == "install":
+            child.add_argument("--toolset", choices=CODEX_TOOLSETS, default="core")
+            child.add_argument("--refresh", action="store_true", help="Replace only an existing Hermes GPT entry after creating a backup.")
     subparsers.add_parser("mcp", help="Run the Codex-focused MCP stdio server.")
     args = parser.parse_args(argv)
     if args.command == "mcp":
         raise RuntimeError("The mcp command is dispatched by server.py.")
     operation = {"install": install, "uninstall": uninstall, "doctor": doctor, "print-config": print_config}[args.command]
     kwargs: dict[str, Any] = {"project": args.project}
+    if operation is install:
+        kwargs.update({"toolset": args.toolset, "refresh": args.refresh})
     if operation is doctor:
         kwargs.update({"list_tools": list_tools, "status": status})
     print(json.dumps(operation(**kwargs), indent=2, default=str))

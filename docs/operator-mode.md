@@ -1,5 +1,11 @@
 # Operator Mode for hermes-gpt
 
+## Codex bridge posture (v0.5.0)
+
+Codex can opt into the control plane with `hermes-gpt codex install --toolset operator --refresh`. Registration does not grant authority; the same level, profile, apply, path, redaction, and audit policy applies.
+
+Trusted clients can delegate asynchronous Codex jobs through the eight `hermes_codex_*` tools. Set `HERMES_GPT_ENABLE_CODEX_RUNNER=1`; direct execution also requires workspace-or-higher level, direct mode, an allowed directory, `confirm=true`, and `dry_run=false`. `HERMES_GPT_ALLOW_CODEX_WRITE=1` is needed only for `workspace-write`. Normal jobs do not require Owner Mode, and raw prompts are not persisted.
+
 `hermes-gpt` is a local MCP bridge for exposing selected Hermes Agent capabilities to trusted MCP clients like ChatGPT. It is meant to run on your machine, bound to loopback, with a tunnel in front of it only when you deliberately want remote access.
 
 Operator Mode is the safer control plane inside `hermes-gpt`. It exposes operator tools, but tool visibility does not mean mutation is allowed. Whether a call can change anything depends on:
@@ -290,11 +296,11 @@ Run before tagging a release. Fast checks by default:
 - git repo / branch / dirty tree
 - secret-file scan (`.env`, `*.pem`, `*.key`, auth/token files, etc.)
 - `pyproject.toml` version
-- CHANGELOG/README/docs mention v0.3.0
+- CHANGELOG/README/docs mention the current package version
 - import / py_compile checks
 - operator apply mode is not direct
 
-Pass `full_tests=true` to also run the pytest suite. Results are classified as `PASS`, `WARN`, or `BLOCKED`. For v0.3.0 the recommended release type is `minor`.
+Pass `full_tests=true` to also run the pytest suite. Results are classified as `PASS`, `WARN`, or `BLOCKED`; the expected release version is derived from package metadata.
 
 ### Structured errors
 

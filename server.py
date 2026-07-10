@@ -16,6 +16,8 @@ import operator_skills as op_skills
 import operator_config as op_config
 import operator_workspace as op_workspace
 import operator_diagnostics as op_diagnostics
+import operator_codex as op_codex
+from versioning import VERSION
 
 
 LOCAL_DEV_PROFILE = "local-dev"
@@ -28,7 +30,7 @@ ENABLE_SESSION_SEARCH_ENV = "HERMES_GPT_ENABLE_SESSION_SEARCH"
 ENABLE_TERMINAL_ENV = "HERMES_GPT_ENABLE_TERMINAL"
 ENABLE_VISION_ENV = "HERMES_GPT_ENABLE_VISION"
 ENABLE_WEB_ENV = "HERMES_GPT_ENABLE_WEB"
-CODEX_BATCH_VERSION = "0.5.0b2"
+CODEX_BATCH_VERSION = VERSION
 NOAUTH_META = {"securitySchemes": [{"type": "noauth"}]}
 
 HERMES_ROOT: Path | None = None
@@ -1021,6 +1023,45 @@ def hermes_owner_write_file(path: str, content: str, dry_run: bool = True) -> st
     return op_workspace.hermes_owner_write_file(path=path, content=content, dry_run=dry_run)
 
 
+# --- Codex background jobs ------------------------------------------------
+
+def hermes_codex_status() -> dict[str, Any]:
+    return op_codex.hermes_codex_status(_default_hermes_root())
+
+
+def hermes_codex_plan(prompt: str, workdir: str, sandbox: str = "read-only", model: str | None = None,
+                      ignore_user_config: bool = False, timeout: int = 900) -> dict[str, Any]:
+    return op_codex.hermes_codex_plan(prompt, workdir, sandbox, model, ignore_user_config, timeout)
+
+
+def hermes_codex_start(prompt: str, workdir: str, sandbox: str = "read-only", model: str | None = None,
+                       ignore_user_config: bool = False, timeout: int = 900, confirm: bool = False,
+                       dry_run: bool = True) -> dict[str, Any]:
+    return op_codex.hermes_codex_start(prompt, workdir, sandbox, model, ignore_user_config, timeout, confirm, dry_run, _default_hermes_root())
+
+
+def hermes_codex_review_start(workdir: str, target: str = "uncommitted", instructions: str = "", model: str | None = None,
+                              ignore_user_config: bool = False, timeout: int = 900, confirm: bool = False,
+                              dry_run: bool = True) -> dict[str, Any]:
+    return op_codex.hermes_codex_review_start(workdir, target, instructions, model, ignore_user_config, timeout, confirm, dry_run, _default_hermes_root())
+
+
+def hermes_codex_jobs(limit: int = 50) -> dict[str, Any]:
+    return op_codex.hermes_codex_jobs(limit, _default_hermes_root())
+
+
+def hermes_codex_job_status(job_id: str) -> dict[str, Any]:
+    return op_codex.hermes_codex_job_status(job_id, _default_hermes_root())
+
+
+def hermes_codex_job_result(job_id: str, max_chars: int = op_codex.MAX_RESULT_CHARS) -> dict[str, Any]:
+    return op_codex.hermes_codex_job_result(job_id, max_chars, _default_hermes_root())
+
+
+def hermes_codex_cancel(job_id: str, confirm: bool = False, dry_run: bool = True) -> dict[str, Any]:
+    return op_codex.hermes_codex_cancel(job_id, confirm, dry_run, _default_hermes_root())
+
+
 def build_server(
     *,
     host: str = "127.0.0.1",
@@ -1117,6 +1158,13 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_owner_patch, meta=tool_meta())
     server.add_tool(hermes_owner_write_file, meta=tool_meta())
 
+    for tool in (
+        hermes_codex_status, hermes_codex_plan, hermes_codex_start,
+        hermes_codex_review_start, hermes_codex_jobs, hermes_codex_job_status,
+        hermes_codex_job_result, hermes_codex_cancel,
+    ):
+        server.add_tool(tool, meta=tool_meta())
+
 
 def _codex_gateway_diagnostics() -> dict[str, Any]:
     """Combine the general doctor with the state-file-aware gateway status."""
@@ -1164,7 +1212,41 @@ def build_codex_mcp_server(
         cron_create_callback=lambda schedule, prompt, dry_run: hermes_cron_create(schedule=schedule, prompt=prompt, dry_run=dry_run),
         skill_create_callback=lambda name, content, dry_run: hermes_skill_create(name=name, content=content, dry_run=dry_run),
     )
-    return build_codex_server(core, host=host, port=port, http=http)
+    operator_tools = {
+        "hermes_operator_policy": hermes_operator_policy,
+        "hermes_operator_status": hermes_operator_status,
+        "hermes_operator_audit_tail": hermes_operator_audit_tail,
+        "hermes_operator_doctor": hermes_operator_doctor,
+        "hermes_operator_snapshot": hermes_operator_snapshot,
+        "hermes_release_doctor": hermes_release_doctor,
+        "hermes_operator_recover": hermes_operator_recover,
+        "hermes_operator_cron_list": hermes_cron_list,
+        "hermes_operator_cron_status": hermes_cron_status,
+        "hermes_operator_cron_run": hermes_cron_run,
+        "hermes_operator_cron_pause": hermes_cron_pause,
+        "hermes_operator_cron_create": hermes_cron_create,
+        "hermes_operator_cron_copy": hermes_cron_copy,
+        "hermes_operator_cron_move": hermes_cron_move,
+        "hermes_operator_skill_list": hermes_skill_list,
+        "hermes_operator_skill_view": hermes_skill_view,
+        "hermes_operator_skill_diff": hermes_skill_diff,
+        "hermes_operator_skill_create": hermes_skill_create,
+        "hermes_operator_skill_edit": hermes_skill_edit,
+        "hermes_operator_skill_patch": hermes_skill_patch,
+        "hermes_operator_skill_write_file": hermes_skill_write_file,
+        "hermes_operator_skill_copy": hermes_skill_copy,
+        "hermes_operator_skill_sync_to_default": hermes_skill_sync_to_default,
+        "hermes_operator_skill_delete": hermes_skill_delete,
+        "hermes_operator_config_get": hermes_config_get,
+        "hermes_operator_config_set": hermes_config_set,
+        "hermes_operator_config_patch": hermes_config_patch,
+        "hermes_operator_env_status": hermes_env_status,
+        "hermes_operator_env_set_nonsecret": hermes_env_set_nonsecret,
+        "hermes_operator_env_copy_nonsecret": hermes_env_copy_nonsecret,
+        "hermes_operator_gateway_status": hermes_gateway_status,
+        "hermes_operator_gateway_restart": hermes_gateway_restart,
+    }
+    return build_codex_server(core, host=host, port=port, http=http, operator_tools=operator_tools)
 
 
 mcp = build_server()

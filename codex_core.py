@@ -23,6 +23,18 @@ from urllib.parse import urlparse
 
 import operator_policy as op_policy
 
+CODEX_TOOLSET_ENV = "HERMES_GPT_CODEX_TOOLSET"
+CODEX_TOOLSETS = ("core", "operator")
+ENABLE_CODEX_RUNNER_ENV = "HERMES_GPT_ENABLE_CODEX_RUNNER"
+ALLOW_CODEX_WRITE_ENV = "HERMES_GPT_ALLOW_CODEX_WRITE"
+
+
+def codex_toolset() -> str:
+    value = os.environ.get(CODEX_TOOLSET_ENV, "core").strip().lower()
+    if value not in CODEX_TOOLSETS:
+        raise ValueError(f"Invalid {CODEX_TOOLSET_ENV}={value!r}; expected core or operator.")
+    return value
+
 
 ENABLE_CODEX_ENV = "HERMES_GPT_ENABLE_CODEX"
 ENABLE_MCP_ENV = "HERMES_GPT_ENABLE_MCP"
@@ -312,11 +324,28 @@ class CodexToolCore:
 
     def capabilities(self) -> dict[str, Any]:
         base_enabled = not bool(self._base_gate())
+        try:
+            toolset = codex_toolset()
+            toolset_error = None
+        except ValueError as exc:
+            toolset = "invalid"
+            toolset_error = str(exc)
+        policy = op_policy.OperatorPolicy()
         def state(env_name: str, reason: str) -> dict[str, Any]:
             enabled = base_enabled and _env_enabled(env_name)
             return {"enabled": enabled, **({} if enabled else {"reason": reason if base_enabled else "Codex MCP integration is disabled."})}
         return redact_value({
             "ok": True,
+            "active_toolset": toolset,
+            "available_toolsets": list(CODEX_TOOLSETS),
+            "toolset_error": toolset_error,
+            "operator": {
+                "enabled": policy.enabled,
+                "level": policy.level,
+                "apply_mode": policy.apply_mode,
+                "codex_runner_enabled": _env_enabled(ENABLE_CODEX_RUNNER_ENV),
+                "codex_write_enabled": _env_enabled(ALLOW_CODEX_WRITE_ENV),
+            },
             "capabilities": {
                 "status": {"enabled": base_enabled, **({} if base_enabled else {"reason": "Codex MCP integration is disabled."})},
                 "planning": {"enabled": base_enabled, **({} if base_enabled else {"reason": "Codex MCP integration is disabled."})},
