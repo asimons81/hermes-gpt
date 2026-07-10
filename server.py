@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.metadata
 import inspect
 import json
@@ -27,6 +28,7 @@ ENABLE_SESSION_SEARCH_ENV = "HERMES_GPT_ENABLE_SESSION_SEARCH"
 ENABLE_TERMINAL_ENV = "HERMES_GPT_ENABLE_TERMINAL"
 ENABLE_VISION_ENV = "HERMES_GPT_ENABLE_VISION"
 ENABLE_WEB_ENV = "HERMES_GPT_ENABLE_WEB"
+CODEX_BATCH_VERSION = "0.5.0b1"
 NOAUTH_META = {"securitySchemes": [{"type": "noauth"}]}
 
 HERMES_ROOT: Path | None = None
@@ -1116,10 +1118,75 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_owner_write_file, meta=tool_meta())
 
 
+def _codex_gateway_diagnostics() -> dict[str, Any]:
+    """Combine the general doctor with the state-file-aware gateway status."""
+    def decoded(value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        return value
+
+    return {
+        "operator_doctor": decoded(hermes_operator_doctor()),
+        # operator_workspace has the gateway_state.json fallback required for
+        # macOS installs when gateway.pid is stale or absent.
+        "gateway_status": decoded(hermes_gateway_status()),
+    }
+
+
+def build_codex_mcp_server(
+    *,
+    host: str = "127.0.0.1",
+    port: int = 7677,
+    http: bool = False,
+) -> FastMCP:
+    """Build the deliberately compact Codex-facing MCP registry.
+
+    The existing ``build_server`` remains the backwards-compatible legacy
+    surface.  Codex gets only the high-leverage tools defined in codex_mcp.
+    """
+    from codex_core import CodexToolCore
+    from codex_mcp import build_codex_server
+
+    def imports_ready() -> bool:
+        return IMPORT_ERROR is None and HERMES_ROOT is not None
+
+    core = CodexToolCore(
+        version=CODEX_BATCH_VERSION,
+        imports_ready=imports_ready,
+        gateway_snapshot=lambda: hermes_gateway_status(),
+        gateway_diagnostics_callback=_codex_gateway_diagnostics,
+        vision_analyze=lambda image_path, prompt: hermes_vision_analyze(image_url=image_path, question=prompt),
+        web_search=lambda query, limit: hermes_web_search(query=query, limit=limit),
+        web_extract=lambda urls, limit: hermes_web_extract(urls=urls, char_limit=limit),
+        cron_create_callback=lambda schedule, prompt, dry_run: hermes_cron_create(schedule=schedule, prompt=prompt, dry_run=dry_run),
+        skill_create_callback=lambda name, content, dry_run: hermes_skill_create(name=name, content=content, dry_run=dry_run),
+    )
+    return build_codex_server(core, host=host, port=port, http=http)
+
+
 mcp = build_server()
 
 
-def main() -> None:
+def _run_codex_mcp(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(prog="hermes-gpt mcp", description="Run the Hermes GPT Codex MCP server.")
+    parser.add_argument("--http", action="store_true", help="Run streamable HTTP instead of stdio.")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=7677)
+    args = parser.parse_args(argv)
+    server = build_codex_mcp_server(host=args.host, port=args.port, http=args.http)
+    if not args.http:
+        eprint("hermes-gpt Codex MCP server starting in stdio mode.")
+        server.run(transport="stdio")
+        return
+    eprint(f"hermes-gpt Codex MCP server running at http://{args.host}:{args.port}/mcp")
+    import uvicorn
+    uvicorn.run(server.streamable_http_app(), host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="*")
+
+
+def _run_legacy_server(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(description="Hermes Agent MCP sidecar.")
     parser.add_argument("--http", action="store_true", help="Run streamable HTTP transport instead of stdio.")
     parser.add_argument("--sse", action="store_true", help="Run legacy SSE transport instead of stdio.")
@@ -1139,7 +1206,7 @@ def main() -> None:
         dest="unsafe_remote_ack",
         help="Allow remote profile without auth. For experiments only; not release-safe.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.http and args.sse:
         raise SystemExit("Choose only one of --http or --sse.")
@@ -1179,6 +1246,37 @@ def main() -> None:
             proxy_headers=True,
             forwarded_allow_ips="*",
         )
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Run legacy MCP, the Codex MCP alias, or the Codex installer helpers."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "mcp":
+        _run_codex_mcp(args[1:])
+        return
+    if args and args[0] == "codex":
+        if len(args) > 1 and args[1] == "mcp":
+            _run_codex_mcp(args[2:])
+            return
+        import codex_config
+
+        def list_tools() -> list[str]:
+            return [tool.name for tool in asyncio.run(build_codex_mcp_server().list_tools())]
+
+        def status() -> dict[str, Any]:
+            try:
+                data = json.loads(hermes_gateway_status())
+                return {
+                    "ok": bool(data.get("success")),
+                    "gateway": "running" if data.get("gateway_running") else "not_running",
+                    "gateway_pid_source": data.get("gateway_pid_source"),
+                }
+            except Exception:
+                return {"ok": False, "gateway": "unknown"}
+
+        codex_config.main(args[1:], list_tools=list_tools, status=status)
+        return
+    _run_legacy_server(args)
 
 
 if __name__ == "__main__":

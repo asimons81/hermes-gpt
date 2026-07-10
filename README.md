@@ -15,6 +15,19 @@ Or clone from [GitHub](https://github.com/asimons81/hermes-gpt).
 
 This is a **local-dev release**.
 
+## Codex App / Codex CLI Support
+
+The first v0.5.0 batch adds a local Codex connector built on MCP. It is a curated tool surface for planning, local vision analysis, web search/extraction, cron planning, skill drafts, and gateway diagnostics; it does not modify Codex itself or bypass its permissions.
+
+```powershell
+$env:HERMES_GPT_ENABLE_CODEX="1"
+$env:HERMES_GPT_ENABLE_MCP="1"
+hermes-gpt codex install
+hermes-gpt codex doctor
+```
+
+The installer prefers `codex mcp add` when available and otherwise creates a backup before adding only the Hermes GPT entry. Use `hermes-gpt codex install --project` for `<repo>/.codex/config.toml`, and `hermes-gpt codex uninstall` to remove only that entry. Full setup, safety gates, and troubleshooting live in [docs/codex.md](docs/codex.md).
+
 ## What's New in v0.4.0
 
 v0.4.0 is the Tool Surface Expansion release. It adds env-gated Hermes tool wrappers, a cron creation operator tool, and ships the first external contribution.

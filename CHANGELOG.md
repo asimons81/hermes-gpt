@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0b1 - 2026-07-09
+
+- Added the first Codex integration batch: a curated MCP stdio server at `hermes-gpt mcp` (also available as `hermes-gpt codex mcp`).
+- Added `hermes-gpt codex install`, `uninstall`, `doctor`, and `print-config` with idempotent, backup-first TOML fallback handling.
+- Added Codex-focused planning, local vision path validation, web extraction SSRF protections, dry-run cron planning, skill drafting, and gateway diagnostics.
+- Added explicit Codex/MCP capability gates plus strict write gates for cron and skill writes.
+- Added recursive response redaction for provider keys, GitHub tokens, cookies/session values, bearer tokens, and private keys.
+
 ## 0.4.0 - 2026-07-09
 
 - Added env-gated Hermes tool wrappers: `hermes_vision_analyze` (HERMES_GPT_ENABLE_VISION), `hermes_web_search` / `hermes_web_extract` (HERMES_GPT_ENABLE_WEB).
