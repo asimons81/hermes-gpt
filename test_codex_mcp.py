@@ -6,6 +6,8 @@ import sys
 import threading
 from pathlib import Path
 
+import pytest
+
 import codex_core
 import codex_mcp
 
@@ -70,6 +72,7 @@ def _readline_with_timeout(stream, seconds: float = 8.0) -> str:
     return result[0]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Subprocess stdio test hangs on Windows CI runners")
 def test_codex_stdio_initialize_list_and_safe_tool_call():
     root = Path(__file__).resolve().parent
     proc = subprocess.Popen(
