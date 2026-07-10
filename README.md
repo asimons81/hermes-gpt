@@ -15,6 +15,19 @@ Or clone from [GitHub](https://github.com/asimons81/hermes-gpt).
 
 This is a **local-dev release**.
 
+## v0.5.0 beta updates
+
+The v0.5.0 beta adds a curated Codex MCP connector and a safe, check-first updater. See [Codex setup](docs/codex.md), [updating](docs/updating.md), and the existing [Operator Mode guide](docs/operator-mode.md) for the focused workflows.
+
+### Updating Hermes GPT
+
+```powershell
+hermes-gpt update
+hermes-gpt update --apply
+```
+
+The first command only checks. `--apply` fast-forwards a clean checkout on its default branch, or upgrades an installed PyPI package. It never creates merge commits, rebases, downgrades packages, or overwrites tracked local changes.
+
 ## Codex App / Codex CLI Support
 
 The first v0.5.0 batch adds a local Codex connector built on MCP. It is a curated tool surface for planning, local vision analysis, web search/extraction, cron planning, skill drafts, and gateway diagnostics; it does not modify Codex itself or bypass its permissions.

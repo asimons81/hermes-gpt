@@ -27,7 +27,7 @@ def tool_core(monkeypatch):
         return value
 
     tool = core_module.CodexToolCore(
-        version="0.5.0b1",
+        version="0.5.0b2",
         imports_ready=lambda: True,
         gateway_snapshot=lambda: {"gateway": {"running": True, "pid": 42}},
         gateway_diagnostics_callback=lambda: {"success": True, "warnings": []},

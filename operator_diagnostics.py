@@ -34,7 +34,23 @@ import operator_workspace as op_workspace
 # Release version
 # ---------------------------------------------------------------------------
 
-VERSION = "0.4.0"
+def _source_version() -> str:
+    """Read the checked-out package version without depending on install state."""
+    try:
+        pyproject = Path(__file__).with_name("pyproject.toml")
+        match = re.search(
+            r'^version\s*=\s*["\']([^"\']+)["\']',
+            pyproject.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if match:
+            return match.group(1)
+    except OSError:
+        pass
+    return "unknown"
+
+
+VERSION = _source_version()
 
 # ---------------------------------------------------------------------------
 # Check statuses

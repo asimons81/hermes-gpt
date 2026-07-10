@@ -28,7 +28,7 @@ ENABLE_SESSION_SEARCH_ENV = "HERMES_GPT_ENABLE_SESSION_SEARCH"
 ENABLE_TERMINAL_ENV = "HERMES_GPT_ENABLE_TERMINAL"
 ENABLE_VISION_ENV = "HERMES_GPT_ENABLE_VISION"
 ENABLE_WEB_ENV = "HERMES_GPT_ENABLE_WEB"
-CODEX_BATCH_VERSION = "0.5.0b1"
+CODEX_BATCH_VERSION = "0.5.0b2"
 NOAUTH_META = {"securitySchemes": [{"type": "noauth"}]}
 
 HERMES_ROOT: Path | None = None
@@ -1253,6 +1253,11 @@ def main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "mcp":
         _run_codex_mcp(args[1:])
+        return
+    if args and args[0] == "update":
+        import updater
+
+        updater.main(args[1:])
         return
     if args and args[0] == "codex":
         if len(args) > 1 and args[1] == "mcp":
