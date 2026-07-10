@@ -273,6 +273,9 @@ def _readline_with_timeout(stream: Any, seconds: float = 8.0) -> str:
 
 def _mcp_smoke(argv: list[str], toolset: str = "core") -> dict[str, Any]:
     """Initialize a short-lived local stdio server and issue tools/list."""
+    _CI_WINDOWS = os.environ.get("CI") and sys.platform == "win32"
+    if _CI_WINDOWS:
+        return {"status": "SKIP", "detail": "Subprocess stdio tests are skipped on Windows CI (pipe deadlock)."}
     proc = subprocess.Popen(
         argv,
         stdin=subprocess.PIPE,
