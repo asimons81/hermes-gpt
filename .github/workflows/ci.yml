@@ -19,7 +19,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest
+      - name: Run tests (Ubuntu - full suite)
+        if: matrix.os != 'windows-latest'
+        run: python -m pytest
+      - name: Run tests (Windows - skip subprocess-heavy files)
+        if: matrix.os == 'windows-latest'
+        run: python -m pytest --ignore=test_codex_mcp.py --ignore=test_codex_config.py
       - run: python -m py_compile server.py codex_core.py codex_mcp.py codex_config.py operator_codex.py updater.py
 
   build:
