@@ -16,6 +16,7 @@ dependencies = [
   "mcp[cli]",
   "packaging>=23",
   "uvicorn",
+  "tomli; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
