@@ -300,11 +300,15 @@ def test_remote_profile_requires_explicit_unsafe_ack(monkeypatch):
 
 
 def test_default_hermes_root_normalizes_profile_scoped_env(monkeypatch):
-    monkeypatch.setenv(
-        "HERMES_HOME", r"C:\Users\asimo\AppData\Local\hermes\profiles\hermes-senior-engineer"
-    )
-    assert server._default_hermes_root() == Path(r"C:\Users\asimo\AppData\Local\hermes")
-    assert server._hermes_root_for_operator() == Path(r"C:\Users\asimo\AppData\Local\hermes")
+    if sys.platform == "win32":
+        hermes_home = r"C:\Users\asimo\AppData\Local\hermes\profiles\hermes-senior-engineer"
+        expected = Path(r"C:\Users\asimo\AppData\Local\hermes")
+    else:
+        hermes_home = "/home/asimo/.hermes/profiles/hermes-senior-engineer"
+        expected = Path("/home/asimo/.hermes")
+    monkeypatch.setenv("HERMES_HOME", hermes_home)
+    assert server._default_hermes_root() == expected
+    assert server._hermes_root_for_operator() == expected
 
 
 def free_port() -> int:

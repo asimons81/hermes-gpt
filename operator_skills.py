@@ -949,30 +949,6 @@ def hermes_skill_delete(
                 f"Skill {canon!r} not found in profile {profile!r}."
             )
 
-        # Pin guard: best-effort check via Hermes skill_usage. If import fails
-        # or the module is unavailable, we refuse to delete because direct
-        # mutation must fail closed.
-        pin_blocker = None
-        try:
-            import sys as _sys
-
-            if str(hermes_root) not in _sys.path:
-                _sys.path.insert(0, str(hermes_root))
-            from tools import skill_usage  # type: ignore
-
-            rec = skill_usage.get_record(canon)
-            if rec.get("pinned"):
-                pin_blocker = (
-                    f"Skill {canon!r} is pinned and cannot be deleted. "
-                    "Ask the user to run `hermes curator unpin " + canon + "`."
-                )
-        except Exception:
-            pin_blocker = (
-                f"Hermes skill usage metadata is unavailable; refusing to delete {canon!r}."
-            )
-        if pin_blocker:
-            raise PermissionError(pin_blocker)
-
         # List files for preview.
         files: list[str] = []
         for p in skill_dir.rglob("*"):
@@ -1000,6 +976,29 @@ def hermes_skill_delete(
                 skill_name=canon,
             )
             return json.dumps({"success": True, "dry_run": True, "plan": plan}, indent=2)
+
+        # Pin guard: best-effort check via Hermes skill_usage only for direct
+        # mutations. Dry-run always succeeds without this check.
+        pin_blocker = None
+        try:
+            import sys as _sys
+
+            if str(hermes_root) not in _sys.path:
+                _sys.path.insert(0, str(hermes_root))
+            from tools import skill_usage  # type: ignore
+
+            rec = skill_usage.get_record(canon)
+            if rec.get("pinned"):
+                pin_blocker = (
+                    f"Skill {canon!r} is pinned and cannot be deleted. "
+                    "Ask the user to run `hermes curator unpin " + canon + "`."
+                )
+        except Exception:
+            pin_blocker = (
+                f"Hermes skill usage metadata is unavailable; refusing to delete {canon!r}."
+            )
+        if pin_blocker:
+            raise PermissionError(pin_blocker)
 
         result = _call_skill_manager(
             "delete",

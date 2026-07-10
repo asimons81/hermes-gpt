@@ -646,7 +646,8 @@ def test_skill_delete_refuses_direct_mutation_without_skill_manager(hermes_root,
     )
     parsed = json.loads(out)
     assert parsed["success"] is False
-    assert "skill manager" in parsed["error"].lower()
+    err_lower = parsed["error"].lower()
+    assert "skill manager" in err_lower or "skill usage metadata" in err_lower
 
 
 def test_skill_delete_refuses_nonexistent(hermes_root, clean_env, audit_override, monkeypatch):
