@@ -23,6 +23,7 @@ dev = [
   "pytest",
   "build",
   "twine",
+  "pyyaml",
 ]
 
 [project.scripts]
