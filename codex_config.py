@@ -249,6 +249,18 @@ def print_config(*, project: bool = False, cwd: Path | None = None, name: str = 
     return redact_value({"ok": True, "config_path": str(path), "server_name": name, "entry": entry, "present": entry is not None, "toolset": toolset})
 
 
+def _kill_proc(proc: subprocess.Popen[str]) -> None:
+    """Terminate a subprocess with a short timeout, killing on timeout."""
+    try:
+        proc.terminate()
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate(timeout=5)
+    except Exception:
+        proc.kill()
+
+
 def _readline_with_timeout(stream: Any, seconds: float = 8.0) -> str:
     result: list[str] = []
     worker = threading.Thread(target=lambda: result.append(stream.readline()), daemon=True)
@@ -280,6 +292,7 @@ def _mcp_smoke(argv: list[str], toolset: str = "core") -> dict[str, Any]:
         send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "hermes-gpt-doctor", "version": "1"}}})
         initialized = json.loads(_readline_with_timeout(proc.stdout))
         if initialized.get("result", {}).get("serverInfo", {}).get("name") != "hermes-gpt":
+            proc.terminate()
             return {"status": "FAIL", "detail": "The MCP launcher returned an unexpected server identity."}
         send({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
         send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
@@ -290,12 +303,7 @@ def _mcp_smoke(argv: list[str], toolset: str = "core") -> dict[str, Any]:
     except (OSError, ValueError, TimeoutError, subprocess.SubprocessError) as exc:
         return {"status": "FAIL", "detail": op_policy.redact_output(str(exc))}
     finally:
-        proc.terminate()
-        try:
-            proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate(timeout=5)
+        _kill_proc(proc)
 
 
 def doctor(*, project: bool = False, cwd: Path | None = None, list_tools: Callable[[], list[str]] | None = None, status: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
