@@ -33,6 +33,8 @@ hermes-gpt codex uninstall
 
 `doctor` is read-only. It checks the Codex binary/version, target config, MCP registry, base gates, gateway status, and redaction smoke path. `uninstall` removes only the Hermes GPT MCP tables and makes a backup first.
 
+Before reinstalling a connector after a release, run `hermes-gpt update` to check safely; use `hermes-gpt update --apply` only when you are ready to update the checkout or installed package. See [updating](updating.md) for the exact safety behavior.
+
 ## Available Codex tools
 
 | Tool | Behavior |

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0b2 - Unreleased
+
+- Added `hermes-gpt update`: check-first, safe fast-forward updates for clean Git checkouts and explicit pip upgrades for installed packages.
+- Added update documentation and aligned the README, Codex guide, release notes, package data, and release checklist.
+
 ## 0.5.0b1 - 2026-07-09
 
 - Added the first Codex integration batch: a curated MCP stdio server at `hermes-gpt mcp` (also available as `hermes-gpt codex mcp`).
