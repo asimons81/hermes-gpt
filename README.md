@@ -4,7 +4,28 @@
 
 `hermes-gpt` is a standalone MCP sidecar for Hermes Agent. It imports selected local Hermes Agent internals at runtime and exposes them to MCP clients without modifying Hermes Agent source files.
 
-This is a **local-dev release**. It is not a hosted service, not a fork of Hermes Agent, not a generic remote dev container, and not a replacement for DevSpace.
+```bash
+pip install hermes-gpt
+```
+
+Or clone from [GitHub](https://github.com/asimons81/hermes-gpt).
+
+This is a **local-dev release**.
+
+## What's New in v0.4.0
+
+v0.4.0 is the Tool Surface Expansion release. It adds env-gated Hermes tool wrappers, a cron creation operator tool, and ships the first external contribution.
+
+- **New env-gated MCP tools:**
+  - `hermes_vision_analyze` — analyze images through Hermes Agent (`HERMES_GPT_ENABLE_VISION=1`)
+  - `hermes_web_search` — search the web (`HERMES_GPT_ENABLE_WEB=1`)
+  - `hermes_web_extract` — extract page content (same env gate)
+- **New operator tool:**
+  - `hermes_cron_create` — create cron jobs from scratch with full field support: schedule, prompt, script, skills, deliver, repeat, workdir, no_agent, model, context_from, enabled_toolsets
+- **First external contribution:** Gateway PID fallback from `gateway_state.json` when `gateway.pid` is missing (fixes macOS detection)
+- **Expanded gateway diagnostics:** New fields — `gateway_state`, `gateway_kind`, `gateway_pid_source`, `gateway_updated_at`, `gateway_exit_reason`, `gateway_active_agents`
+- **Infrastructure:** Vercel static site deploys correctly, HTTP smoke test no longer fails CI
+- **Published on PyPI:** `pip install hermes-gpt`
 
 ## What’s New in v0.3.0
 
