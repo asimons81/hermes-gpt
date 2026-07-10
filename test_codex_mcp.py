@@ -78,7 +78,7 @@ def test_codex_stdio_initialize_list_and_safe_tool_call():
         text=True,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         env={**os.environ, "HERMES_GPT_ENABLE_CODEX": "1", "HERMES_GPT_ENABLE_MCP": "1"},
     )
 
