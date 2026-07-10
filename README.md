@@ -1,5 +1,8 @@
 # hermes-gpt
 
+[![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
+
 ![Hermes GPT branding](assets/hermes-gpt-branding.jpg)
 
 `hermes-gpt` is a standalone MCP sidecar for Hermes Agent. It imports selected local Hermes Agent internals at runtime and exposes them to MCP clients without modifying Hermes Agent source files.
