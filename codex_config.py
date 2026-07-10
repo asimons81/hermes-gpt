@@ -56,7 +56,10 @@ def config_path(*, project: bool = False, cwd: Path | None = None) -> Path:
 def read_config(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib  # Python < 3.11
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
