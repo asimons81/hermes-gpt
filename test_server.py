@@ -341,7 +341,9 @@ class _Phase1FakeSessionDB:
 
     def list_sessions_rich(self, **kwargs):
         self.calls.append(("list_sessions_rich", kwargs))
-        return list(self.session_rows)
+        offset = kwargs.get("offset", 0)
+        limit = kwargs.get("limit", len(self.session_rows))
+        return list(self.session_rows[offset:offset + limit])
 
     def resolve_session_id(self, value):
         self.calls.append(("resolve_session_id", value))
@@ -351,6 +353,12 @@ class _Phase1FakeSessionDB:
 
     def get_messages(self, session_id, **kwargs):
         self.calls.append(("get_messages", {"session_id": session_id, **kwargs}))
+        offset = kwargs.get("offset", 0)
+        limit = kwargs.get("limit", len(self.message_rows))
+        return list(self.message_rows[offset:offset + limit])
+
+    def search_messages(self, **kwargs):
+        self.calls.append(("search_messages", kwargs))
         return list(self.message_rows)
 
     def export_session(self, value):
@@ -671,7 +679,7 @@ def test_phase2_tools_are_gated_and_registered(monkeypatch):
     assert "hermes_session_search" in names
     assert "hermes_session_list" in names
     assert "hermes_session_read" in names
-    assert "hermes_session_export" not in names
+    assert "hermes_session_export" in names
     assert "hermes_session_lineage_export" not in names
 
 
@@ -699,9 +707,9 @@ def test_phase2_session_list_projects_metadata_and_paginates(monkeypatch):
     monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
     monkeypatch.setattr(server, "require_imports", lambda: None)
 
-    result = json.loads(server.hermes_session_list(limit=20, offset=4))
+    result = json.loads(server.hermes_session_list(limit=20, offset=0))
     assert result["success"] is True
-    assert result["offset"] == 4
+    assert result["offset"] == 0
     assert result["returned_count"] == 1
     assert result["has_more"] is False
     assert result["sessions"][0]["id"] == "session-1"
@@ -793,6 +801,133 @@ def test_phase2_tool_bounds_fail_closed(monkeypatch, call):
     monkeypatch.setattr(server, "require_imports", lambda: None)
     result = json.loads(call())
     assert result["success"] is False
+
+
+def test_phase3_filtered_role_pagination_advances_by_examined_rows():
+    connection = _Phase1FakeConnection()
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        message_rows=[
+            {"id": 1, "session_id": "s", "role": "system", "content": "hidden"},
+            {"id": 2, "session_id": "s", "role": "user", "content": "one"},
+            {"id": 3, "session_id": "s", "role": "assistant", "content": "two"},
+            {"id": 4, "session_id": "s", "role": "user", "content": "three"},
+        ],
+    )
+    factory, _ = _phase1_adapter_factory(fake_db)
+    adapter = server.ReadOnlySessionAdapter(
+        db_factory=factory,
+        connection_type=_Phase1FakeConnection,
+    ).open()
+
+    first = adapter.get_messages_page("s", limit=2, offset=0)
+    second = adapter.get_messages_page("s", limit=2, offset=first["next_offset"])
+    assert [row["id"] for row in first["messages"]] == [2, 3]
+    assert first["rows_examined"] == 3
+    assert first["next_offset"] == 3
+    assert [row["id"] for row in second["messages"]] == [4]
+    assert second["next_offset"] == 4
+    assert second["has_more"] is False
+
+
+def test_phase3_session_export_json_and_markdown_without_files(monkeypatch, tmp_path):
+    monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        message_rows=[
+            {"id": 1, "session_id": "session-1", "role": "user", "timestamp": 1, "content": "hello"},
+            {"id": 2, "session_id": "session-1", "role": "assistant", "timestamp": 2, "content": "world"},
+        ],
+    )
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    before = list(tmp_path.iterdir())
+
+    exported_json = json.loads(server.hermes_session_export("session-1", format="json", limit=2))
+    assert exported_json["success"] is True
+    assert exported_json["format"] == "json"
+    assert [row["content"] for row in exported_json["messages"]] == ["hello", "world"]
+
+    exported_markdown = server.hermes_session_export("session-1", format="markdown", limit=2)
+    assert exported_markdown.startswith("# Hermes session export")
+    assert "hello" in exported_markdown
+    assert "world" in exported_markdown
+    assert list(tmp_path.iterdir()) == before
+
+
+def test_phase3_export_limits_truncation_and_lineage_fail_closed(monkeypatch):
+    monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    too_many = json.loads(server.hermes_session_export("session-1", limit=server.MAX_EXPORT_MESSAGES + 1))
+    assert too_many["success"] is False
+
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        message_rows=[
+            {"id": 1, "session_id": "session-1", "role": "user", "content": "x" * server.MAX_RESPONSE_BYTES},
+        ],
+    )
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    truncated = json.loads(server.hermes_session_export("session-1", format="json", limit=1))
+    assert len(json.dumps(truncated, ensure_ascii=False).encode("utf-8")) <= server.MAX_RESPONSE_BYTES
+    assert truncated["success"] is False or truncated["truncated"] is True
+
+    calls_before_lineage = list(fake_db.calls)
+    lineage = json.loads(server.hermes_session_export("session-1", include_lineage=True))
+    assert lineage["success"] is False
+    assert lineage["error"]["code"] == "SESSION_LINEAGE_EXPORT_UNAVAILABLE"
+    assert fake_db.calls == calls_before_lineage
+
+
+def test_phase3_export_elevated_content_denial_and_approval(monkeypatch):
+    monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    monkeypatch.delenv(server.ENABLE_SESSION_INTERNAL_CONTENT_ENV, raising=False)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    denied = json.loads(server.hermes_session_export("session-1", include_tool_messages=True))
+    assert denied["success"] is False
+
+    monkeypatch.setenv(server.ENABLE_SESSION_INTERNAL_CONTENT_ENV, "1")
+    connection = _Phase1FakeConnection()
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        message_rows=[{"id": 1, "session_id": "session-1", "role": "tool", "content": "tool result"}],
+    )
+    factory, _ = _phase1_adapter_factory(fake_db)
+    monkeypatch.setattr(server, "SessionDB", factory)
+    approved = json.loads(server.hermes_session_export("session-1", include_tool_messages=True))
+    assert approved["success"] is True
+    assert approved["messages"][0]["role"] == "tool"
+
+
+def test_phase3_search_plain_text_compatibility_and_cleanup(monkeypatch):
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        message_rows=[{"id": 1, "session_id": "session-1", "role": "user", "content": "hello\nworld"}],
+    )
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    result = server.hermes_session_search("hello")
+    assert result == "- session-1 [user] hello world"
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("select 1")
+
+
+def test_phase3_search_fts_unavailable_guidance(monkeypatch):
+    class NoSearchDB:
+        def __init__(self, connection):
+            self._conn = connection
+
+    connection = sqlite3.connect(":memory:")
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: NoSearchDB(connection))
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    result = server.hermes_session_search("hello")
+    assert "unavailable" in result.lower()
+    assert "fts" in result.lower()
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("select 1")
 
 
 def test_phase1_utf8_response_bytes():

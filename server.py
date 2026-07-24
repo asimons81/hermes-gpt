@@ -44,9 +44,14 @@ MAX_OFFSET = 10_000
 MAX_ID_LENGTH = 256
 MAX_QUERY_LENGTH = 512
 MAX_RESPONSE_BYTES = 262_144
+MAX_MESSAGE_SCAN_ROWS = 1_000
 
 _DEFAULT_MESSAGE_ROLES = {"user", "assistant"}
 _INTERNAL_MESSAGE_ROLES = {"system", "tool", "function"}
+
+
+class _SessionSearchUnavailable(RuntimeError):
+    """Raised when the read-only session search/FTS API is unavailable."""
 _SENSITIVE_KEY_RE = re.compile(
     r"(?i)(?:token|secret|password|passwd|api[_-]?key|authorization|cookie|private[_-]?key)"
 )
@@ -399,6 +404,67 @@ class ReadOnlySessionAdapter:
     def resolve_session_id(self, session_id_or_prefix: str) -> str | None:
         return self._require_db().resolve_session_id(_validate_session_id(session_id_or_prefix))
 
+    def get_messages_page(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        offset: int,
+        include_inactive: bool = False,
+        include_system_messages: bool = False,
+        include_tool_messages: bool = False,
+    ) -> dict[str, Any]:
+        db = self._require_db()
+        safe_id = _validate_session_id(session_id)
+        safe_limit = _validate_limit(limit, "limit", MAX_EXPORT_MESSAGES)
+        safe_offset = _validate_offset(offset)
+        safe_include_inactive = _validate_bool(include_inactive, "include_inactive")
+        safe_include_system = _validate_bool(include_system_messages, "include_system_messages")
+        safe_include_tool = _validate_bool(include_tool_messages, "include_tool_messages")
+        allowed_roles = _allowed_message_roles(
+            include_system_messages=safe_include_system,
+            include_tool_messages=safe_include_tool,
+        )
+        projected: list[dict[str, Any]] = []
+        cursor = safe_offset
+        rows_examined = 0
+        source_exhausted = safe_limit == 0
+        while len(projected) < safe_limit and rows_examined < MAX_MESSAGE_SCAN_ROWS:
+            fetch_limit = min(
+                MAX_PAGE_SIZE,
+                MAX_MESSAGE_SCAN_ROWS - rows_examined,
+                max(1, safe_limit - len(projected)),
+            )
+            raw_rows = db.get_messages(
+                safe_id,
+                limit=fetch_limit,
+                offset=cursor,
+                include_inactive=safe_include_inactive,
+            )
+            examined_now = len(raw_rows)
+            if examined_now == 0:
+                source_exhausted = True
+                break
+            rows_examined += examined_now
+            cursor += examined_now
+            for row in raw_rows:
+                message = _safe_message(row, allowed_roles)
+                if message is not None:
+                    projected.append(message)
+                    if len(projected) >= safe_limit:
+                        break
+            if examined_now < fetch_limit:
+                source_exhausted = True
+                break
+
+        return {
+            "messages": projected[:safe_limit],
+            "next_offset": cursor,
+            "rows_examined": rows_examined,
+            "has_more": not source_exhausted,
+            "scan_limited": rows_examined >= MAX_MESSAGE_SCAN_ROWS and not source_exhausted,
+        }
+
     def get_messages(
         self,
         session_id: str,
@@ -409,23 +475,26 @@ class ReadOnlySessionAdapter:
         include_system_messages: bool = False,
         include_tool_messages: bool = False,
     ) -> list[dict[str, Any]]:
+        return self.get_messages_page(
+            session_id,
+            limit=limit,
+            offset=offset,
+            include_inactive=include_inactive,
+            include_system_messages=include_system_messages,
+            include_tool_messages=include_tool_messages,
+        )["messages"]
+
+    def search_messages(self, *, query: str, limit: int, offset: int) -> list[dict[str, Any]]:
         db = self._require_db()
-        safe_id = _validate_session_id(session_id)
-        safe_limit = _validate_limit(limit, "limit", MAX_PAGE_SIZE)
+        if not hasattr(db, "search_messages"):
+            raise _SessionSearchUnavailable(
+                "read-only FTS search_messages API is unavailable"
+            )
+        safe_query = _validate_query(query)
+        safe_limit = _validate_limit(limit, "limit", MAX_LIST_LIMIT)
         safe_offset = _validate_offset(offset)
-        safe_include_inactive = _validate_bool(include_inactive, "include_inactive")
-        safe_include_system = _validate_bool(include_system_messages, "include_system_messages")
-        safe_include_tool = _validate_bool(include_tool_messages, "include_tool_messages")
-        allowed_roles = _allowed_message_roles(
-            include_system_messages=safe_include_system,
-            include_tool_messages=safe_include_tool,
-        )
-        raw_rows = db.get_messages(
-            safe_id,
-            limit=safe_limit,
-            offset=safe_offset,
-            include_inactive=safe_include_inactive,
-        )
+        raw_rows = db.search_messages(query=safe_query, limit=safe_limit, offset=safe_offset)
+        allowed_roles = _allowed_message_roles()
         projected = []
         for row in raw_rows:
             message = _safe_message(row, allowed_roles)
@@ -698,14 +767,21 @@ def _session_page_response(
     offset: int,
     requested_limit: int,
     extra: dict[str, Any] | None = None,
+    has_more_override: bool | None = None,
+    next_offset_override: int | None = None,
 ) -> str:
     has_more = requested_limit > 0 and len(items) >= requested_limit
+    next_offset = offset + len(items) if has_more else None
+    if has_more_override is not None:
+        has_more = has_more_override
+    if next_offset_override is not None:
+        next_offset = next_offset_override
     payload: dict[str, Any] = {
         "success": True,
         item_key: list(items),
         "returned_count": len(items),
         "offset": offset,
-        "next_offset": offset + len(items) if has_more else None,
+        "next_offset": next_offset,
         "has_more": has_more,
         "truncated": False,
     }
@@ -724,7 +800,10 @@ def _session_page_response(
         payload["returned_count"] = len(payload[item_key])
         payload["truncated"] = True
         payload["has_more"] = True
-        payload["next_offset"] = offset + len(payload[item_key]) + removed_count
+        payload["next_offset"] = max(
+            payload["next_offset"] or 0,
+            offset + len(payload[item_key]) + removed_count,
+        )
 
     serialized = json.dumps(_redact_value(payload), ensure_ascii=False, separators=(",", ":"))
     if _utf8_response_bytes(serialized) > MAX_RESPONSE_BYTES:
@@ -807,7 +886,7 @@ def hermes_session_read(
                 "SESSION_ID_NOT_FOUND_OR_AMBIGUOUS",
                 "The requested session ID was not found or is ambiguous.",
             )
-        messages = adapter.get_messages(
+        page = adapter.get_messages_page(
             resolved_id,
             limit=safe_limit,
             offset=safe_offset,
@@ -815,19 +894,14 @@ def hermes_session_read(
             include_system_messages=safe_include_system,
             include_tool_messages=safe_include_tool,
         )
-        projected = [
-            message
-            for row in messages
-            if isinstance(row, dict)
-            for message in [_safe_message(row, allowed_roles)]
-            if message is not None
-        ]
         return _session_page_response(
             "messages",
-            projected,
+            page["messages"],
             offset=safe_offset,
             requested_limit=safe_limit,
             extra={"session_id": resolved_id},
+            has_more_override=page["has_more"],
+            next_offset_override=page["next_offset"],
         )
     except Exception as exc:
         return _session_error("SESSION_READ_FAILED", _redact_error(exc))
@@ -835,28 +909,155 @@ def hermes_session_read(
         adapter.dispose_safely()
 
 
+def _session_markdown_response(
+    session_id: str,
+    messages: list[dict[str, Any]],
+    *,
+    offset: int,
+    next_offset: int,
+    has_more: bool,
+    truncated: bool,
+) -> str:
+    current = list(messages)
+
+    def render() -> str:
+        lines = [
+            "# Hermes session export",
+            "",
+            f"Session ID: `{_redact_text(session_id)}`",
+            f"Returned count: {len(current)}",
+            f"Offset: {offset}",
+            f"Next offset: {next_offset}",
+            f"Has more: {str(has_more).lower()}",
+            f"Truncated: {str(truncated or len(current) < len(messages)).lower()}",
+            "",
+        ]
+        for message in current:
+            lines.extend(
+                [
+                    f"## {message.get('role', '')} — {message.get('timestamp', '')}",
+                    f"Message ID: `{message.get('id', '')}`",
+                    "",
+                    str(message.get("content", "")),
+                    "",
+                ]
+            )
+        return "\n".join(lines)
+
+    rendered = render()
+    while _utf8_response_bytes(rendered) > MAX_RESPONSE_BYTES and current:
+        current.pop()
+        rendered = render()
+    if _utf8_response_bytes(rendered) > MAX_RESPONSE_BYTES:
+        return "# Hermes session export\n\nThe requested session export exceeds the configured response-size limit."
+    return rendered
+
+
+def hermes_session_export(
+    session_id: str,
+    format: str = "json",
+    limit: int = MAX_EXPORT_MESSAGES,
+    offset: int = 0,
+    include_inactive: bool = False,
+    include_system_messages: bool = False,
+    include_tool_messages: bool = False,
+    include_lineage: bool = False,
+) -> str:
+    adapter = ReadOnlySessionAdapter()
+    try:
+        require_imports()
+        if not env_enabled(ENABLE_SESSION_SEARCH_ENV):
+            return _session_error(
+                "SESSION_HISTORY_DISABLED",
+                f"Session history is disabled. Set {ENABLE_SESSION_SEARCH_ENV}=1 to enable it.",
+            )
+        if not isinstance(format, str) or format.lower() not in {"json", "markdown"}:
+            raise ValueError("format must be json or markdown.")
+        safe_format = format.lower()
+        safe_id = _validate_session_id(session_id)
+        safe_limit = _validate_limit(limit, "limit", MAX_EXPORT_MESSAGES)
+        safe_offset = _validate_offset(offset)
+        safe_include_inactive = _validate_bool(include_inactive, "include_inactive")
+        safe_include_system = _validate_bool(include_system_messages, "include_system_messages")
+        safe_include_tool = _validate_bool(include_tool_messages, "include_tool_messages")
+        safe_include_lineage = _validate_bool(include_lineage, "include_lineage")
+        if safe_include_lineage:
+            return _session_error(
+                "SESSION_LINEAGE_EXPORT_UNAVAILABLE",
+                "Lineage export is disabled until a bounded safe lineage projection is proven.",
+            )
+        _allowed_message_roles(
+            include_system_messages=safe_include_system,
+            include_tool_messages=safe_include_tool,
+        )
+        adapter.open()
+        resolved_id = adapter.resolve_session_id(safe_id)
+        if not resolved_id:
+            return _session_error(
+                "SESSION_ID_NOT_FOUND_OR_AMBIGUOUS",
+                "The requested session ID was not found or is ambiguous.",
+            )
+        page = adapter.get_messages_page(
+            resolved_id,
+            limit=safe_limit,
+            offset=safe_offset,
+            include_inactive=safe_include_inactive,
+            include_system_messages=safe_include_system,
+            include_tool_messages=safe_include_tool,
+        )
+        if safe_format == "markdown":
+            return _session_markdown_response(
+                resolved_id,
+                page["messages"],
+                offset=safe_offset,
+                next_offset=page["next_offset"],
+                has_more=page["has_more"],
+                truncated=page["scan_limited"],
+            )
+        return _session_page_response(
+            "messages",
+            page["messages"],
+            offset=safe_offset,
+            requested_limit=safe_limit,
+            extra={"session_id": resolved_id, "format": "json"},
+            has_more_override=page["has_more"],
+            next_offset_override=page["next_offset"],
+        )
+    except Exception as exc:
+        return _session_error("SESSION_EXPORT_FAILED", _redact_error(exc))
+    finally:
+        adapter.dispose_safely()
+
+
 def hermes_session_search(query: str, limit: int = 20, offset: int = 0) -> str:
+    adapter = ReadOnlySessionAdapter()
     try:
         require_imports()
         if SessionDB is None:
             return "Hermes session search is unavailable in this install: SessionDB import failed."
-        db = SessionDB(read_only=True)
-        if not hasattr(db, "search_messages"):
-            return "Hermes session search is unavailable in this install: search_messages API is missing."
-        rows = db.search_messages(query=query, limit=limit, offset=offset)
+        rows = adapter.open().search_messages(query=query, limit=limit, offset=offset)
         if not rows:
             return "No matching Hermes session messages found."
         rendered = []
         for row in rows:
             session_id = row.get("session_id", "")
             role = row.get("role", "")
-            content = (row.get("content") or "").replace("\r", " ").replace("\n", " ")
+            content = (row.get("content") or "").replace(chr(13), " ").replace(chr(10), " ")
             rendered.append(f"- {session_id} [{role}] {content[:500]}")
         return "\n".join(rendered)
-    except Exception as exc:
-        message = f"Hermes session search is unavailable in this install: {exc}"
+    except _SessionSearchUnavailable as exc:
+        message = f"Hermes session search is unavailable in this install: {exc}. Read-only FTS support is unavailable; no FTS activation or rebuild was attempted."
         eprint(f"hermes-gpt: {message}")
         return message
+    except Exception as exc:
+        message = (
+            f"Hermes session search is unavailable in this install: {exc}. "
+            "Read-only FTS search was unavailable; no FTS activation or rebuild was attempted."
+        )
+        eprint(f"hermes-gpt: {message}")
+        return message
+    finally:
+        adapter.dispose_safely()
 
 
 # ---------------------------------------------------------------------------
@@ -1574,6 +1775,7 @@ def register_tools(server: FastMCP) -> None:
         server.add_tool(hermes_session_search, meta=tool_meta())
         server.add_tool(hermes_session_list, meta=tool_meta())
         server.add_tool(hermes_session_read, meta=tool_meta())
+        server.add_tool(hermes_session_export, meta=tool_meta())
     if env_enabled(ENABLE_VISION_ENV):
         server.add_tool(hermes_vision_analyze, meta=tool_meta())
     if env_enabled(ENABLE_WEB_ENV):
