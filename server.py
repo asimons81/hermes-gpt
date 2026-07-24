@@ -490,6 +490,10 @@ class ReadOnlySessionAdapter:
             raise _SessionSearchUnavailable(
                 "read-only FTS search_messages API is unavailable"
             )
+        if hasattr(db, "_fts_enabled") and not bool(getattr(db, "_fts_enabled")):
+            raise _SessionSearchUnavailable(
+                "read-only FTS is disabled by the installed SessionDB runtime"
+            )
         safe_query = _validate_query(query)
         safe_limit = _validate_limit(limit, "limit", MAX_LIST_LIMIT)
         safe_offset = _validate_offset(offset)

@@ -326,9 +326,9 @@ class _Phase1FakeConnection:
 
 
 class _Phase1FakeSessionDB:
-    def __init__(self, connection, *, message_rows=None, session_rows=None):
+    def __init__(self, connection, *, message_rows=None, session_rows=None, fts_enabled=False):
         self._conn = connection
-        self._fts_enabled = False
+        self._fts_enabled = fts_enabled
         self._trigram_available = False
         self.close_calls = 0
         self.calls = []
@@ -906,6 +906,7 @@ def test_phase3_search_plain_text_compatibility_and_cleanup(monkeypatch):
     fake_db = _Phase1FakeSessionDB(
         connection,
         message_rows=[{"id": 1, "session_id": "session-1", "role": "user", "content": "hello\nworld"}],
+        fts_enabled=True,
     )
     monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
     monkeypatch.setattr(server, "require_imports", lambda: None)
