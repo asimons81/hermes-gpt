@@ -10,6 +10,12 @@ Use this checklist before publishing any release artifact.
 - Confirm `python -m build` and `python -m twine check dist/*` pass and artifacts include the runner, version helper, public docs, and final release notes.
 - Confirm runner metadata and audit records contain no raw prompts and no danger/bypass argv can be constructed.
 - Confirm default tools exclude write, patch, terminal, and session search.
+- With `HERMES_GPT_ENABLE_SESSION_SEARCH=1`, confirm exactly four session-history tools are visible: `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, and `hermes_session_export`.
+- Confirm session history defaults to `user`/`assistant`, and `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1` is required for `system`, `tool`, and `function` content.
+- Confirm list/read/export pagination advances by rows examined, remains bounded, and cannot duplicate or loop when roles are filtered.
+- Confirm JSON and Markdown export stay in memory, enforce `MAX_EXPORT_MESSAGES` and `MAX_RESPONSE_BYTES`, create no files, expose no paths, and fail closed for lineage.
+- Confirm unavailable read-only FTS reports an unavailable/FTS limitation rather than “no matches,” with no FTS activation or rebuild.
+- Review session-history output as private transcript data before sharing or exposing any MCP endpoint.
 - Confirm `--profile remote` refuses to start without the explicit unsafe bypass.
 - Confirm no private files are present:
   - `*.pem`

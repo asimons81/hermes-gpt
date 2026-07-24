@@ -8,6 +8,10 @@
   validation. Existing fleet tools retain registry-only routing, Operator Mode,
   confirmation, dry-run, hashing, redaction, secret-path, and end-of-options
   controls.
+- Added bounded read-only session-history pagination that advances by database rows examined while filtering unsafe roles before client exposure.
+- Added the gated `hermes_session_list`, `hermes_session_read`, and in-memory `hermes_session_export` tools alongside the existing plain-text `hermes_session_search` tool.
+- Added JSON and Markdown export with `MAX_EXPORT_MESSAGES` and `MAX_RESPONSE_BYTES` limits; file creation, file paths, raw exports, and lineage export remain unavailable.
+- Added explicit guidance for the `HERMES_GPT_ENABLE_SESSION_SEARCH=1` and `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1` gates, FTS availability limitations, default role filtering, and transcript privacy.
 
 ## 0.5.0 - 2026-07-10
 

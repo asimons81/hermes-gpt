@@ -247,6 +247,21 @@ Opt-in tools and actions:
 
 Terminal timeout is capped at 120 seconds even when enabled.
 
+### Session history tools
+
+Session history is hidden unless `HERMES_GPT_ENABLE_SESSION_SEARCH=1` is set. When enabled, the four read-only tools are:
+
+- `hermes_session_search(query, limit=20, offset=0)` — preserves a plain-text search response. It depends on the installed read-only FTS/search API; it does not activate, rebuild, or mutate FTS state. If that API is unavailable, the tool reports the limitation instead of claiming there were no matches.
+- `hermes_session_list(limit=20, offset=0, include_archived=false)` — returns safe session metadata and bounded pagination.
+- `hermes_session_read(session_id, limit=50, offset=0, include_inactive=false, include_system_messages=false, include_tool_messages=false)` — resolves exact or unique-prefix IDs and returns safe messages.
+- `hermes_session_export(session_id, format="json", limit=500, offset=0, include_inactive=false, include_system_messages=false, include_tool_messages=false, include_lineage=false)` — returns bounded in-memory JSON or Markdown only; it never creates files or returns file paths.
+
+List, read, and export pagination advances by database rows examined, including rows filtered from the response, so filtered internal roles do not cause duplicate or infinite pages. Responses are bounded by the configured `MAX_RESPONSE_BYTES` limit, and export requests are bounded by `MAX_EXPORT_MESSAGES`.
+
+The default message roles are `user` and `assistant`. Access to `system`, `tool`, and `function` messages additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`; redaction and safe projection remain active when that gate is enabled. `include_lineage=true` is intentionally fail-closed until a bounded safe lineage projection is proven.
+
+Session transcripts may contain private prompts, credentials, personal data, paths, tool output, and other sensitive material. Treat session-history results as private local data and do not expose the MCP endpoint publicly or share returned content without reviewing it.
+
 The broad `HERMES_GPT_ENABLE_*` flags still work for backward compatibility,
 but for tiered, safe operation prefer the **Operator / Owner Mode** tools
 documented below.
