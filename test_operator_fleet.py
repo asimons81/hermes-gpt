@@ -27,7 +27,14 @@ def runner_with(responses: dict[tuple[str, ...], tuple[int, str, str]], calls: l
     return runner
 
 
-def test_fleet_list_returns_registry_without_tokens():
+def enable_read_only(monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "read_only")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+
+
+def test_fleet_list_requires_operator_mode_and_never_returns_registry_urls(monkeypatch):
+    enable_read_only(monkeypatch)
     calls: list[list[str]] = []
     runner = runner_with(
         {(HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), "")},
@@ -40,14 +47,15 @@ def test_fleet_list_returns_registry_without_tokens():
         "success": True,
         "count": 2,
         "agents": [
-            {"name": "rza", "url": "http://rza.example:8765", "has_token": True},
-            {"name": "nous-girl", "url": "http://nous.example:8765", "has_token": True},
+            {"name": "rza", "has_token": True},
+            {"name": "nous-girl", "has_token": True},
         ],
     }
     assert calls == [[HERMES, "a2a", "registry", "list", "--json"]]
 
 
-def test_fleet_status_uses_fixed_doctor_argv_for_registered_agent():
+def test_fleet_status_uses_fixed_doctor_argv_and_safe_summary(monkeypatch):
+    enable_read_only(monkeypatch)
     calls: list[list[str]] = []
     runner = runner_with(
         {
@@ -66,7 +74,9 @@ def test_fleet_status_uses_fixed_doctor_argv_for_registered_agent():
     assert out["success"] is True
     assert out["agent"] == "rza"
     assert out["status"] == "compatible"
-    assert out["capabilities"] == {"message_send": True}
+    assert out["capability_count"] == 1
+    assert out["warnings_count"] == 0
+    assert out["errors_count"] == 0
     assert calls[-1] == [HERMES, "a2a", "doctor", "rza", "--timeout", "9", "--json"]
 
 
@@ -124,7 +134,7 @@ def test_fleet_dispatch_sends_to_registered_agent_and_redacts_prompt_from_output
     runner = runner_with(
         {
             (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
-            (HERMES, "a2a", "send", "rza", message, "--json"): (
+            (HERMES, "a2a", "send", "--json", "rza", "--", message): (
                 0,
                 json.dumps({"task": {"id": "task-123", "status": {"state": "TASK_STATE_SUBMITTED"}, "history": [{"parts": [{"text": message}]}]}}),
                 "",
@@ -148,10 +158,11 @@ def test_fleet_dispatch_sends_to_registered_agent_and_redacts_prompt_from_output
         "state": "TASK_STATE_SUBMITTED",
     }
     assert message not in json.dumps(out)
-    assert calls[-1] == [HERMES, "a2a", "send", "rza", message, "--json"]
+    assert calls[-1] == [HERMES, "a2a", "send", "--json", "rza", "--", message]
 
 
-def test_fleet_task_rejects_unknown_agent_before_any_remote_command():
+def test_fleet_task_rejects_unknown_agent_before_any_remote_command(monkeypatch):
+    enable_read_only(monkeypatch)
     calls: list[list[str]] = []
     runner = runner_with(
         {(HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), "")},
@@ -165,12 +176,13 @@ def test_fleet_task_rejects_unknown_agent_before_any_remote_command():
     assert calls == [[HERMES, "a2a", "registry", "list", "--json"]]
 
 
-def test_fleet_task_reads_the_a2a_cli_wrapped_task_shape():
+def test_fleet_task_reads_the_a2a_cli_wrapped_task_shape(monkeypatch):
+    enable_read_only(monkeypatch)
     calls: list[list[str]] = []
     runner = runner_with(
         {
             (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
-            (HERMES, "a2a", "task", "task-123", "--agent", "rza", "--json"): (
+            (HERMES, "a2a", "task", "--agent", "rza", "--json", "--", "task-123"): (
                 0,
                 json.dumps({"task": {"id": "task-123", "status": {"state": "TASK_STATE_COMPLETED", "timestamp": "2026-07-26T20:00:00+00:00"}, "artifacts": [{}, {}]}}),
                 "",
@@ -203,3 +215,56 @@ def test_server_registers_the_bounded_fleet_control_tools():
         "hermes_fleet_dispatch",
         "hermes_fleet_task",
     } <= names
+
+
+def test_fleet_read_tools_are_denied_when_operator_mode_is_disabled(monkeypatch):
+    monkeypatch.delenv(op.OPERATOR_ENABLED_ENV, raising=False)
+    calls: list[list[str]] = []
+    runner = runner_with({}, calls)
+
+    out = json.loads(fleet.hermes_fleet_list(runner=runner, hermes_bin=HERMES))
+
+    assert out["code"] == "FLEET_POLICY_DENIED"
+    assert calls == []
+
+
+def test_fleet_dispatch_validates_policy_before_registry_lookup(monkeypatch):
+    monkeypatch.delenv(op.OPERATOR_ENABLED_ENV, raising=False)
+    calls: list[list[str]] = []
+    runner = runner_with({}, calls)
+
+    out = json.loads(fleet.hermes_fleet_dispatch(agent="rza", message="safe task", runner=runner, hermes_bin=HERMES))
+
+    assert out["code"] == "FLEET_POLICY_DENIED"
+    assert calls == []
+
+
+def test_fleet_dispatch_dash_leading_message_is_a_positional_argument(monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    message = "--token"
+    calls: list[list[str]] = []
+    runner = runner_with(
+        {
+            (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
+            (HERMES, "a2a", "send", "--json", "rza", "--", message): (0, json.dumps({"task": {"id": "task-123", "status": {"state": "TASK_STATE_SUBMITTED"}}}), ""),
+        },
+        calls,
+    )
+
+    out = json.loads(fleet.hermes_fleet_dispatch(agent="rza", message=message, dry_run=False, confirm=True, runner=runner, hermes_bin=HERMES))
+
+    assert out["success"] is True
+    assert calls[-1] == [HERMES, "a2a", "send", "--json", "rza", "--", "--token"]
+
+
+def test_fleet_task_rejects_dash_leading_task_id_before_registry_lookup(monkeypatch):
+    enable_read_only(monkeypatch)
+    calls: list[list[str]] = []
+    runner = runner_with({}, calls)
+
+    out = json.loads(fleet.hermes_fleet_task(agent="rza", task_id="-h", runner=runner, hermes_bin=HERMES))
+
+    assert out["code"] == "INVALID_TASK_ID"
+    assert calls == []

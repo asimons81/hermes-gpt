@@ -20,7 +20,7 @@ import operator_policy as op
 Runner = Callable[..., tuple[int, str, str]]
 
 _AGENT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
-_TASK_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
 def _hermes_bin(hermes_root: Path | None = None) -> str:
@@ -84,7 +84,7 @@ def _registry(*, runner: Runner | None, hermes_bin: str | None) -> tuple[list[di
         name = item.get("name")
         url = item.get("url")
         if isinstance(name, str) and _AGENT_RE.fullmatch(name) and isinstance(url, str):
-            clean.append({"name": name, "url": url, "has_token": bool(item.get("hasToken"))})
+            clean.append({"name": name, "has_token": bool(item.get("hasToken"))})
     return clean, binary
 
 
@@ -100,8 +100,11 @@ def _registered_agent(agent: str, *, runner: Runner | None, hermes_bin: str | No
 def hermes_fleet_list(*, runner: Runner | None = None, hermes_bin: str | None = None) -> str:
     """List locally registered A2A fleet peers. Never exposes bearer tokens."""
     try:
+        op.OperatorPolicy().require_level("read_only")
         agents, _ = _registry(runner=runner, hermes_bin=hermes_bin)
         return json.dumps({"success": True, "count": len(agents), "agents": agents}, indent=2)
+    except PermissionError as exc:
+        return _error("FLEET_POLICY_DENIED", str(exc), "Enable read-only Operator Mode before inspecting fleet peers.")
     except Exception as exc:
         return _error("FLEET_REGISTRY_ERROR", op.redact_output(str(exc)), "Verify the local Hermes A2A registry.")
 
@@ -109,6 +112,7 @@ def hermes_fleet_list(*, runner: Runner | None = None, hermes_bin: str | None = 
 def hermes_fleet_status(agent: str, timeout: int = 10, *, runner: Runner | None = None, hermes_bin: str | None = None) -> str:
     """Fetch metadata-only compatibility status for one registered fleet peer."""
     try:
+        op.OperatorPolicy().require_level("read_only")
         peer, binary = _registered_agent(agent, runner=runner, hermes_bin=hermes_bin)
         capped_timeout = max(1, min(int(timeout), 30))
         code, stdout, stderr = _run(
@@ -124,15 +128,16 @@ def hermes_fleet_status(agent: str, timeout: int = 10, *, runner: Runner | None 
                 "success": bool(payload.get("ok")),
                 "agent": peer,
                 "status": payload.get("status", "unknown"),
-                "name": payload.get("name"),
-                "capabilities": payload.get("capabilities", {}),
-                "warnings": payload.get("warnings", []),
-                "errors": payload.get("errors", []),
+                "capability_count": len(payload.get("capabilities", {})) if isinstance(payload.get("capabilities"), dict) else 0,
+                "warnings_count": len(payload.get("warnings", [])) if isinstance(payload.get("warnings"), list) else 0,
+                "errors_count": len(payload.get("errors", [])) if isinstance(payload.get("errors"), list) else 0,
             },
             indent=2,
         )
     except LookupError:
         return _error("UNKNOWN_AGENT", "agent is not a registered fleet peer", "Call hermes_fleet_list and use one returned name.")
+    except PermissionError as exc:
+        return _error("FLEET_POLICY_DENIED", str(exc), "Enable read-only Operator Mode before checking fleet peers.")
     except Exception as exc:
         return _error("FLEET_STATUS_ERROR", op.redact_output(str(exc)), "Check the local A2A registry and peer service.")
 
@@ -156,14 +161,14 @@ def hermes_fleet_dispatch(
     """
     policy = op.OperatorPolicy()
     try:
-        peer, binary = _registered_agent(agent, runner=runner, hermes_bin=hermes_bin)
+        policy.require_level("workspace")
+        effective_dry_run = policy.effective_dry_run(dry_run)
+        policy.require_mutation(dry_run)
         if not isinstance(message, str) or not message.strip():
             return _error("INVALID_MESSAGE", "message must be a non-empty string", "Provide a bounded task message.")
         if len(message.encode("utf-8")) > 16_000:
             return _error("MESSAGE_TOO_LARGE", "message exceeds the 16 KB fleet dispatch limit", "Send a shorter bounded task.")
-        policy.require_level("workspace")
-        effective_dry_run = policy.effective_dry_run(dry_run)
-        policy.require_mutation(dry_run)
+        peer, binary = _registered_agent(agent, runner=runner, hermes_bin=hermes_bin)
         if effective_dry_run:
             audit = op.audit_record(
                 tool="hermes_fleet_dispatch", level=policy.level, apply_mode=policy.apply_mode,
@@ -174,7 +179,7 @@ def hermes_fleet_dispatch(
         if not confirm:
             return _error("CONFIRMATION_REQUIRED", "remote dispatch requires confirm=true", "Review the task and call again with confirm=true.")
         capped_timeout = max(5, min(int(timeout), 120))
-        code, stdout, stderr = _run([binary, "a2a", "send", peer, message, "--json"], timeout=capped_timeout, runner=runner)
+        code, stdout, stderr = _run([binary, "a2a", "send", "--json", peer, "--", message], timeout=capped_timeout, runner=runner)
         if code != 0:
             audit = op.audit_record(
                 tool="hermes_fleet_dispatch", level=policy.level, apply_mode=policy.apply_mode,
@@ -207,11 +212,12 @@ def hermes_fleet_dispatch(
 def hermes_fleet_task(agent: str, task_id: str, timeout: int = 15, *, runner: Runner | None = None, hermes_bin: str | None = None) -> str:
     """Return a task's safe summary from one registered peer."""
     try:
-        peer, binary = _registered_agent(agent, runner=runner, hermes_bin=hermes_bin)
+        op.OperatorPolicy().require_level("read_only")
         if not isinstance(task_id, str) or not _TASK_ID_RE.fullmatch(task_id):
             return _error("INVALID_TASK_ID", "task_id has an invalid format", "Use the task id returned by hermes_fleet_dispatch.")
+        peer, binary = _registered_agent(agent, runner=runner, hermes_bin=hermes_bin)
         capped_timeout = max(1, min(int(timeout), 60))
-        code, stdout, stderr = _run([binary, "a2a", "task", task_id, "--agent", peer, "--json"], timeout=capped_timeout, runner=runner)
+        code, stdout, stderr = _run([binary, "a2a", "task", "--agent", peer, "--json", "--", task_id], timeout=capped_timeout, runner=runner)
         if code != 0:
             return _error("FLEET_TASK_ERROR", op.redact_output(stderr or "A2A task lookup failed"), "Check the peer and task id.")
         payload = _parse_json(stdout, operation="A2A task lookup")
@@ -232,5 +238,7 @@ def hermes_fleet_task(agent: str, task_id: str, timeout: int = 15, *, runner: Ru
         )
     except LookupError:
         return _error("UNKNOWN_AGENT", "agent is not a registered fleet peer", "Call hermes_fleet_list and use one returned name.")
+    except PermissionError as exc:
+        return _error("FLEET_POLICY_DENIED", str(exc), "Enable read-only Operator Mode before inspecting fleet tasks.")
     except Exception as exc:
         return _error("FLEET_TASK_ERROR", op.redact_output(str(exc)), "Check the local A2A registry and peer service.")

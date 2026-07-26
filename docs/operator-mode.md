@@ -147,12 +147,13 @@ authenticated Hermes A2A mesh:
 
 | Tool | Access | Behavior |
 | --- | --- | --- |
-| `hermes_fleet_list` | read-only | Lists named local-registry peers; tokens never leave the host. |
-| `hermes_fleet_status` | read-only | Runs a metadata-only compatibility check for one named peer. |
+| `hermes_fleet_list` | read-only | Lists named local-registry peers; tokens and peer URLs never leave the host. |
+| `hermes_fleet_status` | read-only | Returns a bounded metadata-only compatibility summary for one named peer. |
 | `hermes_fleet_dispatch` | workspace + direct + confirmation | Submits a bounded task to one named peer. |
 | `hermes_fleet_task` | read-only | Returns task id, state, timestamp, and artifact count only. |
 
-Fleet routing is intentionally narrow. MCP callers cannot provide an endpoint,
+Fleet routing is intentionally narrow. All fleet tools require enabled
+read-only Operator Mode or higher. MCP callers cannot provide an endpoint,
 bearer token, SSH command, or arbitrary executable. A real dispatch requires
 all of: Operator Mode enabled at `workspace` or higher, server `direct` apply
 mode, `dry_run=false`, and `confirm=true`. The dispatch message is recorded in
