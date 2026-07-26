@@ -107,6 +107,25 @@ What v0.2.0 adds:
 
 For the full Operator Mode guide, new-user quickstart, and tunnel safety model, see `docs/operator-mode.md`.
 
+## Fleet routing through one connector
+
+When the local Hermes install already has authenticated named peers in its A2A
+registry, one Hermes GPT connector can route bounded tasks to those peers:
+
+- `hermes_fleet_list()` lists registered peers without exposing bearer tokens.
+- `hermes_fleet_status(agent)` runs a metadata-only A2A compatibility check.
+- `hermes_fleet_dispatch(agent, message, confirm, dry_run)` submits a task only
+  to a registered peer. A real dispatch requires workspace-level Operator Mode,
+  direct apply mode, `dry_run=false`, and `confirm=true`.
+- `hermes_fleet_task(agent, task_id)` returns a safe status summary without
+  returning task prompts or histories.
+
+This is deliberately not a generic remote shell: callers cannot provide a peer
+URL or token, and dispatch is constrained to the local authenticated A2A
+registry. Use `hermes_fleet_list` before selecting a target. Keep the connector
+behind an authenticated private boundary; A2A peer authentication does not make
+an unauthenticated public MCP endpoint safe.
+
 ## Security posture
 
 By default, `hermes-gpt` is designed for a trusted local machine:

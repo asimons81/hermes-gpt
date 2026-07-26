@@ -39,6 +39,7 @@ py-modules = [
   "operator_skills",
   "operator_config",
   "operator_workspace",
+  "operator_fleet",
   "operator_diagnostics",
   "operator_codex",
   "codex_core",

@@ -17,6 +17,7 @@ import operator_config as op_config
 import operator_workspace as op_workspace
 import operator_diagnostics as op_diagnostics
 import operator_codex as op_codex
+import operator_fleet as op_fleet
 from versioning import VERSION
 
 
@@ -669,6 +670,10 @@ def hermes_operator_status() -> str:
             "hermes_owner_run_command",
             "hermes_owner_patch",
             "hermes_owner_write_file",
+            "hermes_fleet_list",
+            "hermes_fleet_status",
+            "hermes_fleet_dispatch",
+            "hermes_fleet_task",
         ]
         result = {
             "success": True,
@@ -741,6 +746,37 @@ def hermes_operator_recover(profile: str = "default", apply: bool = False) -> st
     return op_diagnostics.hermes_operator_recover(
         profile=profile, apply=apply, hermes_root=_default_hermes_root()
     )
+
+
+# --- Fleet wrappers (named A2A peers only) ---------------------------------
+
+
+def hermes_fleet_list() -> str:
+    """List locally registered A2A fleet peers without exposing tokens."""
+    return op_fleet.hermes_fleet_list()
+
+
+def hermes_fleet_status(agent: str, timeout: int = 10) -> str:
+    """Check metadata-only compatibility status for one registered fleet peer."""
+    return op_fleet.hermes_fleet_status(agent=agent, timeout=timeout)
+
+
+def hermes_fleet_dispatch(
+    agent: str,
+    message: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+    timeout: int = 30,
+) -> str:
+    """Submit a confirmed bounded task to one registered A2A fleet peer."""
+    return op_fleet.hermes_fleet_dispatch(
+        agent=agent, message=message, confirm=confirm, dry_run=dry_run, timeout=timeout,
+    )
+
+
+def hermes_fleet_task(agent: str, task_id: str, timeout: int = 15) -> str:
+    """Return a safe status summary for one task on a registered fleet peer."""
+    return op_fleet.hermes_fleet_task(agent=agent, task_id=task_id, timeout=timeout)
 
 
 # --- Cron wrappers (pass hermes_root through) ----------------------------
@@ -1117,6 +1153,12 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_operator_snapshot, meta=tool_meta())
     server.add_tool(hermes_release_doctor, meta=tool_meta())
     server.add_tool(hermes_operator_recover, meta=tool_meta())
+
+    # Fleet routing: named peers in the local authenticated A2A registry only.
+    server.add_tool(hermes_fleet_list, meta=tool_meta())
+    server.add_tool(hermes_fleet_status, meta=tool_meta())
+    server.add_tool(hermes_fleet_dispatch, meta=tool_meta())
+    server.add_tool(hermes_fleet_task, meta=tool_meta())
 
     # Cron
     server.add_tool(hermes_cron_list, meta=tool_meta())

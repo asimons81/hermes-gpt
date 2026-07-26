@@ -140,6 +140,29 @@ Higher levels include the lower levels before them.
 `workspace` is for scoped workspace file operations only under allowed paths.
 `owner` is break-glass.
 
+## Fleet routing through the local A2A registry
+
+The full Hermes GPT MCP surface includes four fleet tools for an existing
+authenticated Hermes A2A mesh:
+
+| Tool | Access | Behavior |
+| --- | --- | --- |
+| `hermes_fleet_list` | read-only | Lists named local-registry peers; tokens never leave the host. |
+| `hermes_fleet_status` | read-only | Runs a metadata-only compatibility check for one named peer. |
+| `hermes_fleet_dispatch` | workspace + direct + confirmation | Submits a bounded task to one named peer. |
+| `hermes_fleet_task` | read-only | Returns task id, state, timestamp, and artifact count only. |
+
+Fleet routing is intentionally narrow. MCP callers cannot provide an endpoint,
+bearer token, SSH command, or arbitrary executable. A real dispatch requires
+all of: Operator Mode enabled at `workspace` or higher, server `direct` apply
+mode, `dry_run=false`, and `confirm=true`. The dispatch message is recorded in
+the audit log only as a length and SHA-256 digest; it is not returned in the
+tool response.
+
+`hermes_fleet_dispatch` creates remote work. Do not use it for casual probes,
+and do not leave an internet-exposed connector unauthenticated merely because
+the A2A peer mesh itself uses bearer authentication.
+
 ## Dry-run vs direct: the important bit
 
 `HERMES_GPT_OPERATOR_APPLY_MODE=dry_run` means mutating tools only preview.
