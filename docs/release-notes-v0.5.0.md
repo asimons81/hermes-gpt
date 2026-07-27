@@ -1,5 +1,9 @@
 # Hermes GPT v0.5.0 — Two-Way Codex Bridge
 
+> Subsequent control-plane hardening adds structured profile-aware fleet work
+> orders, safe completion retrieval, authority drift validation, and bounded
+> completed-task parsing for the next patch release.
+
 Hermes GPT v0.5.0 connects Hermes Agent and Codex in both directions while keeping the local-first, dry-run-first safety model.
 
 ## Codex uses Hermes

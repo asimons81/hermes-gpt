@@ -119,12 +119,26 @@ registry, one Hermes GPT connector can route bounded tasks to those peers:
   direct apply mode, `dry_run=false`, and `confirm=true`.
 - `hermes_fleet_task(agent, task_id)` returns a safe status summary without
   returning task prompts or histories.
+- `hermes_fleet_dispatch_work_order(...)` validates and submits a canonical,
+  profile-aware work order.
+- `hermes_fleet_result(agent, task_id)` returns only a safe completion bundle.
+- `hermes_fleet_authority_drift()` reports registry, manifest, profile, role,
+  and Agent Card drift.
 
 This is deliberately not a generic remote shell: callers cannot provide a peer
 URL or token, and dispatch is constrained to the local authenticated A2A
 registry. Use `hermes_fleet_list` before selecting a target. Keep the connector
 behind an authenticated private boundary; A2A peer authentication does not make
 an unauthenticated public MCP endpoint safe.
+
+Structured dispatch reads `HERMES_GPT_FLEET_AUTHORITY_MANIFEST`, defaulting to
+`<Hermes data root>/config/fleet-authority.json`. The server-controlled path is
+absolute, non-symlinked, size-bounded, and checked by the secret-path policy.
+Copy `examples/fleet-authority.example.json`, set expected roles and identities,
+install it with service-account-only permissions, and run the drift tool before
+enabling direct mode. Confirmed structured dispatch rechecks the live peer
+identity and host role against that manifest immediately before sending. Never
+place URLs, credentials, or tokens in the manifest.
 
 ## Security posture
 

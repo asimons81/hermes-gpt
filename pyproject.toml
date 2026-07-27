@@ -70,6 +70,7 @@ py-modules = [
   "examples/start-hermes-gpt.example.ps1",
   "examples/status-hermes-gpt.example.ps1",
   "examples/install-task.example.ps1",
+  "examples/fleet-authority.example.json",
 ]
 
 [tool.pytest.ini_options]

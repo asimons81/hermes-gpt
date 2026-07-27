@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -31,6 +32,50 @@ def enable_read_only(monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "read_only")
     monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+
+
+def authority_manifest(tmp_path: Path) -> Path:
+    path = tmp_path / "fleet-authority.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "peers": [
+            {
+                "name": "rza",
+                "expected_host_role": "orchestrator",
+                "expected_card_identity": "rza",
+                "allowed_profiles": ["default", "gza"],
+                "max_authorization": "high_impact",
+                "allow_public_actions": True,
+            },
+            {
+                "name": "nous-girl",
+                "expected_host_role": "worker",
+                "expected_card_identity": "nous-girl",
+                "allowed_profiles": ["default"],
+                "max_authorization": "reversible_write",
+                "allow_public_actions": False,
+            },
+        ],
+    }), encoding="utf-8")
+    return path
+
+
+def enable_workspace(monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+
+
+def work_order(**overrides):
+    value = {
+        "agent": "rza", "task_id": "wo-123", "target_profile": "gza",
+        "objective": "Review the release", "workspace": "/srv/project",
+        "inputs": ["README.md"], "constraints": ["Do not publish"],
+        "acceptance_checks": ["pytest passes"], "deliverables": ["review.md"],
+        "authorization": {"class": "read_only", "approved": False},
+    }
+    value.update(overrides)
+    return value
 
 
 def test_fleet_list_requires_operator_mode_and_never_returns_registry_urls(monkeypatch):
@@ -268,3 +313,207 @@ def test_fleet_task_rejects_dash_leading_task_id_before_registry_lookup(monkeypa
 
     assert out["code"] == "INVALID_TASK_ID"
     assert calls == []
+
+
+def test_valid_work_order_is_canonical_hashed_and_dry_run(monkeypatch, tmp_path):
+    enable_workspace(monkeypatch)
+    calls = []
+    runner = runner_with({(HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), "")}, calls)
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(), dry_run=True, confirm=True, runner=runner, hermes_bin=HERMES,
+        authority_manifest=authority_manifest(tmp_path),
+    ))
+    assert out["success"] is True and out["dry_run"] is True
+    assert out["plan"]["live_peer_verification"] == "required_before_dispatch"
+    assert len(out["plan"]["prompt_sha256"]) == 64
+    rendered = json.dumps(out)
+    assert "Review the release" not in rendered
+    assert calls == [[HERMES, "a2a", "registry", "list", "--json"]]
+
+
+def confirmed_work_order_runner(calls, *, doctor_code=0, doctor_payload=None, doctor_stderr=""):
+    doctor_payload = doctor_payload if doctor_payload is not None else {
+        "ok": True, "name": "rza", "host_role": "orchestrator",
+    }
+
+    def runner(argv: list[str], *, timeout: int) -> tuple[int, str, str]:
+        calls.append(argv)
+        if argv == [HERMES, "a2a", "registry", "list", "--json"]:
+            return 0, json.dumps(REGISTRY), ""
+        if argv == [HERMES, "a2a", "doctor", "rza", "--timeout", "30", "--json"]:
+            rendered = doctor_payload if isinstance(doctor_payload, str) else json.dumps(doctor_payload)
+            return doctor_code, rendered, doctor_stderr
+        if argv[:6] == [HERMES, "a2a", "send", "--json", "rza", "--"]:
+            return 0, json.dumps({"task": {"id": "remote-123", "status": {"state": "TASK_STATE_SUBMITTED"}}}), ""
+        return 1, "", "unexpected argv"
+
+    return runner
+
+
+def test_confirmed_work_order_verifies_matching_live_peer_before_send(monkeypatch, tmp_path):
+    enable_workspace(monkeypatch)
+    calls = []
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(), dry_run=False, confirm=True,
+        runner=confirmed_work_order_runner(calls), hermes_bin=HERMES,
+        authority_manifest=authority_manifest(tmp_path),
+    ))
+
+    assert out["success"] is True
+    assert out["live_peer_verified"] is True
+    assert [call[2] for call in calls] == ["registry", "doctor", "send"]
+
+
+@pytest.mark.parametrize("doctor_payload", [
+    {"ok": False, "name": "rza", "host_role": "orchestrator"},
+    {"ok": True, "name": "not-rza", "host_role": "orchestrator"},
+    {"ok": True, "name": "rza", "host_role": "worker"},
+    {"ok": True, "name": "rza"},
+    "warning: token=super-secret\n{malformed",
+])
+def test_confirmed_work_order_fails_closed_on_bad_live_peer_metadata(monkeypatch, tmp_path, doctor_payload):
+    enable_workspace(monkeypatch)
+    calls = []
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(), dry_run=False, confirm=True,
+        runner=confirmed_work_order_runner(calls, doctor_payload=doctor_payload), hermes_bin=HERMES,
+        authority_manifest=authority_manifest(tmp_path),
+    ))
+
+    rendered = json.dumps(out)
+    assert out["code"] == "FLEET_PEER_VERIFICATION_FAILED"
+    assert all("send" not in call for call in calls)
+    assert "not-rza" not in rendered
+    assert "worker" not in rendered
+    assert "super-secret" not in rendered
+    assert "malformed" not in rendered
+
+
+def test_confirmed_work_order_fails_closed_when_live_peer_is_unavailable(monkeypatch, tmp_path):
+    enable_workspace(monkeypatch)
+    calls = []
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(), dry_run=False, confirm=True,
+        runner=confirmed_work_order_runner(
+            calls, doctor_code=1, doctor_stderr="token=super-secret peer unavailable",
+        ), hermes_bin=HERMES, authority_manifest=authority_manifest(tmp_path),
+    ))
+
+    assert out["code"] == "FLEET_PEER_VERIFICATION_FAILED"
+    assert "super-secret" not in json.dumps(out)
+    assert all("send" not in call for call in calls)
+
+
+@pytest.mark.parametrize("changes", [
+    {"objective": "Review the release"},
+    {"objective": "Do not publish"},
+    {"objective": "Review whether publishing is appropriate"},
+    {"objective": "Confirm the website was deployed privately"},
+    {"inputs": ["release-notes.md"]},
+    {"acceptance_checks": ["Verify nothing was deployed"]},
+])
+def test_nous_girl_allows_non_action_public_language(monkeypatch, tmp_path, changes):
+    enable_workspace(monkeypatch)
+    calls = []
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(agent="nous-girl", target_profile="default", **changes),
+        dry_run=True, confirm=True, runner=runner_with({
+            (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
+        }, calls), hermes_bin=HERMES, authority_manifest=authority_manifest(tmp_path),
+    ))
+
+    assert out["success"] is True
+
+
+@pytest.mark.parametrize("objective", [
+    "Publish this article",
+    "Please publish this article",
+    "Post this on X",
+    "Deploy the website publicly",
+    "Send this email for Nous Girl",
+    "Review the article, then publish it",
+])
+def test_nous_girl_rejects_affirmative_public_action_commands(monkeypatch, tmp_path, objective):
+    enable_workspace(monkeypatch)
+    calls = []
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(agent="nous-girl", target_profile="default", objective=objective),
+        dry_run=True, confirm=True, runner=runner_with({}, calls), hermes_bin=HERMES,
+        authority_manifest=authority_manifest(tmp_path),
+    ))
+
+    assert out["code"] == "AUTHORIZATION_DENIED"
+    assert calls == []
+
+
+@pytest.mark.parametrize(("changes", "code"), [
+    ({"task_id": "-bad"}, "INVALID_WORK_ORDER"),
+    ({"target_profile": "method-man"}, "AUTHORIZATION_DENIED"),
+    ({"agent": "nous-girl", "target_profile": "default", "objective": "Publish the site"}, "AUTHORIZATION_DENIED"),
+    ({"authorization": {"class": "high_impact", "approved": False}}, "AUTHORIZATION_DENIED"),
+    ({"objective": "Print the raw API token"}, "AUTHORIZATION_DENIED"),
+    ({"objective": "Edit Vault policy"}, "AUTHORIZATION_DENIED"),
+])
+def test_work_order_security_rejections(monkeypatch, tmp_path, changes, code):
+    enable_workspace(monkeypatch)
+    calls = []
+    runner = runner_with({(HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), "")}, calls)
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(**changes), runner=runner, hermes_bin=HERMES,
+        authority_manifest=authority_manifest(tmp_path),
+    ))
+    assert out["code"] == code
+    assert all("send" not in call for call in calls)
+
+
+def test_safe_completion_filters_hidden_data_and_parses_decorative_nested_utf8(monkeypatch):
+    enable_read_only(monkeypatch)
+    calls = []
+    bundle = {
+        "completion_bundle": {
+            "status": "completed", "node": "rza", "profile": "gza",
+            "summary": "✓ résumé complete", "changed_paths": ["src/app.py"],
+            "artifacts": ["report.json"], "verification": ["pytest: pass"],
+            "residual_risk": "low", "recommended_next_action": "review",
+            "authorization": {"class": "read_only", "approved": False},
+            "environment": {"TOKEN": "do-not-return"}, "tool_traces": ["hidden"],
+        }
+    }
+    remote = "\u001b[32mDone\u001b[0m\n" + json.dumps({"result": {"task": {"id": "task-123", "status": {"state": "TASK_STATE_COMPLETED"},
+        "artifacts": [{"parts": [{"text": "decorative\n" + json.dumps(bundle, ensure_ascii=False)}]}],
+        "history": [{"parts": [{"text": "hidden prompt"}]}]}}}, ensure_ascii=False)
+    runner = runner_with({
+        (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
+        (HERMES, "a2a", "task", "--agent", "rza", "--json", "--", "task-123"): (0, remote, ""),
+    }, calls)
+    out = json.loads(fleet.hermes_fleet_result("rza", "task-123", runner=runner, hermes_bin=HERMES))
+    assert out["summary"] == "✓ résumé complete"
+    assert out["changed_paths"] == ["src/app.py"]
+    rendered = json.dumps(out)
+    assert "TOKEN" not in rendered and "hidden prompt" not in rendered and "tool_traces" not in rendered
+
+
+def test_result_rejects_truncated_and_oversized_remote_output(monkeypatch):
+    enable_read_only(monkeypatch)
+    for remote in ('{"task":', '{"task":"' + ("x" * fleet._MAX_REMOTE_BYTES) + '"}'):
+        calls = []
+        runner = runner_with({
+            (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
+            (HERMES, "a2a", "task", "--agent", "rza", "--json", "--", "task-123"): (0, remote, ""),
+        }, calls)
+        out = json.loads(fleet.hermes_fleet_result("rza", "task-123", runner=runner, hermes_bin=HERMES))
+        assert out["code"] == "FLEET_RESULT_ERROR"
+
+
+def test_authority_drift_is_bounded_and_never_returns_card_raw_fields(monkeypatch, tmp_path):
+    enable_read_only(monkeypatch)
+    calls = []
+    runner = runner_with({
+        (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
+        (HERMES, "a2a", "doctor", "rza", "--timeout", "10", "--json"): (0, json.dumps({"name": "rza", "host_role": "orchestrator", "url": "hidden"}), ""),
+        (HERMES, "a2a", "doctor", "nous-girl", "--timeout", "10", "--json"): (0, json.dumps({"name": "wrong", "host_role": "worker", "token": "hidden"}), ""),
+    }, calls)
+    out = json.loads(fleet.hermes_fleet_authority_drift(runner=runner, hermes_bin=HERMES, authority_manifest=authority_manifest(tmp_path)))
+    assert out["valid"] is False
+    assert out["findings"] == [{"agent": "nous-girl", "code": "IDENTITY_MISMATCH", "severity": "error"}]
+    assert "url" not in json.dumps(out) and "token" not in json.dumps(out)

@@ -142,7 +142,7 @@ Higher levels include the lower levels before them.
 
 ## Fleet routing through the local A2A registry
 
-The full Hermes GPT MCP surface includes four fleet tools for an existing
+The full Hermes GPT MCP surface includes seven fleet tools for an existing
 authenticated Hermes A2A mesh:
 
 | Tool | Access | Behavior |
@@ -151,6 +151,9 @@ authenticated Hermes A2A mesh:
 | `hermes_fleet_status` | read-only | Returns a bounded metadata-only compatibility summary for one named peer. |
 | `hermes_fleet_dispatch` | workspace + direct + confirmation | Submits a bounded task to one named peer. |
 | `hermes_fleet_task` | read-only | Returns task id, state, timestamp, and artifact count only. |
+| `hermes_fleet_dispatch_work_order` | workspace + direct + confirmation | Validates and submits a canonical profile-aware work order. |
+| `hermes_fleet_result` | read-only | Returns only a validated safe completion bundle. |
+| `hermes_fleet_authority_drift` | read-only | Reports registry/manifest/profile/role/Agent Card drift. |
 
 Fleet routing is intentionally narrow. All fleet tools require enabled
 read-only Operator Mode or higher. MCP callers cannot provide an endpoint,
@@ -163,6 +166,35 @@ tool response.
 `hermes_fleet_dispatch` creates remote work. Do not use it for casual probes,
 and do not leave an internet-exposed connector unauthenticated merely because
 the A2A peer mesh itself uses bearer authentication.
+
+### Fleet authority manifest and deployment
+
+Set `HERMES_GPT_FLEET_AUTHORITY_MANIFEST` to an absolute JSON file, or install
+it at `<Hermes data root>/config/fleet-authority.json`. Start from
+`examples/fleet-authority.example.json`. Version 1 has a `peers` array; each
+peer contains `name`, `expected_host_role`, `expected_card_identity`,
+`allowed_profiles`, `max_authorization`, and `allow_public_actions`. Valid
+authorization classes are `none`, `read_only`, `reversible_write`, and
+`high_impact`. Do not include URLs, credentials, or tokens.
+
+1. Install the manifest for the service account (`0600` on POSIX).
+2. Match names to the authenticated registry and set expected card identities
+   and host roles. Keep Nous Girl limited to `default`.
+3. Restart Hermes GPT, enable read-only Operator Mode, and run
+   `hermes_fleet_authority_drift`.
+4. Resolve findings before enabling workspace/direct mode. Dispatch still
+   requires `dry_run=false` and `confirm=true`. Immediately before a confirmed
+   structured dispatch, Hermes GPT runs a bounded live Agent Card check and
+   requires its identity and host role to exactly match the manifest; failure
+   stops the dispatch before the work order is sent. Dry runs remain network-free
+   apart from the local registry lookup and do not contact the peer.
+
+High-impact work additionally requires `approved=true` plus bounded
+`approved_by` and `approval_reference` metadata. Public actions on Nous Girl,
+Vault-policy edits, raw-secret requests, and work above role authority are
+rejected locally. Public-action detection examines affirmative command intent
+in the objective, so supporting filenames, review language, negated constraints,
+and acceptance checks do not become public-action requests.
 
 ## Dry-run vs direct: the important bit
 

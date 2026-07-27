@@ -673,7 +673,10 @@ def hermes_operator_status() -> str:
             "hermes_fleet_list",
             "hermes_fleet_status",
             "hermes_fleet_dispatch",
+            "hermes_fleet_dispatch_work_order",
             "hermes_fleet_task",
+            "hermes_fleet_result",
+            "hermes_fleet_authority_drift",
         ]
         result = {
             "success": True,
@@ -777,6 +780,41 @@ def hermes_fleet_dispatch(
 def hermes_fleet_task(agent: str, task_id: str, timeout: int = 15) -> str:
     """Return a safe status summary for one task on a registered fleet peer."""
     return op_fleet.hermes_fleet_task(agent=agent, task_id=task_id, timeout=timeout)
+
+
+def hermes_fleet_dispatch_work_order(
+    agent: str,
+    task_id: str,
+    target_profile: str,
+    objective: str,
+    workspace: str,
+    inputs: list[str],
+    constraints: list[str],
+    acceptance_checks: list[str],
+    deliverables: list[str],
+    authorization: dict[str, Any],
+    confirm: bool = False,
+    dry_run: bool = True,
+    timeout: int = 30,
+) -> str:
+    """Dispatch a canonical, profile-authorized work order to a registered peer."""
+    return op_fleet.hermes_fleet_dispatch_work_order(
+        agent=agent, task_id=task_id, target_profile=target_profile,
+        objective=objective, workspace=workspace, inputs=inputs,
+        constraints=constraints, acceptance_checks=acceptance_checks,
+        deliverables=deliverables, authorization=authorization,
+        confirm=confirm, dry_run=dry_run, timeout=timeout,
+    )
+
+
+def hermes_fleet_result(agent: str, task_id: str, timeout: int = 15) -> str:
+    """Return a schema-filtered safe completion bundle."""
+    return op_fleet.hermes_fleet_result(agent=agent, task_id=task_id, timeout=timeout)
+
+
+def hermes_fleet_authority_drift() -> str:
+    """Compare registered peers, authority, roles, profiles, and Agent Cards."""
+    return op_fleet.hermes_fleet_authority_drift()
 
 
 # --- Cron wrappers (pass hermes_root through) ----------------------------
@@ -1158,7 +1196,10 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_fleet_list, meta=tool_meta())
     server.add_tool(hermes_fleet_status, meta=tool_meta())
     server.add_tool(hermes_fleet_dispatch, meta=tool_meta())
+    server.add_tool(hermes_fleet_dispatch_work_order, meta=tool_meta())
     server.add_tool(hermes_fleet_task, meta=tool_meta())
+    server.add_tool(hermes_fleet_result, meta=tool_meta())
+    server.add_tool(hermes_fleet_authority_drift, meta=tool_meta())
 
     # Cron
     server.add_tool(hermes_cron_list, meta=tool_meta())

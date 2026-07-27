@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "peers": [
+    {
+      "name": "nous-girl",
+      "expected_host_role": "worker",
+      "expected_card_identity": "nous-girl",
+      "allowed_profiles": ["default"],
+      "max_authorization": "reversible_write",
+      "allow_public_actions": false
+    },
+    {
+      "name": "rza",
+      "expected_host_role": "orchestrator",
+      "expected_card_identity": "rza",
+      "allowed_profiles": ["default", "gza", "masta-killa", "inspectah-deck", "ghostface-killah", "method-man", "raekwon"],
+      "max_authorization": "high_impact",
+      "allow_public_actions": true
+    }
+  ]
+}

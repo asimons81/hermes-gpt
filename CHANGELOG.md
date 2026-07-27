@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Upgraded A2A fleet control with canonical structured work orders,
+  server-controlled profile authority, explicit authorization classes, safe
+  completion bundles, hardened bounded parsing, and read-only authority drift
+  validation. Existing fleet tools retain registry-only routing, Operator Mode,
+  confirmation, dry-run, hashing, redaction, secret-path, and end-of-options
+  controls.
+
 ## 0.5.0 - 2026-07-10
 
 - Completed the two-way Codex bridge: opt-in Operator toolsets for Codex and gated asynchronous Codex jobs for trusted Hermes GPT clients.
