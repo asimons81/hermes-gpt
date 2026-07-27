@@ -50,6 +50,20 @@ _COMMAND_PREFIX_RE = re.compile(
 )
 _SECRET_RE = re.compile(r"\b(raw|reveal|return|print|show|read|extract|dump|expose)\b.{0,40}\b(secret|token|password|credential|api[_ -]?key|private key|environment values?)s?\b", re.I | re.S)
 _VAULT_RE = re.compile(r"\b(vault|credential store)\b.{0,40}\b(policy|policies|edit|write|change|update)\b|\b(edit|write|change|update)\b.{0,40}\b(vault|credential store)\b", re.I | re.S)
+_FLEET_POLICY_ACTION_RE = re.compile(
+    r"\b(?:edit|write|change|update|modify|replace|delete|create)\b.{0,80}"
+    r"\b(?:fleet|authority)\s+(?:policy|manifest|rules?)\b"
+    r"|\b(?:fleet|authority)\s+(?:policy|manifest|rules?)\b.{0,80}"
+    r"\b(?:edit|write|change|update|modify|replace|delete|create)\b",
+    re.I | re.S,
+)
+_CHILD_MCP_ACTION_RE = re.compile(
+    r"\b(?:enable|allow|turn\s+on|set)\b.{0,80}"
+    r"\b(?:inherit_mcp_toolsets|(?:child|subagent|delegate)\b.{0,40}"
+    r"\b(?:mcp|toolsets?|inherit(?:ance)?))"
+    r"|\binherit_mcp_toolsets\b.{0,40}\b(?:true|on|enabled)\b",
+    re.I | re.S,
+)
 
 
 @dataclass(frozen=True)
@@ -79,7 +93,11 @@ def _hermes_bin(hermes_root: Path | None = None) -> str:
 
 
 def _run(argv: list[str], *, timeout: int, runner: Runner | None) -> tuple[int, str, str]:
-    return runner(argv, timeout=timeout) if runner is not None else op.run_argv(argv, timeout=timeout)
+    return (
+        runner(argv, timeout=timeout)
+        if runner is not None
+        else op.run_argv(argv, timeout=timeout, max_output_chars=_MAX_REMOTE_BYTES)
+    )
 
 
 def _error(code: str, message: str, action: str) -> str:
@@ -248,13 +266,25 @@ def _authorization(value: Any) -> dict[str, Any]:
     return result
 
 
-def _requests_public_action(objective: str) -> bool:
-    """Detect affirmative public-action commands without scanning supporting fields."""
-    for match in _PUBLIC_ACTION_RE.finditer(objective):
+def _requests_affirmative_action(objective: str, pattern: re.Pattern[str]) -> bool:
+    for match in pattern.finditer(objective):
         prefix = objective[max(0, match.start() - 48):match.start()]
         if _COMMAND_PREFIX_RE.search(prefix) and not _NEGATED_ACTION_RE.search(prefix):
             return True
     return False
+
+
+def _requests_public_action(objective: str) -> bool:
+    """Detect affirmative public-action commands without scanning supporting fields."""
+    return _requests_affirmative_action(objective, _PUBLIC_ACTION_RE)
+
+
+def _requests_fleet_policy_change(objective: str) -> bool:
+    return _requests_affirmative_action(objective, _FLEET_POLICY_ACTION_RE)
+
+
+def _requests_child_mcp_inheritance(objective: str) -> bool:
+    return _requests_affirmative_action(objective, _CHILD_MCP_ACTION_RE)
 
 
 def _canonical_work_order(*, agent: Any, task_id: Any, target_profile: Any, objective: Any, workspace: Any,
@@ -299,6 +329,10 @@ def _authorize_order(peer: AuthorityPeer, envelope: dict[str, Any], canonical: s
         raise PermissionError("raw-secret requests are forbidden")
     if _VAULT_RE.search(canonical):
         raise PermissionError("Vault-policy edits by peers are forbidden")
+    if _requests_fleet_policy_change(envelope["objective"]):
+        raise PermissionError("fleet-policy edits by peers are forbidden")
+    if _requests_child_mcp_inheritance(envelope["objective"]):
+        raise PermissionError("child MCP inheritance is forbidden")
     if _requests_public_action(envelope["objective"]) and (peer.name == "nous-girl" or not peer.allow_public_actions):
         raise PermissionError("public actions are not authorized for this peer")
 

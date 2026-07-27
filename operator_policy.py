@@ -890,6 +890,7 @@ def run_argv(
     timeout: int = 120,
     workdir: str | None = None,
     env: dict[str, str] | None = None,
+    max_output_chars: int = 4096,
 ) -> tuple[int, str, str]:
     """Run ``argv`` as a subprocess with shell=False (hard rule).
 
@@ -902,6 +903,7 @@ def run_argv(
         raise ValueError("argv must be a non-empty list")
 
     capped_timeout = max(1, min(int(timeout), 600))
+    capped_output = max(1, min(int(max_output_chars), 1_048_576))
     try:
         proc = subprocess.run(
             argv,
@@ -915,11 +917,19 @@ def run_argv(
     except subprocess.TimeoutExpired as exc:
         out = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
         err = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
-        return (124, _truncate(out), _truncate(err or f"timed out after {capped_timeout}s"))
+        return (
+            124,
+            _truncate(out, capped_output),
+            _truncate(err or f"timed out after {capped_timeout}s", capped_output),
+        )
     except FileNotFoundError as exc:
-        return (127, "", _truncate(str(exc)))
+        return (127, "", _truncate(str(exc), capped_output))
 
-    return (proc.returncode, _truncate(proc.stdout), _truncate(proc.stderr))
+    return (
+        proc.returncode,
+        _truncate(proc.stdout, capped_output),
+        _truncate(proc.stderr, capped_output),
+    )
 
 
 def _truncate(text: str, limit: int = 4096) -> str:

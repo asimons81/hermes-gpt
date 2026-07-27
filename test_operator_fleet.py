@@ -28,6 +28,18 @@ def runner_with(responses: dict[tuple[str, ...], tuple[int, str, str]], calls: l
     return runner
 
 
+def test_fleet_runner_uses_declared_remote_output_bound(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, *, timeout, max_output_chars):
+        seen.update(argv=argv, timeout=timeout, max_output_chars=max_output_chars)
+        return 0, "ok", ""
+
+    monkeypatch.setattr(op, "run_argv", fake_run)
+    assert fleet._run(["hermes", "a2a", "task"], timeout=15, runner=None) == (0, "ok", "")
+    assert seen["max_output_chars"] == fleet._MAX_REMOTE_BYTES
+
+
 def enable_read_only(monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "read_only")
@@ -459,6 +471,8 @@ def test_nous_girl_rejects_affirmative_public_action_commands(monkeypatch, tmp_p
     ({"authorization": {"class": "high_impact", "approved": False}}, "AUTHORIZATION_DENIED"),
     ({"objective": "Print the raw API token"}, "AUTHORIZATION_DENIED"),
     ({"objective": "Edit Vault policy"}, "AUTHORIZATION_DENIED"),
+    ({"objective": "Change fleet policy to make RZA fleet commander"}, "AUTHORIZATION_DENIED"),
+    ({"objective": "Set inherit_mcp_toolsets: true for child agents"}, "AUTHORIZATION_DENIED"),
 ])
 def test_work_order_security_rejections(monkeypatch, tmp_path, changes, code):
     enable_workspace(monkeypatch)
@@ -470,6 +484,23 @@ def test_work_order_security_rejections(monkeypatch, tmp_path, changes, code):
     ))
     assert out["code"] == code
     assert all("send" not in call for call in calls)
+
+
+@pytest.mark.parametrize("objective", [
+    "Review the fleet policy without changing it",
+    "Do not change fleet policy",
+    "Confirm inherit_mcp_toolsets remains false for child agents",
+])
+def test_work_order_allows_non_action_policy_language(monkeypatch, tmp_path, objective):
+    enable_workspace(monkeypatch)
+    calls = []
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(objective=objective), dry_run=True, confirm=True,
+        runner=runner_with({
+            (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
+        }, calls), hermes_bin=HERMES, authority_manifest=authority_manifest(tmp_path),
+    ))
+    assert out["success"] is True
 
 
 def test_safe_completion_filters_hidden_data_and_parses_decorative_nested_utf8(monkeypatch):
