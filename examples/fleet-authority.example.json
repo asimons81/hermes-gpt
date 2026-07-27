@@ -3,16 +3,16 @@
   "peers": [
     {
       "name": "nous-girl",
-      "expected_host_role": "worker",
-      "expected_card_identity": "nous-girl",
+      "expected_host_role": "compute_specialist",
+      "expected_card_identity": "Nous Girl GPU Compute",
       "allowed_profiles": ["default"],
       "max_authorization": "reversible_write",
       "allow_public_actions": false
     },
     {
       "name": "rza",
-      "expected_host_role": "orchestrator",
-      "expected_card_identity": "rza",
+      "expected_host_role": "wu_tang_host",
+      "expected_card_identity": "Wu-Tang RZA Router",
       "allowed_profiles": ["default", "gza", "masta-killa", "inspectah-deck", "ghostface-killah", "method-man", "raekwon"],
       "max_authorization": "high_impact",
       "allow_public_actions": true

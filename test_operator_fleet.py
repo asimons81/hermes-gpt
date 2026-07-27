@@ -41,16 +41,16 @@ def authority_manifest(tmp_path: Path) -> Path:
         "peers": [
             {
                 "name": "rza",
-                "expected_host_role": "orchestrator",
-                "expected_card_identity": "rza",
+                "expected_host_role": "wu_tang_host",
+                "expected_card_identity": "Wu-Tang RZA Router",
                 "allowed_profiles": ["default", "gza"],
                 "max_authorization": "high_impact",
                 "allow_public_actions": True,
             },
             {
                 "name": "nous-girl",
-                "expected_host_role": "worker",
-                "expected_card_identity": "nous-girl",
+                "expected_host_role": "compute_specialist",
+                "expected_card_identity": "Nous Girl GPU Compute",
                 "allowed_profiles": ["default"],
                 "max_authorization": "reversible_write",
                 "allow_public_actions": False,
@@ -58,6 +58,12 @@ def authority_manifest(tmp_path: Path) -> Path:
         ],
     }), encoding="utf-8")
     return path
+
+
+def test_authority_manifest_accepts_human_readable_card_identities(tmp_path):
+    peers = fleet._load_authority(authority_manifest(tmp_path))
+    assert peers["rza"].expected_card_identity == "Wu-Tang RZA Router"
+    assert peers["nous-girl"].expected_card_identity == "Nous Girl GPU Compute"
 
 
 def enable_workspace(monkeypatch):
@@ -333,7 +339,7 @@ def test_valid_work_order_is_canonical_hashed_and_dry_run(monkeypatch, tmp_path)
 
 def confirmed_work_order_runner(calls, *, doctor_code=0, doctor_payload=None, doctor_stderr=""):
     doctor_payload = doctor_payload if doctor_payload is not None else {
-        "ok": True, "name": "rza", "host_role": "orchestrator",
+        "ok": True, "name": "Wu-Tang RZA Router", "host_role": "wu_tang_host",
     }
 
     def runner(argv: list[str], *, timeout: int) -> tuple[int, str, str]:
@@ -365,10 +371,10 @@ def test_confirmed_work_order_verifies_matching_live_peer_before_send(monkeypatc
 
 
 @pytest.mark.parametrize("doctor_payload", [
-    {"ok": False, "name": "rza", "host_role": "orchestrator"},
-    {"ok": True, "name": "not-rza", "host_role": "orchestrator"},
-    {"ok": True, "name": "rza", "host_role": "worker"},
-    {"ok": True, "name": "rza"},
+    {"ok": False, "name": "Wu-Tang RZA Router", "host_role": "wu_tang_host"},
+    {"ok": True, "name": "not-rza", "host_role": "wu_tang_host"},
+    {"ok": True, "name": "Wu-Tang RZA Router", "host_role": "worker"},
+    {"ok": True, "name": "Wu-Tang RZA Router"},
     "warning: token=super-secret\n{malformed",
 ])
 def test_confirmed_work_order_fails_closed_on_bad_live_peer_metadata(monkeypatch, tmp_path, doctor_payload):
@@ -510,8 +516,8 @@ def test_authority_drift_is_bounded_and_never_returns_card_raw_fields(monkeypatc
     calls = []
     runner = runner_with({
         (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
-        (HERMES, "a2a", "doctor", "rza", "--timeout", "10", "--json"): (0, json.dumps({"name": "rza", "host_role": "orchestrator", "url": "hidden"}), ""),
-        (HERMES, "a2a", "doctor", "nous-girl", "--timeout", "10", "--json"): (0, json.dumps({"name": "wrong", "host_role": "worker", "token": "hidden"}), ""),
+        (HERMES, "a2a", "doctor", "rza", "--timeout", "10", "--json"): (0, json.dumps({"name": "Wu-Tang RZA Router", "host_role": "wu_tang_host", "url": "hidden"}), ""),
+        (HERMES, "a2a", "doctor", "nous-girl", "--timeout", "10", "--json"): (0, json.dumps({"name": "wrong", "host_role": "compute_specialist", "token": "hidden"}), ""),
     }, calls)
     out = json.loads(fleet.hermes_fleet_authority_drift(runner=runner, hermes_bin=HERMES, authority_manifest=authority_manifest(tmp_path)))
     assert out["valid"] is False

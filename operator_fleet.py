@@ -17,6 +17,7 @@ Runner = Callable[..., tuple[int, str, str]]
 
 AUTHORITY_MANIFEST_ENV = "HERMES_GPT_FLEET_AUTHORITY_MANIFEST"
 _AGENT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_CARD_IDENTITY_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,128}$")
 _PROFILE_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 _TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _ROLE_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -190,7 +191,11 @@ def _load_authority(path: Path | None = None) -> dict[str, AuthorityPeer]:
             raise ValueError("authority manifest contains an unsupported peer")
         if not isinstance(role, str) or not _ROLE_RE.fullmatch(role):
             raise ValueError("expected_host_role is invalid")
-        if not isinstance(identity, str) or not _AGENT_RE.fullmatch(identity):
+        if (
+            not isinstance(identity, str)
+            or identity != identity.strip()
+            or not _CARD_IDENTITY_RE.fullmatch(identity)
+        ):
             raise ValueError("expected_card_identity is invalid")
         if not isinstance(profiles, list) or not profiles or len(profiles) > 16 or any(not isinstance(p, str) or not _PROFILE_RE.fullmatch(p) for p in profiles):
             raise ValueError("allowed_profiles is invalid")
@@ -315,7 +320,11 @@ def _verify_live_peer(peer: AuthorityPeer, binary: str, timeout: int, runner: Ru
     host_role = card.get("host_role") or card.get("role")
     if card.get("ok") is not True:
         raise PeerVerificationError("peer verification failed")
-    if not isinstance(identity, str) or not _AGENT_RE.fullmatch(identity):
+    if (
+        not isinstance(identity, str)
+        or identity != identity.strip()
+        or not _CARD_IDENTITY_RE.fullmatch(identity)
+    ):
         raise PeerVerificationError("peer verification failed")
     if not isinstance(host_role, str) or not _ROLE_RE.fullmatch(host_role):
         raise PeerVerificationError("peer verification failed")
