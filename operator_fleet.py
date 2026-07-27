@@ -287,6 +287,21 @@ def _requests_child_mcp_inheritance(objective: str) -> bool:
     return _requests_affirmative_action(objective, _CHILD_MCP_ACTION_RE)
 
 
+def _work_order_text_fields(envelope: dict[str, Any]) -> list[str]:
+    values = [envelope["objective"]]
+    for field in ("inputs", "constraints", "acceptance_checks", "deliverables"):
+        values.extend(envelope[field])
+    return values
+
+
+def _requests_raw_secret(envelope: dict[str, Any]) -> bool:
+    return any(_requests_affirmative_action(text, _SECRET_RE) for text in _work_order_text_fields(envelope))
+
+
+def _requests_vault_policy_change(envelope: dict[str, Any]) -> bool:
+    return any(_requests_affirmative_action(text, _VAULT_RE) for text in _work_order_text_fields(envelope))
+
+
 def _canonical_work_order(*, agent: Any, task_id: Any, target_profile: Any, objective: Any, workspace: Any,
                           inputs: Any, constraints: Any, acceptance_checks: Any, deliverables: Any, authorization: Any) -> tuple[str, dict[str, Any]]:
     if not isinstance(agent, str) or not _AGENT_RE.fullmatch(agent):
@@ -325,9 +340,9 @@ def _authorize_order(peer: AuthorityPeer, envelope: dict[str, Any], canonical: s
     ranks = {"none": 0, "read_only": 1, "reversible_write": 2, "high_impact": 3}
     if ranks[envelope["authorization"]["class"]] > ranks[peer.max_authorization]:
         raise PermissionError("request exceeds peer role authority")
-    if _SECRET_RE.search(canonical):
+    if _requests_raw_secret(envelope):
         raise PermissionError("raw-secret requests are forbidden")
-    if _VAULT_RE.search(canonical):
+    if _requests_vault_policy_change(envelope):
         raise PermissionError("Vault-policy edits by peers are forbidden")
     if _requests_fleet_policy_change(envelope["objective"]):
         raise PermissionError("fleet-policy edits by peers are forbidden")

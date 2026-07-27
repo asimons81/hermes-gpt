@@ -88,7 +88,8 @@ def work_order(**overrides):
     value = {
         "agent": "rza", "task_id": "wo-123", "target_profile": "gza",
         "objective": "Review the release", "workspace": "/srv/project",
-        "inputs": ["README.md"], "constraints": ["Do not publish"],
+        "inputs": ["README.md"],
+        "constraints": ["Do not publish", "Do not expose credentials", "Do not edit credential store policy"],
         "acceptance_checks": ["pytest passes"], "deliverables": ["review.md"],
         "authorization": {"class": "read_only", "approved": False},
     }
