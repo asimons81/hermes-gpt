@@ -73,6 +73,7 @@ def _clear_operator_envs(monkeypatch):
         op.OPERATOR_ALLOWED_PATHS_ENV,
         op.OPERATOR_DENIED_PATHS_ENV,
         op.OWNER_ACK_ENV,
+        op.OWNER_ACTIVE_ENV,
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -106,10 +107,25 @@ def test_mutation_refuses_in_read_only_mode(monkeypatch):
         policy.require_level("cron")
 
 
+def test_owner_configuration_is_clamped_to_workspace_without_break_glass_activation(monkeypatch):
+    _clear_operator_envs(monkeypatch)
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "owner")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    monkeypatch.setenv(op.OWNER_ACK_ENV, op.OWNER_ACK_REQUIRED_VALUE)
+    policy = op.OperatorPolicy()
+    assert policy.level == "workspace"
+    assert policy.owner_active is False
+    assert policy.owner_mode_ready is False
+    with pytest.raises(PermissionError, match="does not satisfy required level"):
+        policy.require_owner(dry_run=False)
+
+
 def test_owner_tools_refuse_without_owner_ack(monkeypatch):
     _clear_operator_envs(monkeypatch)
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "owner")
+    monkeypatch.setenv(op.OWNER_ACTIVE_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
     # OWNER_ACK_ENV deliberately not set.
     policy = op.OperatorPolicy()
@@ -122,6 +138,7 @@ def test_owner_tools_refuse_with_wrong_ack(monkeypatch):
     _clear_operator_envs(monkeypatch)
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "owner")
+    monkeypatch.setenv(op.OWNER_ACTIVE_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
     monkeypatch.setenv(op.OWNER_ACK_ENV, "i_understand_this_is_unsafe")
     policy = op.OperatorPolicy()
@@ -134,6 +151,7 @@ def test_owner_mode_ready_when_all_set(monkeypatch):
     _clear_operator_envs(monkeypatch)
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "owner")
+    monkeypatch.setenv(op.OWNER_ACTIVE_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
     monkeypatch.setenv(op.OWNER_ACK_ENV, op.OWNER_ACK_REQUIRED_VALUE)
     policy = op.OperatorPolicy()

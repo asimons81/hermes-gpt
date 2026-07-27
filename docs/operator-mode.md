@@ -108,7 +108,8 @@ Break-glass only.
 
 Behavior:
 
-- owner tools are visible but refuse unless the exact owner acknowledgement is set
+- configured `owner` is clamped to effective `workspace` unless break-glass activation is explicitly enabled
+- owner tools require both the activation flag and exact owner acknowledgement
 - owner mode is not recommended for always-on tunnels
 - owner mode still denies secret paths
 
@@ -118,6 +119,7 @@ Example:
 $env:HERMES_GPT_OPERATOR_ENABLED="1"
 $env:HERMES_GPT_OPERATOR_LEVEL="owner"
 $env:HERMES_GPT_OPERATOR_APPLY_MODE="direct"
+$env:HERMES_GPT_OWNER_ACTIVE="1"
 $env:HERMES_GPT_OWNER_ACK="I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
 ```
 

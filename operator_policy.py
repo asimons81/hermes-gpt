@@ -38,6 +38,7 @@ OPERATOR_ALLOWED_PROFILES_ENV = "HERMES_GPT_OPERATOR_ALLOWED_PROFILES"
 OPERATOR_ALLOWED_PATHS_ENV = "HERMES_GPT_OPERATOR_ALLOWED_PATHS"
 OPERATOR_DENIED_PATHS_ENV = "HERMES_GPT_OPERATOR_DENIED_PATHS"
 OWNER_ACK_ENV = "HERMES_GPT_OWNER_ACK"
+OWNER_ACTIVE_ENV = "HERMES_GPT_OWNER_ACTIVE"
 
 OWNER_ACK_REQUIRED_VALUE = "I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
 
@@ -567,15 +568,19 @@ class OperatorPolicy:
         "allowed_paths",
         "denied_paths",
         "owner_ack",
+        "owner_active",
         "owner_mode_ready",
         "mutation_allowed",
     )
 
     def __init__(self) -> None:
         self.enabled = env_truthy(OPERATOR_ENABLED_ENV)
+        self.owner_active = env_truthy(OWNER_ACTIVE_ENV)
         raw_level = os.environ.get(OPERATOR_LEVEL_ENV, "read_only").strip().lower()
         if raw_level not in LEVELS:
             raw_level = "read_only"
+        if raw_level == "owner" and not self.owner_active:
+            raw_level = "workspace"
         self.level = raw_level
 
         raw_mode = os.environ.get(OPERATOR_APPLY_MODE_ENV, "dry_run").strip().lower()
@@ -600,6 +605,7 @@ class OperatorPolicy:
 
         self.owner_mode_ready = (
             self.enabled
+            and self.owner_active
             and self.level == "owner"
             and self.owner_ack == OWNER_ACK_REQUIRED_VALUE
         )
@@ -654,7 +660,8 @@ class OperatorPolicy:
         if not self.owner_mode_ready:
             raise PermissionError(
                 "Owner Mode requires "
-                f"{OPERATOR_ENABLED_ENV}=1, {OPERATOR_LEVEL_ENV}=owner, and "
+                f"{OPERATOR_ENABLED_ENV}=1, {OPERATOR_LEVEL_ENV}=owner, "
+                f"{OWNER_ACTIVE_ENV}=1, and "
                 f"{OWNER_ACK_ENV}={OWNER_ACK_REQUIRED_VALUE!r}."
             )
         # Owner direct still requires direct apply mode + dry_run=False.
@@ -714,6 +721,7 @@ class OperatorPolicy:
             "denied_paths_summary": [
                 str(p) for p in self.denied_paths[:8]
             ],
+            "owner_active": self.owner_active,
             "owner_mode_ready": self.owner_mode_ready,
             "mutation_allowed": self.mutation_allowed,
             "available_capability_groups": _capability_groups(self.level),

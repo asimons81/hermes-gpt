@@ -270,10 +270,10 @@ command and file access.
   tool call.
 - **Direct mutation requires explicit opt-in.** `HERMES_GPT_OPERATOR_APPLY_MODE=direct`
   is required for any write to happen.
-- **Owner Mode requires an additional explicit acknowledgement.** Setting
-  `HERMES_GPT_OPERATOR_LEVEL=owner` alone is not enough; you must also set
-  `HERMES_GPT_OWNER_ACK=I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE`. Without
-  the exact ack string, owner tools refuse.
+- **Owner Mode requires an explicit break-glass activation and acknowledgement.**
+  Setting `HERMES_GPT_OPERATOR_LEVEL=owner` alone is clamped to effective
+  `workspace` operation. Owner tools require both `HERMES_GPT_OWNER_ACTIVE=1`
+  and `HERMES_GPT_OWNER_ACK=I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE`.
 - **No secrets exposed.** Config `get` redacts secret-looking keys; `env`
   tools never return values; skill/cron prompts are logged and surfaced
   only as `prompt_len` + `prompt_sha256`.
@@ -320,6 +320,7 @@ above it in this list.
 | `HERMES_GPT_OPERATOR_ALLOWED_PROFILES` | `default` | Comma-separated profile names, or `*` for all existing |
 | `HERMES_GPT_OPERATOR_ALLOWED_PATHS` | empty | Comma-separated workspace root paths; empty disables workspace writes |
 | `HERMES_GPT_OPERATOR_DENIED_PATHS` | built-in defaults | Extra denied paths (additions only; cannot weaken defaults) |
+| `HERMES_GPT_OWNER_ACTIVE` | unset | Must be truthy to activate break-glass Owner Mode; otherwise configured `owner` is clamped to `workspace` |
 | `HERMES_GPT_OWNER_ACK` | unset | Must equal `I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE` for owner tools |
 
 ### Examples
@@ -366,6 +367,7 @@ Owner Mode (WARNING: can mutate your machine):
 $env:HERMES_GPT_OPERATOR_ENABLED="1"
 $env:HERMES_GPT_OPERATOR_LEVEL="owner"
 $env:HERMES_GPT_OPERATOR_APPLY_MODE="direct"
+$env:HERMES_GPT_OWNER_ACTIVE="1"
 $env:HERMES_GPT_OWNER_ACK="I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
 hermes-gpt
 ```

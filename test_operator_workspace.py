@@ -27,7 +27,7 @@ def clean_env(monkeypatch):
     for name in [
         op.OPERATOR_ENABLED_ENV, op.OPERATOR_LEVEL_ENV, op.OPERATOR_APPLY_MODE_ENV,
         op.OPERATOR_ALLOWED_PROFILES_ENV, op.OPERATOR_ALLOWED_PATHS_ENV,
-        op.OPERATOR_DENIED_PATHS_ENV, op.OWNER_ACK_ENV,
+        op.OPERATOR_DENIED_PATHS_ENV, op.OWNER_ACK_ENV, op.OWNER_ACTIVE_ENV,
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -43,6 +43,7 @@ def audit_override(tmp_path):
 def _enable_owner(monkeypatch, *, ack=True, direct=True):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "owner")
+    monkeypatch.setenv(op.OWNER_ACTIVE_ENV, "1")
     if direct:
         monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
     else:
@@ -319,6 +320,7 @@ def test_owner_run_command_refuses_without_owner_ack(workspace_tree, clean_env, 
 def test_owner_run_command_refuses_with_wrong_ack(workspace_tree, clean_env, audit_override, monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "owner")
+    monkeypatch.setenv(op.OWNER_ACTIVE_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
     monkeypatch.setenv(op.OWNER_ACK_ENV, "wrong ack value")
     out = ows.hermes_owner_run_command(command="echo hi", dry_run=True)

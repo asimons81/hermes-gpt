@@ -687,6 +687,7 @@ def hermes_operator_status() -> str:
             "enabled": policy.enabled,
             "level": policy.level,
             "apply_mode": policy.apply_mode,
+            "owner_active": policy.owner_active,
             "owner_mode_ready": policy.owner_mode_ready,
             "registered_operator_tools": registered,
             "audit_log_path": str(op_policy.audit_log_path()),
