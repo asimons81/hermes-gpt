@@ -905,7 +905,7 @@ def test_phase3_search_plain_text_compatibility_and_cleanup(monkeypatch):
     connection = sqlite3.connect(":memory:")
     fake_db = _Phase1FakeSessionDB(
         connection,
-        message_rows=[{"id": 1, "session_id": "session-1", "role": "user", "content": "hello\nworld"}],
+        message_rows=[{"id": 1, "session_id": "session-1", "role": "user", "snippet": "hello\nworld"}],
         fts_enabled=True,
     )
     monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
@@ -914,6 +914,18 @@ def test_phase3_search_plain_text_compatibility_and_cleanup(monkeypatch):
     assert result == "- session-1 [user] hello world"
     with pytest.raises(sqlite3.ProgrammingError):
         connection.execute("select 1")
+
+
+def test_phase3_search_legacy_content_fallback(monkeypatch):
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        message_rows=[{"id": 1, "session_id": "session-1", "role": "user", "content": "legacy content"}],
+        fts_enabled=True,
+    )
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    assert server.hermes_session_search("legacy") == "- session-1 [user] legacy content"
 
 
 def test_phase3_search_fts_unavailable_guidance(monkeypatch):

@@ -336,6 +336,19 @@ def _safe_message(row: dict[str, Any], allowed_roles: set[str]) -> dict[str, Any
     return _redact_value(result)
 
 
+def _safe_search_message(
+    row: dict[str, Any], allowed_roles: set[str]
+) -> dict[str, Any] | None:
+    """Project a SessionDB search row through the normal message safeguards."""
+    projected = dict(row)
+    snippet = row.get("snippet")
+    if isinstance(snippet, str):
+        # Current Hermes search results expose matched text as ``snippet``;
+        # older runtimes and test doubles may still expose ``content``.
+        projected["content"] = snippet
+    return _safe_message(projected, allowed_roles)
+
+
 def _allowed_message_roles(
     *,
     include_system_messages: bool = False,
@@ -501,7 +514,7 @@ class ReadOnlySessionAdapter:
         allowed_roles = _allowed_message_roles()
         projected = []
         for row in raw_rows:
-            message = _safe_message(row, allowed_roles)
+            message = _safe_search_message(row, allowed_roles)
             if message is not None:
                 projected.append(message)
         return projected
