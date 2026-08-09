@@ -39,7 +39,7 @@ hermes-gpt codex install --toolset core
 hermes-gpt codex doctor
 ```
 
-Use `hermes-gpt codex install --toolset operator --refresh` for the opt-in Operator control plane. The installer creates a backup before refreshing only the Hermes GPT entry. Use `--project` for `<repo>/.codex/config.toml`, and `uninstall` to remove only that entry. Full setup, runner gates, and troubleshooting live in [docs/codex.md](docs/codex.md).
+Use `hermes-gpt codex install --toolset operator --refresh` for the opt-in Operator control plane. The installer creates a backup before refreshing only the Hermes GPT entry. Use `--project` for `<repo>/.codex/config.toml`, and `uninstall` to remove only that entry. Full setup, runner gates, and troubleshooting live in [docs/codex.md](docs/codex.md). For a Windows deployment where ChatGPT dispatches approved jobs to the standalone Codex CLI, see [docs/windows-chatgpt-codex.md](docs/windows-chatgpt-codex.md).
 
 ## What's New in v0.4.0
 

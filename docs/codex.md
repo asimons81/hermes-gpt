@@ -69,6 +69,8 @@ Execution requires Operator Mode at `workspace` or acknowledged `owner` level, d
 
 Jobs use fixed arguments, `shell=False`, bounded timeouts, prompt hashes instead of raw prompt persistence, and redacted bounded results. Danger-full-access, bypass flags, arbitrary commands/config, executable paths, and extra directories are unsupported. Operator Mode is not a sandbox, and these tools do not bypass Codex permissions.
 
+For a Windows setup where ChatGPT connects through a private tunnel and Hermes dispatches approved jobs to the standalone Codex CLI, see [ChatGPT to Codex through Hermes GPT on Windows](windows-chatgpt-codex.md).
+
 ## Safety model
 
 The server launches even when gates are absent, so Codex can list the tool schemas and receive an actionable blocked response. The base gates are:
