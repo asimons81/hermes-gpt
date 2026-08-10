@@ -19,6 +19,9 @@ import operator_policy as op
 
 ENABLE_CODEX_RUNNER_ENV = "HERMES_GPT_ENABLE_CODEX_RUNNER"
 ALLOW_CODEX_WRITE_ENV = "HERMES_GPT_ALLOW_CODEX_WRITE"
+CODEX_EXE_ENV = "HERMES_GPT_CODEX_EXE"
+WINDOWS_APPS_MARKER = "WindowsApps"
+CODEX_PROBE_TIMEOUT = 10
 MAX_RESULT_CHARS = 24_000
 MIN_TIMEOUT = 10
 MAX_TIMEOUT = 3600
@@ -98,9 +101,97 @@ def _policy(workdir: str, sandbox: str, *, confirm: bool, dry_run: bool) -> tupl
     return policy, Path(workdir).expanduser().resolve()
 
 
+def _is_protected_windows_apps(path: Path) -> bool:
+    """True when a path component is the protected WindowsApps directory."""
+    return any(part.lower() == WINDOWS_APPS_MARKER.lower() for part in path.parts)
+
+
+def _probe_codex_version(exe: Path) -> str | None:
+    """Return the Codex CLI version string, or None when it cannot launch."""
+    try:
+        result = subprocess.run([str(exe), "--version"], text=True, capture_output=True, shell=False, timeout=CODEX_PROBE_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return (result.stdout or result.stderr or "").strip()
+
+
+def _path_candidates() -> list[Path]:
+    """All `codex` candidates from PATH in order, deduplicated by resolved path."""
+    seen: set[str] = set()
+    candidates: list[Path] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        found = shutil.which("codex", path=entry)
+        if not found:
+            continue
+        try:
+            candidate = Path(found).expanduser().resolve(strict=True)
+        except OSError:
+            continue
+        key = os.path.normcase(str(candidate))
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+    return candidates
+
+
+def resolve_codex_exe() -> dict[str, Any]:
+    """Resolve a launchable Codex CLI executable for status checks and launches.
+
+    Priority: an explicit ``HERMES_GPT_CODEX_EXE`` override (validated: absolute
+    file path, exists, is a regular file, not a protected WindowsApps shim, and
+    passes a ``codex --version`` probe), then the first PATH candidate that is
+    neither protected nor unlaunchable. Returns:
+    ``{"path", "source" ("env"|"path"|"none"), "version", "reason", "skipped"}``
+    where ``path`` is None when no launchable executable could be found.
+    """
+    override = os.environ.get(CODEX_EXE_ENV, "").strip()
+    if override:
+        try:
+            candidate = Path(override).expanduser().resolve(strict=True)
+        except OSError as exc:
+            return {"path": None, "source": "env", "version": None,
+                    "reason": f"{CODEX_EXE_ENV} does not resolve to an existing file: {exc}", "skipped": []}
+        if not candidate.is_file():
+            return {"path": None, "source": "env", "version": None,
+                    "reason": f"{CODEX_EXE_ENV} is not a regular file: {candidate}", "skipped": []}
+        if _is_protected_windows_apps(candidate):
+            return {"path": None, "source": "env", "version": None,
+                    "reason": f"{CODEX_EXE_ENV} points into the protected {WINDOWS_APPS_MARKER} directory and cannot be launched.",
+                    "skipped": []}
+        version = _probe_codex_version(candidate)
+        if version is None:
+            return {"path": None, "source": "env", "version": None,
+                    "reason": f"{CODEX_EXE_ENV} exists but could not be executed (version probe failed).", "skipped": []}
+        return {"path": str(candidate), "source": "env", "version": version, "reason": None, "skipped": []}
+
+    skipped: list[str] = []
+    for candidate in _path_candidates():
+        if _is_protected_windows_apps(candidate):
+            skipped.append(str(candidate))
+            continue
+        version = _probe_codex_version(candidate)
+        if version is None:
+            skipped.append(str(candidate))
+            continue
+        return {"path": str(candidate), "source": "path", "version": version, "reason": None, "skipped": skipped}
+    reason = "No launchable Codex CLI executable was found on PATH."
+    if skipped:
+        reason += f" Skipped {len(skipped)} protected or unlaunchable candidate(s): " + ", ".join(skipped) + "."
+    return {"path": None, "source": "none", "version": None, "reason": reason, "skipped": skipped}
+
+
 def _argv(*, workdir: Path, sandbox: str, prompt: str, model: str | None, ignore_user_config: bool,
           review: bool = False, review_target: str = "uncommitted") -> list[str] | dict[str, Any]:
-    codex = shutil.which("codex") or "codex"
+    resolution = resolve_codex_exe()
+    if not resolution["path"]:
+        return _safe_error("CODEX_EXE_UNAVAILABLE", resolution["reason"] or "No launchable Codex CLI executable was found.",
+                           f"Install the standalone Codex CLI, or set {CODEX_EXE_ENV} to an absolute path outside {WINDOWS_APPS_MARKER}.")
+    codex = resolution["path"]
     argv = [codex, "exec"]
     if review:
         argv += ["review", "--json", "--ephemeral"]
@@ -128,9 +219,26 @@ def _argv(*, workdir: Path, sandbox: str, prompt: str, model: str | None, ignore
 def hermes_codex_status(hermes_root: Path | None = None) -> dict[str, Any]:
     _reconcile(hermes_root)
     policy = op.OperatorPolicy()
-    return {"success": True, "enabled": op.env_truthy(ENABLE_CODEX_RUNNER_ENV), "write_enabled": op.env_truthy(ALLOW_CODEX_WRITE_ENV),
-            "operator_enabled": policy.enabled, "operator_level": policy.level, "apply_mode": policy.apply_mode,
-            "codex_available": bool(shutil.which("codex")), "jobs_root": str(_root(hermes_root))}
+    resolution = resolve_codex_exe()
+    status: dict[str, Any] = {
+        "success": True,
+        "enabled": op.env_truthy(ENABLE_CODEX_RUNNER_ENV),
+        "write_enabled": op.env_truthy(ALLOW_CODEX_WRITE_ENV),
+        "operator_enabled": policy.enabled,
+        "operator_level": policy.level,
+        "apply_mode": policy.apply_mode,
+        "codex_available": resolution["path"] is not None,
+        "codex_path": resolution["path"],
+        "codex_source": resolution["source"],
+        "jobs_root": str(_root(hermes_root)),
+    }
+    if resolution["version"]:
+        status["codex_version"] = resolution["version"]
+    if resolution["reason"]:
+        status["codex_reason"] = resolution["reason"]
+    if resolution["skipped"]:
+        status["codex_skipped"] = list(resolution["skipped"])
+    return status
 
 
 def hermes_codex_plan(prompt: str, workdir: str, sandbox: str = "read-only", model: str | None = None,
