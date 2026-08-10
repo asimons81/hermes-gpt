@@ -13,7 +13,7 @@ authors = [
   { name = "hermes-gpt contributors" }
 ]
 dependencies = [
-  "mcp[cli]",
+  "mcp[cli]>=1.0,<2",
   "packaging>=23",
   "uvicorn",
   "tomli; python_version < '3.11'",

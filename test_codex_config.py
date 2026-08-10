@@ -1,6 +1,14 @@
 from pathlib import Path
 
 import codex_config
+import operator_codex as oc
+
+
+def _fake_codex(path: Path, version: str = "0.50.0", *, exit_code: int = 0) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\necho 'codex {version}'\nexit {exit_code}\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
 
 
 def test_direct_project_install_is_idempotent_and_preserves_other_servers(tmp_path):
@@ -75,3 +83,33 @@ def test_install_toolset_difference_requires_refresh(tmp_path):
     entry = codex_config.get_server_entry(tmp_path / ".codex" / "config.toml")
     assert entry["env"][codex_config.CODEX_TOOLSET_ENV] == "operator"
     assert refreshed["backup"]
+
+
+def test_doctor_reports_resolved_codex_binary(monkeypatch, tmp_path):
+    exe = _fake_codex(tmp_path / "bin" / "codex")
+    monkeypatch.setenv(oc.CODEX_EXE_ENV, str(exe))
+    result = codex_config.doctor(
+        project=True,
+        cwd=tmp_path,
+        list_tools=lambda: ["hermes_status", "hermes_capabilities", "hermes_plan", "hermes_gateway_diagnostics"],
+        status=lambda: {"ok": True, "gateway": "running"},
+    )
+    assert result["checks"]["codex_binary"]["status"] == "PASS"
+    assert result["checks"]["codex_binary"]["path"] == str(exe)
+    assert result["checks"]["codex_binary"]["source"] == "env"
+    assert result["checks"]["codex_version"]["status"] == "PASS"
+
+
+def test_doctor_warns_when_only_protected_windows_apps_candidate(monkeypatch, tmp_path):
+    protected = _fake_codex(tmp_path / "WindowsApps" / "codex")
+    monkeypatch.setenv("PATH", str(protected.parent))
+    monkeypatch.delenv(oc.CODEX_EXE_ENV, raising=False)
+    result = codex_config.doctor(
+        project=True,
+        cwd=tmp_path,
+        list_tools=lambda: ["hermes_status", "hermes_capabilities", "hermes_plan", "hermes_gateway_diagnostics"],
+        status=lambda: {"ok": True, "gateway": "running"},
+    )
+    assert result["checks"]["codex_binary"]["status"] == "WARN"
+    assert result["checks"]["codex_binary"]["path"] is None
+    assert "WindowsApps" in result["checks"]["codex_binary"]["reason"]

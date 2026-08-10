@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 import operator_policy as op_policy
-from codex_core import CODEX_TOOLSET_ENV, CODEX_TOOLSETS, ENABLE_CODEX_ENV, ENABLE_MCP_ENV, redact_value
+from codex_core import (
+    CODEX_TOOLSET_ENV,
+    CODEX_TOOLSETS,
+    ENABLE_CODEX_ENV,
+    ENABLE_MCP_ENV,
+    redact_value,
+)
+from operator_codex import CODEX_EXE_ENV, resolve_codex_exe
 
 
 SERVER_NAME = "hermes-gpt"
@@ -198,7 +205,7 @@ def install(*, project: bool = False, cwd: Path | None = None, name: str = SERVE
             return redact_value({"ok": True, "method": "toml-refresh", "toolset": toolset, "config_path": str(path), "launcher": argv, **direct})
         return {"ok": False, "changed": False, "code": "NAME_CONFLICT", "config_path": str(path), "message": f"{name} is owned by a different MCP configuration; no changes were made."}
 
-    codex = shutil.which("codex") if prefer_cli and not project else None
+    codex = resolve_codex_exe()["path"] if prefer_cli and not project else None
     if codex:
         try:
             completed = _run_codex_add(codex, name, argv, toolset)
@@ -311,20 +318,22 @@ def doctor(*, project: bool = False, cwd: Path | None = None, list_tools: Callab
     entry = get_server_entry(path)
     toolset = str((entry or {}).get("env", {}).get(CODEX_TOOLSET_ENV, "core")).lower()
     valid_toolset = toolset in CODEX_TOOLSETS
-    codex = shutil.which("codex")
+    resolution = resolve_codex_exe()
+    codex_path = resolution["path"]
+    codex_binary: dict[str, Any] = {"status": "PASS" if codex_path else "WARN", "path": codex_path, "source": resolution["source"]}
+    if resolution["reason"]:
+        codex_binary["reason"] = resolution["reason"]
     checks: dict[str, Any] = {
-        "codex_binary": {"status": "PASS" if codex else "WARN", "path": codex},
+        "codex_binary": codex_binary,
         "codex_config": {"status": "PASS" if path.exists() else "WARN", "path": str(path)},
         "hermes_gpt_entry": {"status": "PASS" if entry and _is_hermes_entry(entry) else "WARN"},
         "toolset": {"status": "PASS" if valid_toolset else "FAIL", "configured": toolset, "available": list(CODEX_TOOLSETS)},
         "env_gates": {"status": "PASS" if os.environ.get(ENABLE_CODEX_ENV) == "1" and os.environ.get(ENABLE_MCP_ENV) == "1" else "WARN", "required": [ENABLE_CODEX_ENV, ENABLE_MCP_ENV]},
     }
-    if codex:
-        try:
-            result = subprocess.run([codex, "--version"], text=True, capture_output=True, shell=False, timeout=10)
-            checks["codex_version"] = {"status": "PASS" if result.returncode == 0 else "WARN", "value": op_policy.redact_output(result.stdout.strip())}
-        except (OSError, subprocess.SubprocessError) as exc:
-            checks["codex_version"] = {"status": "WARN", "detail": op_policy.redact_output(str(exc))}
+    if codex_path:
+        checks["codex_version"] = {"status": "PASS" if resolution["version"] else "WARN", "value": resolution["version"]}
+    elif resolution["source"] == "env":
+        checks["codex_version"] = {"status": "WARN", "detail": f"{CODEX_EXE_ENV} could not be validated."}
     if list_tools:
         try:
             tools = list_tools()

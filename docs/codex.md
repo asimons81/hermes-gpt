@@ -84,7 +84,13 @@ The normal Operator server exposes `hermes_codex_status`, `hermes_codex_plan`, `
 
 Execution requires Operator Mode at `workspace` or acknowledged `owner` level, direct apply mode, an approved work directory, `HERMES_GPT_ENABLE_CODEX_RUNNER=1`, `confirm=true`, and `dry_run=false`. Add `HERMES_GPT_ALLOW_CODEX_WRITE=1` only for `workspace-write`; read-only jobs do not need it.
 
+The Codex CLI executable is resolved at status and launch time. Set `HERMES_GPT_CODEX_EXE` to an absolute path when you want to pin a specific standalone CLI — for example when a Windows desktop app install puts a protected `WindowsApps` shim earlier in `PATH` that fails with `WinError 5`. The resolver validates that the path exists, is a regular file, is not under `WindowsApps`, and answers `codex --version` before it is used; otherwise it walks `PATH` and skips protected or unlaunchable candidates. `hermes_codex_status` reports the chosen `codex_path` and `codex_source` (`env`, `path`, or `none`) so availability is never reported for an executable that cannot actually launch.
+
+The work directory must be a trusted Git repository for the Codex CLI. If a job fails with `Not inside a trusted directory and --skip-git-repo-check was not specified`, run `codex trust` (or `git init`) in the work directory and retry.
+
 Jobs use fixed arguments, `shell=False`, bounded timeouts, prompt hashes instead of raw prompt persistence, and redacted bounded results. Danger-full-access, bypass flags, arbitrary commands/config, executable paths, and extra directories are unsupported. Operator Mode is not a sandbox, and these tools do not bypass Codex permissions.
+
+For a Windows setup where ChatGPT connects through a private tunnel and Hermes dispatches approved jobs to the standalone Codex CLI, see [ChatGPT to Codex through Hermes GPT on Windows](windows-chatgpt-codex.md).
 
 ## Safety model
 
@@ -119,5 +125,7 @@ Use hermes_vision_analyze with this project image and keep the answer concise.
 
 - If every tool says `CODEX_DISABLED`, set both base gates in the process that starts Codex and restart Codex.
 - If `doctor` reports no MCP entry, rerun `hermes-gpt codex install`; use `--project` when you intend the current repository only.
+- If a Codex job fails with `[WinError 5] Access is denied` on Windows, the runner selected a protected `WindowsApps` shim from the desktop app install. Set `HERMES_GPT_CODEX_EXE` to the standalone CLI's absolute path (e.g. `C:\Users\<YOU>\AppData\Roaming\npm\codex.exe`), or reorder `PATH` so the standalone CLI comes before `%LOCALAPPDATA%\Microsoft\WindowsApps`.
+- If a Codex job fails with `Not inside a trusted directory`, the work directory is not trusted by the Codex CLI; run `codex trust` (or `git init`) there first.
 - If vision rejects a path, provide `project_root` and keep the image beneath it; secret files and symlink escapes are intentionally blocked.
 - If page extraction rejects a URL, use a public `http` or `https` URL. Local/private address access is intentionally not the default.
