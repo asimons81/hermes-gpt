@@ -146,7 +146,7 @@ By default, `hermes-gpt` is designed for a trusted local machine:
 
 - HTTP binds to `127.0.0.1` by default.
 - Tools advertise `noauth` only for local-dev MCP clients.
-- Write, patch, terminal execution, memory writes, and session search are disabled or hidden by default.
+- Write, patch, terminal execution, memory writes, session search, and session control are disabled or hidden by default.
 - Remote/public release is not supported until real OAuth or another ChatGPT-compatible authentication layer is added.
 
 Do not expose this server publicly without authentication. A temporary tunnel is acceptable only for short local testing when you understand that any enabled tool is reachable through that URL.
@@ -243,6 +243,7 @@ Opt-in tools and actions:
 | Write file and patch tools | `HERMES_GPT_ENABLE_WRITE=1` | Hidden |
 | Memory `add`, `replace`, `remove` | `HERMES_GPT_ENABLE_MEMORY_WRITE=1` | Disabled |
 | Session search | `HERMES_GPT_ENABLE_SESSION_SEARCH=1` | Hidden |
+| Session continue/send jobs | `HERMES_GPT_ENABLE_SESSION_CONTROL=1` | Hidden |
 | Terminal command execution | `HERMES_GPT_ENABLE_TERMINAL=1` | Hidden |
 
 Terminal timeout is capped at 120 seconds even when enabled.
@@ -261,6 +262,19 @@ List, read, and export pagination advances by database rows examined, including 
 The default message roles are `user` and `assistant`. Access to `system`, `tool`, and `function` messages additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`; redaction and safe projection remain active when that gate is enabled. `include_lineage=true` is intentionally fail-closed until a bounded safe lineage projection is proven.
 
 Session transcripts may contain private prompts, credentials, personal data, paths, tool output, and other sensitive material. Treat session-history results as private local data and do not expose the MCP endpoint publicly or share returned content without reviewing it.
+
+### Session control tools
+
+Session control is independent from the read-only history gate and is hidden unless `HERMES_GPT_ENABLE_SESSION_CONTROL=1` is set. It exposes:
+
+- `hermes_session_continue(session_id, prompt, timeout=900)` — resolves an exact or unique-prefix ID through the read-only session database, then starts one asynchronous `hermes --resume <id> --oneshot <prompt>` turn.
+- `hermes_session_send(session_id, prompt, timeout=900)` — an alias for clients that use send terminology.
+- `hermes_session_job_status(job_id)` — returns bounded job metadata without the prompt.
+- `hermes_session_job_result(job_id, max_chars=24000)` — returns the bounded, redacted response and completion state.
+
+Timeouts are clamped to 10–3600 seconds, prompts are limited to 65,536 characters, result text is limited to 24,000 characters, and subprocesses always use fixed argument arrays with `shell=False`. Only one session-control job may run per session. Raw prompts are never persisted in job metadata; only their length and SHA-256 digest are stored. A server restart marks unowned running jobs as `orphaned` and never signals a process based on a persisted PID alone.
+
+This feature invokes the provider/model already configured for Hermes and may consume that provider's quota or incur its charges. Keep it disabled on public or untrusted endpoints. See [docs/session-control.md](docs/session-control.md) for setup and the monitor/result workflow.
 
 The broad `HERMES_GPT_ENABLE_*` flags still work for backward compatibility,
 but for tiered, safe operation prefer the **Operator / Owner Mode** tools
@@ -437,7 +451,7 @@ Before publishing:
 - `python -m py_compile server.py` passes.
 - `pytest` passes.
 - Server binds to loopback by default.
-- Terminal, write tools, memory writes, and session search are disabled by default.
+- Terminal, write tools, memory writes, session search, and session control are disabled by default.
 
 ## Current capability notes
 

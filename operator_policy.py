@@ -101,6 +101,7 @@ _ERROR_LAYERS: frozenset[str] = frozenset(
         "audit",
         "connector",
         "release",
+        "session_control",
         "system",
     }
 )

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added separately gated, bounded asynchronous Hermes session continue/send jobs with status and redacted result tools. Session IDs resolve through the existing read-only adapter; prompts are omitted from metadata; subprocesses use fixed arguments without a shell; timeouts and output are capped; restart reconciliation fails closed.
 - Upgraded A2A fleet control with canonical structured work orders,
   server-controlled profile authority, explicit authorization classes, safe
   completion bundles, hardened bounded parsing, and read-only authority drift

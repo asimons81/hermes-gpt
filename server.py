@@ -20,6 +20,7 @@ import operator_workspace as op_workspace
 import operator_diagnostics as op_diagnostics
 import operator_codex as op_codex
 import operator_fleet as op_fleet
+import operator_session as op_session
 from versioning import VERSION
 
 
@@ -31,6 +32,7 @@ ENABLE_WRITE_ENV = "HERMES_GPT_ENABLE_WRITE"
 ENABLE_MEMORY_WRITE_ENV = "HERMES_GPT_ENABLE_MEMORY_WRITE"
 ENABLE_SESSION_SEARCH_ENV = "HERMES_GPT_ENABLE_SESSION_SEARCH"
 ENABLE_SESSION_INTERNAL_CONTENT_ENV = "HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT"
+ENABLE_SESSION_CONTROL_ENV = op_session.ENABLE_SESSION_CONTROL_ENV
 ENABLE_TERMINAL_ENV = "HERMES_GPT_ENABLE_TERMINAL"
 ENABLE_VISION_ENV = "HERMES_GPT_ENABLE_VISION"
 ENABLE_WEB_ENV = "HERMES_GPT_ENABLE_WEB"
@@ -1077,6 +1079,59 @@ def hermes_session_search(query: str, limit: int = 20, offset: int = 0) -> str:
         adapter.dispose_safely()
 
 
+def hermes_session_continue(session_id: str, prompt: str, timeout: int = 900) -> dict[str, Any]:
+    """Start one bounded, asynchronous turn in an existing Hermes session."""
+    adapter = ReadOnlySessionAdapter()
+    try:
+        require_imports()
+        if not env_enabled(ENABLE_SESSION_CONTROL_ENV):
+            return op_session.hermes_session_continue(
+                session_id, prompt, timeout, hermes_root=_default_hermes_root(), agent_root=HERMES_ROOT
+            )
+        adapter.open()
+        resolved_id = adapter.resolve_session_id(session_id)
+        if not resolved_id:
+            return op_policy.make_error_envelope(
+                layer="session_control",
+                code="SESSION_ID_NOT_FOUND_OR_AMBIGUOUS",
+                safe_message="The requested session ID was not found or is ambiguous.",
+                suggested_action="Use an exact or unique-prefix ID returned by hermes_session_list.",
+            )
+        return op_session.hermes_session_continue(
+            resolved_id,
+            prompt,
+            timeout,
+            hermes_root=_default_hermes_root(),
+            agent_root=HERMES_ROOT,
+        )
+    except Exception as exc:
+        return op_policy.make_error_envelope(
+            layer="session_control",
+            code="SESSION_CONTINUE_FAILED",
+            safe_message=_redact_error(exc),
+            suggested_action="Check the Hermes session database and local CLI installation.",
+        )
+    finally:
+        adapter.dispose_safely()
+
+
+def hermes_session_send(session_id: str, prompt: str, timeout: int = 900) -> dict[str, Any]:
+    """Alias for hermes_session_continue for clients that use send terminology."""
+    return hermes_session_continue(session_id, prompt, timeout)
+
+
+def hermes_session_job_status(job_id: str) -> dict[str, Any]:
+    """Return bounded metadata for a Hermes session-control job."""
+    return op_session.hermes_session_job_status(job_id, _default_hermes_root())
+
+
+def hermes_session_job_result(
+    job_id: str, max_chars: int = op_session.MAX_RESULT_CHARS
+) -> dict[str, Any]:
+    """Return the bounded, redacted response from a Hermes session-control job."""
+    return op_session.hermes_session_job_result(job_id, max_chars, _default_hermes_root())
+
+
 # ---------------------------------------------------------------------------
 # Hermes tool wrappers (env-gated)
 # ---------------------------------------------------------------------------
@@ -1793,6 +1848,11 @@ def register_tools(server: FastMCP) -> None:
         server.add_tool(hermes_session_list, meta=tool_meta())
         server.add_tool(hermes_session_read, meta=tool_meta())
         server.add_tool(hermes_session_export, meta=tool_meta())
+    if env_enabled(ENABLE_SESSION_CONTROL_ENV):
+        server.add_tool(hermes_session_continue, meta=tool_meta())
+        server.add_tool(hermes_session_send, meta=tool_meta())
+        server.add_tool(hermes_session_job_status, meta=tool_meta())
+        server.add_tool(hermes_session_job_result, meta=tool_meta())
     if env_enabled(ENABLE_VISION_ENV):
         server.add_tool(hermes_vision_analyze, meta=tool_meta())
     if env_enabled(ENABLE_WEB_ENV):
