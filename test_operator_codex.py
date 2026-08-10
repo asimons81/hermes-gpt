@@ -25,6 +25,9 @@ def enable(monkeypatch, root: Path, *, write: bool = False):
 
 def test_status_and_dry_run_plan(monkeypatch, tmp_path):
     enable(monkeypatch, tmp_path)
+    _fake_codex(tmp_path / "bin" / "codex")
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    monkeypatch.delenv(oc.CODEX_EXE_ENV, raising=False)
     assert oc.hermes_codex_status(tmp_path)["enabled"] is True
     plan = oc.hermes_codex_plan("inspect tests", str(tmp_path))
     assert plan["success"] is True and plan["dry_run"] is True
@@ -52,6 +55,9 @@ def test_result_redacts_and_bounds(monkeypatch, tmp_path):
 
 def test_metadata_never_contains_prompt(monkeypatch, tmp_path):
     enable(monkeypatch, tmp_path, write=True)
+    _fake_codex(tmp_path / "bin" / "codex")
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    monkeypatch.delenv(oc.CODEX_EXE_ENV, raising=False)
     prompt = "private task body"
     plan = oc.hermes_codex_start(prompt, str(tmp_path), dry_run=True, hermes_root=tmp_path)
     assert prompt not in json.dumps(plan)
