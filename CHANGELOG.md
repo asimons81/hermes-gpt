@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added Codex parity for the four session-history capabilities that were previously available only through the full ChatGPT connector, delivered through the separately installed Hermes GPT Session History integration and verified with direct native-tool calls.
+- Added a dedicated session-history guide covering client availability, privacy-preserving arguments, bounded Markdown export, optional read-only working-model inspection, and a no-write Codex smoke-test procedure.
 - Added separately gated, bounded asynchronous Hermes session continue/send jobs with status and redacted result tools. Session IDs resolve through the existing read-only adapter; prompts are omitted from metadata; subprocesses use fixed arguments without a shell; timeouts and output are capped; restart reconciliation fails closed.
 - Upgraded A2A fleet control with canonical structured work orders,
   server-controlled profile authority, explicit authorization classes, safe

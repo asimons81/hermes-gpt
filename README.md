@@ -17,7 +17,7 @@ This is a **local-dev release**.
 
 ## v0.5.0 Two-Way Codex Bridge
 
-v0.5.0 adds a two-way bridge: Codex can opt into Hermes Operator tools, and trusted Hermes GPT clients can delegate asynchronous tasks and reviews to Codex. Updates remain check-first and mutations remain gated and dry-run-first. See [Codex setup](docs/codex.md), [Operator Mode](docs/operator-mode.md), [updating](docs/updating.md), and the [v0.5.0 release notes](docs/release-notes-v0.5.0.md).
+v0.5.0 adds a two-way bridge: Codex can opt into Hermes Operator tools, and trusted Hermes GPT clients can delegate asynchronous tasks and reviews to Codex. Updates remain check-first and mutations remain gated and dry-run-first. See [Codex setup](docs/codex.md), [Operator Mode](docs/operator-mode.md), [session history](docs/session-history.md), [session control](docs/session-control.md), [updating](docs/updating.md), and the [v0.5.0 release notes](docs/release-notes-v0.5.0.md).
 
 ### Updating Hermes GPT
 
@@ -31,6 +31,20 @@ The first command only checks. `--apply` fast-forwards a clean checkout on its d
 ## Codex App / Codex CLI Support
 
 The v0.5.0 core connector is a curated tool surface for planning, local vision analysis, web search/extraction, cron planning, skill drafts, and gateway diagnostics; it does not modify Codex itself or bypass its permissions.
+
+### Session-history parity for Codex (Unreleased)
+
+The four session-history capabilities were originally exposed only through the
+full ChatGPT connector and were intentionally absent from the curated Codex
+`core` and `operator` toolsets. The separately installed **Hermes GPT Session
+History** Codex integration now exposes the same read-only operations as native
+Codex tools: `hermes_session_list`, `hermes_session_search`,
+`hermes_session_read`, and `hermes_session_export`.
+
+This integration does not add session mutation. It keeps the existing Hermes
+gates, bounds, safe projections, role filtering, and in-memory-only export
+contract. See [session history](docs/session-history.md) for availability,
+privacy defaults, and the verified native-tool smoke test.
 
 ```powershell
 $env:HERMES_GPT_ENABLE_CODEX="1"
@@ -262,6 +276,10 @@ List, read, and export pagination advances by database rows examined, including 
 The default message roles are `user` and `assistant`. Access to `system`, `tool`, and `function` messages additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`; redaction and safe projection remain active when that gate is enabled. `include_lineage=true` is intentionally fail-closed until a bounded safe lineage projection is proven.
 
 Session transcripts may contain private prompts, credentials, personal data, paths, tool output, and other sensitive material. Treat session-history results as private local data and do not expose the MCP endpoint publicly or share returned content without reviewing it.
+
+For an end-to-end native MCP smoke test with small limits, safe role filters,
+Markdown export, redacted reporting, and optional read-only model inspection,
+see [docs/session-history.md](docs/session-history.md).
 
 ### Session control tools
 

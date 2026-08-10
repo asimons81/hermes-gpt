@@ -61,6 +61,23 @@ Before reinstalling a connector after a release, run `hermes-gpt update` to chec
 
 The `operator` toolset adds namespaced aliases for Operator diagnostics, audit, cron, skills, non-secret config/environment, and gateway operations. It excludes workspace, git, raw command, Owner patch, and Owner write tools. Existing Operator gates remain authoritative.
 
+## Optional session-history tools
+
+Session history was originally available only through the full ChatGPT
+connector and is not part of the curated Codex `core` or `operator` toolsets.
+The separately installed **Hermes GPT Session History** integration adds the
+four native read-only tools `hermes_session_list`, `hermes_session_search`,
+`hermes_session_read`, and `hermes_session_export` to Codex. The backing Hermes
+GPT server still requires `HERMES_GPT_ENABLE_SESSION_SEARCH=1`. These are not
+shell wrappers and do not write files.
+
+Keep `include_system_messages`, `include_tool_messages`, and `include_lineage`
+disabled during routine inspection, use small limits, and redact transcript
+content in reports. If the read-only Operator surface exposes
+`hermes_config_get`, querying `model` reports the configured default working
+model under `value.default` without changing it. See [session history](session-history.md)
+for the exact native-tool smoke test and privacy rules.
+
 ## Codex jobs through Hermes GPT
 
 The normal Operator server exposes `hermes_codex_status`, `hermes_codex_plan`, `hermes_codex_start`, `hermes_codex_review_start`, `hermes_codex_jobs`, `hermes_codex_job_status`, `hermes_codex_job_result`, and `hermes_codex_cancel`.

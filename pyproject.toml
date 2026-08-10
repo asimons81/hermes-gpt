@@ -62,6 +62,7 @@ py-modules = [
   "docs/release-notes-v0.3.0.md",
   "docs/release-notes-v0.4.0.md",
   "docs/codex.md",
+  "docs/session-history.md",
   "docs/session-control.md",
   "docs/updating.md",
   "docs/release-notes-v0.5.0b1.md",

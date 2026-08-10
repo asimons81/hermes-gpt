@@ -11,7 +11,7 @@ $env:HERMES_GPT_ENABLE_SESSION_CONTROL="1"
 python server.py
 ```
 
-Read-only history remains separately controlled by `HERMES_GPT_ENABLE_SESSION_SEARCH=1`. Enable both when the client needs to list or inspect sessions before choosing one to continue.
+Read-only history remains separately controlled by `HERMES_GPT_ENABLE_SESSION_SEARCH=1`. Enable both when the client needs to list or inspect sessions before choosing one to continue. See [session history](session-history.md) for its four-tool read-only workflow and privacy defaults.
 
 ## Workflow
 
