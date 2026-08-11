@@ -1778,14 +1778,15 @@ def hermes_codex_status() -> dict[str, Any]:
 
 
 def hermes_codex_plan(prompt: str, workdir: str, sandbox: str = "read-only", model: str | None = None,
-                      ignore_user_config: bool = False, timeout: int = 900) -> dict[str, Any]:
-    return op_codex.hermes_codex_plan(prompt, workdir, sandbox, model, ignore_user_config, timeout)
+                      ignore_user_config: bool = False, timeout: int = 900, execution_mode: str = "normal") -> dict[str, Any]:
+    return op_codex.hermes_codex_plan(prompt, workdir, sandbox, model, ignore_user_config, timeout, execution_mode=execution_mode)
 
 
 def hermes_codex_start(prompt: str, workdir: str, sandbox: str = "read-only", model: str | None = None,
                        ignore_user_config: bool = False, timeout: int = 900, confirm: bool = False,
-                       dry_run: bool = True) -> dict[str, Any]:
-    return op_codex.hermes_codex_start(prompt, workdir, sandbox, model, ignore_user_config, timeout, confirm, dry_run, _default_hermes_root())
+                       dry_run: bool = True, execution_mode: str = "normal") -> dict[str, Any]:
+    return op_codex.hermes_codex_start(prompt, workdir, sandbox, model, ignore_user_config, timeout, confirm, dry_run,
+                                       _default_hermes_root(), execution_mode=execution_mode)
 
 
 def hermes_codex_review_start(workdir: str, target: str = "uncommitted", instructions: str = "", model: str | None = None,

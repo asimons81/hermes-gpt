@@ -4,7 +4,7 @@
 
 Codex can opt into the control plane with `hermes-gpt codex install --toolset operator --refresh`. Registration does not grant authority; the same level, profile, apply, path, redaction, and audit policy applies.
 
-Trusted clients can delegate asynchronous Codex jobs through the eight `hermes_codex_*` tools. Set `HERMES_GPT_ENABLE_CODEX_RUNNER=1`; direct execution also requires workspace-or-higher level, direct mode, an allowed directory, `confirm=true`, and `dry_run=false`. `HERMES_GPT_ALLOW_CODEX_WRITE=1` is needed only for `workspace-write`. Normal jobs do not require Owner Mode, and raw prompts are not persisted.
+Trusted clients can delegate asynchronous Codex jobs through the eight `hermes_codex_*` tools. Set `HERMES_GPT_ENABLE_CODEX_RUNNER=1`; direct execution also requires workspace-or-higher level, direct mode, an allowed directory, `confirm=true`, and `dry_run=false`. Jobs default to `execution_mode="normal"`. An explicit per-job `execution_mode="nolo"` adds Codex's `-a never` approval policy while keeping the requested `read-only` or `workspace-write` sandbox active, so Codex will not stop for its own approvals during that job but remains sandbox-contained. Hermes still checks the requested launch workspace and direct-launch confirmation before NOLO starts. `HERMES_GPT_ALLOW_CODEX_WRITE=1` is required whenever `workspace-write` is requested; read-only NOLO does not require the write gate. NOLO is job-scoped and ends with the job; raw prompts are not persisted.
 
 `hermes-gpt` is a local MCP bridge for exposing selected Hermes Agent capabilities to trusted MCP clients like ChatGPT. It is meant to run on your machine, bound to loopback, with a tunnel in front of it only when you deliberately want remote access.
 

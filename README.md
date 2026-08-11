@@ -55,6 +55,8 @@ hermes-gpt codex doctor
 
 Use `hermes-gpt codex install --toolset operator --refresh` for the opt-in Operator control plane. The installer creates a backup before refreshing only the Hermes GPT entry. Use `--project` for `<repo>/.codex/config.toml`, and `uninstall` to remove only that entry. Full setup, runner gates, and troubleshooting live in [docs/codex.md](docs/codex.md). For a Windows deployment where ChatGPT dispatches approved jobs to the standalone Codex CLI, see [docs/windows-chatgpt-codex.md](docs/windows-chatgpt-codex.md).
 
+Operator-dispatched Codex tasks default to `execution_mode="normal"`. Trusted clients may explicitly select job-scoped `execution_mode="nolo"`, which adds Codex's `-a never` approval policy while retaining the requested `read-only` or `workspace-write` sandbox. NOLO therefore removes Codex approval interruptions without disabling sandbox containment. `HERMES_GPT_ALLOW_CODEX_WRITE=1` is required only when the requested sandbox is `workspace-write`; read-only NOLO remains read-only. Hermes still gates the requested launch directory, direct apply mode, `confirm=true`, and `dry_run=false`. NOLO is not a persistent global toggle.
+
 ## What's New in v0.4.0
 
 v0.4.0 is the Tool Surface Expansion release. It adds env-gated Hermes tool wrappers, a cron creation operator tool, and ships the first external contribution.
