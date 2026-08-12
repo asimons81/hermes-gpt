@@ -42,6 +42,8 @@ def test_status_and_dry_run_plan(monkeypatch, tmp_path):
 
 def test_gates_and_fixed_arguments(monkeypatch, tmp_path):
     enable(monkeypatch, tmp_path)
+    exe = _fake_codex(tmp_path / "bin" / "codex")
+    monkeypatch.setenv(oc.CODEX_EXE_ENV, str(exe))
     assert oc.hermes_codex_start("change", str(tmp_path), sandbox="workspace-write")["code"] == "WRITE_DISABLED"
     assert oc.hermes_codex_plan("change", str(tmp_path), sandbox="workspace-write", execution_mode="nolo")["code"] == "WRITE_DISABLED"
     nolo_read_only = oc.hermes_codex_plan("inspect", str(tmp_path), execution_mode="nolo")
