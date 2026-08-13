@@ -19,6 +19,23 @@ This is a **local-dev release**.
 
 v0.5.0 adds a two-way bridge: Codex can opt into Hermes Operator tools, and trusted Hermes GPT clients can delegate asynchronous tasks and reviews to Codex. Updates remain check-first and mutations remain gated and dry-run-first. See [Codex setup](docs/codex.md), [Operator Mode](docs/operator-mode.md), [updating](docs/updating.md), and the [v0.5.0 release notes](docs/release-notes-v0.5.0.md).
 
+## v0.6 Mission Control (M0)
+
+v0.6 M0 adds **Mission Control**, a read-only operational view of the whole
+Hermes fleet exposed as the `hermes_mission_*` tool family: `overview`,
+`health`, `profiles`, `fleet`, `codex`, `cron`, `delegations`, `failures`,
+`approvals`, `vault`, `usage`, and `audit`. It answers "what is my entire Hermes
+fleet doing right now" as a bounded JSON document for trusted clients (ChatGPT
+first).
+
+Mission Control is structurally read-only — all SQLite is opened `mode=ro`, no
+write/dry-run/apply arguments exist, and no mutating shell calls are made. It
+never returns raw message, memory, transcript, request-dump, or profile-secret
+bodies; prompts surface as `{prompt_len, prompt_sha256}` only, and every call is
+audited. Per-client authorization uses the `HERMES_GPT_MISSION_ALLOWED_SURFACES`
+allowlist (deny-by-default). See [Operator Mode](docs/operator-mode.md) for the
+full surface, allowlist, and redaction contract.
+
 ### Updating Hermes GPT
 
 ```powershell
