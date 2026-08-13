@@ -196,6 +196,41 @@ rejected locally. Public-action detection examines affirmative command intent
 in the objective, so supporting filenames, review language, negated constraints,
 and acceptance checks do not become public-action requests.
 
+## Mission Control (v0.6 M0, read-only)
+
+Mission Control is a read-only operational view of the whole Hermes fleet —
+profiles, fleet agents, Codex jobs, cron activity, delegated work, failures,
+pending approvals, vault, usage, and the operator audit trail — exposed to
+trusted clients (ChatGPT first) as the `hermes_mission_*` tool family
+(`operator_mission.py`).
+
+It is structurally read-only:
+
+- every SQLite store is opened `file:...?mode=ro`; no write / dry-run / apply
+  arguments exist; no mutating shell calls are made.
+- no message, memory, transcript, request-dump, or profile-secret body ever
+  crosses the surface — prompts appear as `{prompt_len, prompt_sha256}` only,
+  delegation/kanban bodies are stripped, Codex transcripts and Vault
+  credentials are never returned, and `.env`/`auth.json`/tokens are excluded.
+- every mission call is written to the operator audit log (`dry_run=true`,
+  `changed=false`).
+
+Each surface reports `available:false + reason` when its source is absent
+(e.g. no Codex store on the host) rather than failing. Output is bounded per
+design §8.4 (overview 64 KB / hard 128 KB; surface 256 KB / hard 512 KB), with
+lists truncated via `truncated:true, count_total:N`.
+
+Per-client authorization uses the `HERMES_GPT_MISSION_ALLOWED_SURFACES`
+allowlist (deny-by-default): a comma-separated list of surface names
+(`health`, `profiles`, `fleet`, `codex`, `cron`, `delegations`, `failures`,
+`approvals`, `vault`, `usage`, `audit`, `overview`). When unset, all read-only
+surfaces are allowed; an empty value denies everything; a listed-only value
+restricts a client to that subset. This is the seam a future OAuth scope maps
+onto (design D12). Denied surfaces return `AUTHZ_DENIED`, not a data error.
+
+Mission Control requires only operator level `read_only` (the default) — it
+never needs `direct` apply mode.
+
 ## Dry-run vs direct: the important bit
 
 `HERMES_GPT_OPERATOR_APPLY_MODE=dry_run` means mutating tools only preview.

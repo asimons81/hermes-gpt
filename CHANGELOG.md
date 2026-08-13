@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added **Mission Control (v0.6 M0)**: a read-only `hermes_mission_*` tool
+  family (`overview`, `health`, `profiles`, `fleet`, `codex`, `cron`,
+  `delegations`, `failures`, `approvals`, `vault`, `usage`, `audit`) exposing a
+  bounded, redacted operational view of the whole Hermes fleet to trusted
+  clients. Structurally read-only (`mode=ro` SQLite, no apply/dry-run args, no
+  mutating calls); prompts surface as `{prompt_len, prompt_sha256}` only; every
+  call is audited; per-client `HERMES_GPT_MISSION_ALLOWED_SURFACES` allowlist
+  (deny-by-default). See `docs/operator-mode.md` and the technical design
+  `docs/design/v0.6-mission-control.md`.
 - Upgraded A2A fleet control with canonical structured work orders,
   server-controlled profile authority, explicit authorization classes, safe
   completion bundles, hardened bounded parsing, and read-only authority drift

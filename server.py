@@ -18,6 +18,7 @@ import operator_workspace as op_workspace
 import operator_diagnostics as op_diagnostics
 import operator_codex as op_codex
 import operator_fleet as op_fleet
+import operator_mission as op_mission
 from versioning import VERSION
 
 
@@ -677,6 +678,18 @@ def hermes_operator_status() -> str:
             "hermes_fleet_task",
             "hermes_fleet_result",
             "hermes_fleet_authority_drift",
+            "hermes_mission_overview",
+            "hermes_mission_health",
+            "hermes_mission_profiles",
+            "hermes_mission_fleet",
+            "hermes_mission_codex",
+            "hermes_mission_cron",
+            "hermes_mission_delegations",
+            "hermes_mission_failures",
+            "hermes_mission_approvals",
+            "hermes_mission_vault",
+            "hermes_mission_usage",
+            "hermes_mission_audit",
         ]
         result = {
             "success": True,
@@ -1136,6 +1149,57 @@ def hermes_codex_cancel(job_id: str, confirm: bool = False, dry_run: bool = True
     return op_codex.hermes_codex_cancel(job_id, confirm, dry_run, _default_hermes_root())
 
 
+# --- Mission Control (v0.6 M0, read-only) --------------------------------
+
+
+def hermes_mission_overview(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_overview_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_health(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_health_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_cron(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_cron_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_fleet(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_fleet_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_audit(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_audit_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_profiles(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_profiles_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_delegations(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_delegations_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_failures(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_failures_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_approvals(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_approvals_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_codex(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_codex_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_vault(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_vault_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_usage(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_usage_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
 def build_server(
     *,
     host: str = "127.0.0.1",
@@ -1209,6 +1273,25 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_cron_pause, meta=tool_meta())
     server.add_tool(hermes_cron_copy, meta=tool_meta())
     server.add_tool(hermes_cron_move, meta=tool_meta())
+
+    # Mission Control (v0.6 M0): read-only operational view. Registered
+    # unconditionally; each surface enforces the per-client allowlist
+    # (HERMES_GPT_MISSION_ALLOWED_SURFACES) and audits every call.
+    for _mission_tool in (
+        hermes_mission_overview,
+        hermes_mission_health,
+        hermes_mission_profiles,
+        hermes_mission_fleet,
+        hermes_mission_codex,
+        hermes_mission_cron,
+        hermes_mission_delegations,
+        hermes_mission_failures,
+        hermes_mission_approvals,
+        hermes_mission_vault,
+        hermes_mission_usage,
+        hermes_mission_audit,
+    ):
+        server.add_tool(_mission_tool, meta=tool_meta())
 
     # Skills
     server.add_tool(hermes_skill_diff, meta=tool_meta())
