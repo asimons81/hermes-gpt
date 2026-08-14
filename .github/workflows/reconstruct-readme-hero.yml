@@ -1,0 +1,49 @@
+name: Reconstruct README hero
+
+on:
+  push:
+    branches:
+      - branding/readme-hero-v0.6.0
+
+permissions:
+  contents: write
+
+jobs:
+  reconstruct:
+    if: github.event.head_commit.message == 'chore: trigger README hero reconstruction'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: branding/readme-hero-v0.6.0
+
+      - name: Reconstruct hero and update README
+        shell: bash
+        run: |
+          cat .hermes-gpt-asset/hero.part.* | base64 --decode > assets/hermes-gpt-v0.6.0-readme-hero.jpg
+          test -s assets/hermes-gpt-v0.6.0-readme-hero.jpg
+          file assets/hermes-gpt-v0.6.0-readme-hero.jpg
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('README.md')
+          text = path.read_text()
+          old = '![Hermes GPT v0.5.0 — Two-Way Codex Bridge](assets/hermes-gpt-v0.5.0-two-way-codex-bridge.png)'
+          new = '![Hermes GPT v0.6.0 — ChatGPT for Hermes Agent](assets/hermes-gpt-v0.6.0-readme-hero.jpg)'
+          if old not in text:
+              raise SystemExit('Expected README hero line not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          rm -rf .hermes-gpt-asset
+
+      - name: Commit finished branding update
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'docs: refresh Hermes GPT README branding'
+          git push origin HEAD:branding/readme-hero-v0.6.0
