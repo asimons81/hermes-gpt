@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   reconstruct:
-    if: github.event.head_commit.message == 'chore: trigger README hero reconstruction'
+    if: "${{ github.event.head_commit.message == 'chore: trigger README hero reconstruction' }}"
     runs-on: ubuntu-latest
     steps:
       - name: Check out branch
