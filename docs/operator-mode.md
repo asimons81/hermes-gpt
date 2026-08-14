@@ -233,6 +233,41 @@ onto (design D12). Denied surfaces return `AUTHZ_DENIED`, not a data error.
 Mission Control requires only operator level `read_only` (the default) — it
 never needs `direct` apply mode.
 
+## Work Contracts (v0.6 M1)
+
+Work Contracts (`operator_contract.py`) add a structured work-order layer on top
+of Mission Control: declarative `hermes.work-contract/v1` documents whose
+completion is verified against **observed** state, not a worker's claim (design
+`docs/design/v0.6-work-contracts.md`).
+
+Tools:
+
+- `hermes_contract_define(contract_json)` — read-only, pure. Validates and
+  canonicalizes a contract (schema, scope, forbidden actions, artifacts, tests,
+  review, criteria, authorization) and returns the canonical document
+  (redacted: objective appears only as `{prompt_len, prompt_sha256}`) plus
+  `contract_sha256`.
+- `hermes_contract_dispatch(contract_json, confirm, dry_run)` — workspace
+  level, dry-run-first. Submits the contract as a fleet work order reusing the
+  existing authority manifest, live peer verification, dry-run/confirm gates,
+  and audit. Requires a unique `task_id` and `confirm=true` + direct mode to
+  actually dispatch.
+- `hermes_contract_validate(contract_json)` — read-only by default. Returns a
+  deterministic verdict (`SATISFIED` / `NOT_SATISFIED` / `INCONCLUSIVE` /
+  `INVALID_CONTRACT`) with per-check detail and `false_done_detected`. Evidence
+  is observed-only (kanban runs, async delegations, artifacts on disk, audit
+  trail); a worker-supplied result is never proof. A valid contract with no
+  observed run returns `INCONCLUSIVE` (fail-closed), never `SATISFIED`.
+  Test checks run only through the workspace allowlist
+  (`hermes_workspace_run_test`, `shell=False`) and are individually gated at
+  workspace + direct apply mode (design D6) — at `read_only` a required test is
+  `UNVERIFIED` and the verdict is `NOT_SATISFIED`.
+- `hermes_contract_status(contract_json)` — read-only. Links a contract to its
+  observed run/delegation state (redacted summary).
+
+Every call is audited with `contract_sha256` + `task_id`; no objective text is
+ever written to the audit log or the surface.
+
 ## Dry-run vs direct: the important bit
 
 `HERMES_GPT_OPERATOR_APPLY_MODE=dry_run` means mutating tools only preview.

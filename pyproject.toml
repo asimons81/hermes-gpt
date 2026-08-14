@@ -43,6 +43,7 @@ py-modules = [
   "operator_diagnostics",
   "operator_codex",
   "operator_mission",
+  "operator_contract",
   "codex_core",
   "codex_mcp",
   "codex_config",

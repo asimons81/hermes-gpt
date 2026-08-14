@@ -19,6 +19,7 @@ import operator_diagnostics as op_diagnostics
 import operator_codex as op_codex
 import operator_fleet as op_fleet
 import operator_mission as op_mission
+import operator_contract as op_contract
 from versioning import VERSION
 
 
@@ -690,6 +691,10 @@ def hermes_operator_status() -> str:
             "hermes_mission_vault",
             "hermes_mission_usage",
             "hermes_mission_audit",
+            "hermes_contract_define",
+            "hermes_contract_dispatch",
+            "hermes_contract_validate",
+            "hermes_contract_status",
         ]
         result = {
             "success": True,
@@ -1201,6 +1206,36 @@ def hermes_mission_usage(force_refresh: bool = False) -> str:
     return op_mission.hermes_mission_usage_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
 
 
+# --- Work Contracts (v0.6 M1) ----------------------------------------------
+
+
+def hermes_contract_define(contract_json: str) -> str:
+    return op_contract.hermes_contract_define(contract_json=contract_json, hermes_root=_default_hermes_root())
+
+
+def hermes_contract_dispatch(
+    contract_json: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+    timeout: int = 30,
+) -> str:
+    return op_contract.hermes_contract_dispatch(
+        contract_json=contract_json,
+        confirm=confirm,
+        dry_run=dry_run,
+        timeout=timeout,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_contract_validate(contract_json: str) -> str:
+    return op_contract.hermes_contract_validate(contract_json=contract_json, hermes_root=_default_hermes_root())
+
+
+def hermes_contract_status(contract_json: str) -> str:
+    return op_contract.hermes_contract_status(contract_json=contract_json, hermes_root=_default_hermes_root())
+
+
 def build_server(
     *,
     host: str = "127.0.0.1",
@@ -1293,6 +1328,17 @@ def register_tools(server: FastMCP) -> None:
         hermes_mission_audit,
     ):
         server.add_tool(_mission_tool, meta=tool_meta())
+
+    # Work Contracts (v0.6 M1): define/dispatch/validate/status. Registered
+    # unconditionally; dispatch enforces workspace level + dry-run-first +
+    # confirm gates; validate enforces D6 test gating internally.
+    for _contract_tool in (
+        hermes_contract_define,
+        hermes_contract_dispatch,
+        hermes_contract_validate,
+        hermes_contract_status,
+    ):
+        server.add_tool(_contract_tool, meta=tool_meta())
 
     # Skills
     server.add_tool(hermes_skill_diff, meta=tool_meta())
