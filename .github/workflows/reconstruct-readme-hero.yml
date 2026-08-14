@@ -21,8 +21,9 @@ jobs:
       - name: Reconstruct hero and update README
         shell: bash
         run: |
-          cat .hermes-gpt-asset/hero.part.* | base64 --decode > assets/hermes-gpt-v0.6.0-readme-hero.jpg
+          cat .hermes-gpt-asset/hero.part.* | tr -d '\r\n\t ' | base64 --decode --ignore-garbage > assets/hermes-gpt-v0.6.0-readme-hero.jpg
           test -s assets/hermes-gpt-v0.6.0-readme-hero.jpg
+          echo '4e7371f84d8c99e099efb34dabf4d39e61b453bac73df661a7d3193431cbef2d  assets/hermes-gpt-v0.6.0-readme-hero.jpg' | sha256sum --check
           file assets/hermes-gpt-v0.6.0-readme-hero.jpg
 
           python - <<'PY'
