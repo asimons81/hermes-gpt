@@ -44,6 +44,8 @@ py-modules = [
   "operator_codex",
   "operator_mission",
   "operator_contract",
+  "operator_swarm",
+  "operator_swarm_workflows",
   "codex_core",
   "codex_mcp",
   "codex_config",

@@ -20,6 +20,7 @@ import operator_codex as op_codex
 import operator_fleet as op_fleet
 import operator_mission as op_mission
 import operator_contract as op_contract
+import operator_swarm as op_swarm
 from versioning import VERSION
 
 
@@ -1236,6 +1237,71 @@ def hermes_contract_status(contract_json: str) -> str:
     return op_contract.hermes_contract_status(contract_json=contract_json, hermes_root=_default_hermes_root())
 
 
+# --- Swarm Orchestration (v0.6 M2) ----------------------------------------
+
+
+def hermes_swarm_workflow_create(workflow_json: str, confirm: bool = False, dry_run: bool = True) -> str:
+    return op_swarm.hermes_swarm_workflow_create(
+        workflow_json=workflow_json,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_swarm_workflow_list() -> str:
+    return op_swarm.hermes_swarm_workflow_list(hermes_root=_default_hermes_root())
+
+
+def hermes_swarm_workflow_status(workflow_id: str) -> str:
+    return op_swarm.hermes_swarm_workflow_status(workflow_id=workflow_id, hermes_root=_default_hermes_root())
+
+
+def hermes_swarm_workflow_validate(workflow_json: str) -> str:
+    return op_swarm.hermes_swarm_workflow_validate(workflow_json=workflow_json, hermes_root=_default_hermes_root())
+
+
+def hermes_swarm_stage_dispatch(
+    workflow_id: str,
+    stage_id: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+    timeout: int = 30,
+) -> str:
+    return op_swarm.hermes_swarm_stage_dispatch(
+        workflow_id=workflow_id,
+        stage_id=stage_id,
+        confirm=confirm,
+        dry_run=dry_run,
+        timeout=timeout,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_swarm_stage_advance(
+    workflow_id: str,
+    stage_id: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    return op_swarm.hermes_swarm_stage_advance(
+        workflow_id=workflow_id,
+        stage_id=stage_id,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_swarm_approve(workflow_id: str, confirm: bool = False, dry_run: bool = True) -> str:
+    return op_swarm.hermes_swarm_approve(
+        workflow_id=workflow_id,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
 def build_server(
     *,
     host: str = "127.0.0.1",
@@ -1339,6 +1405,20 @@ def register_tools(server: FastMCP) -> None:
         hermes_contract_status,
     ):
         server.add_tool(_contract_tool, meta=tool_meta())
+
+    # Swarm Orchestration (v0.6 M2): workflow engine on contracts. Registered
+    # unconditionally; each tool enforces its own level/apply/dry-run gates
+    # and audits every call (D-SW9/D-SW10).
+    for _swarm_tool in (
+        hermes_swarm_workflow_create,
+        hermes_swarm_workflow_list,
+        hermes_swarm_workflow_status,
+        hermes_swarm_workflow_validate,
+        hermes_swarm_stage_dispatch,
+        hermes_swarm_stage_advance,
+        hermes_swarm_approve,
+    ):
+        server.add_tool(_swarm_tool, meta=tool_meta())
 
     # Skills
     server.add_tool(hermes_skill_diff, meta=tool_meta())

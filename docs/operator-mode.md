@@ -268,6 +268,60 @@ Tools:
 Every call is audited with `contract_sha256` + `task_id`; no objective text is
 ever written to the audit log or the surface.
 
+## Swarm Orchestration (v0.6 M2)
+
+Swarm Orchestration (`operator_swarm.py` + `operator_swarm_workflows.py`) is a
+workflow engine on top of Mission Control (M0) and Work Contracts (M1): a
+declarative, validated DAG of stages (design
+`docs/design/v0.6-swarm-orchestration.md`). The canonical shape is
+
+```
+research → architecture → (implementation / tests / docs in parallel)
+→ integration review → Codex review → acceptance validation → HUMAN APPROVAL
+```
+
+Every stage is dispatched as an M1 **contract**; completion is validated by the
+M1 validator against **observed** Mission Control state, so a false "done"
+claim returns the stage for rework (bounded to one retry, then blocked for a
+human). Implementation stages run in upstream kanban **worktrees** (separate
+branch per stage; the engine never manages git itself). Codex review drives the
+existing runner unchanged (fixed argv, `shell=False`, bounded timeout, approved
+workdir) and reads only a bounded verdict JSON — never a raw transcript.
+
+Tools:
+
+- `hermes_swarm_workflow_validate(workflow_json)` — read-only, pure. Validates
+  the DAG (schema, cycles, owners, caps, per-stage contracts) and returns the
+  stage plan.
+- `hermes_swarm_workflow_create(workflow_json, confirm, dry_run)` — workspace,
+  dry-run-first. Registers a workflow instance; returns `workflow_id` + stage
+  plan. Direct requires `confirm=true`.
+- `hermes_swarm_workflow_list()` — read-only. Instances + status (running /
+  blocked / done / awaiting_approval).
+- `hermes_swarm_workflow_status(workflow_id)` — read-only. One workflow's stage
+  map, owners, verdicts, handoffs, observed runs, approval record.
+- `hermes_swarm_stage_dispatch(workflow_id, stage_id, confirm, dry_run)` —
+  workspace, dry-run-first. Dispatches one ready stage (parents done) as an M1
+  contract; respects per-workflow and per-board concurrency caps.
+- `hermes_swarm_stage_advance(workflow_id, stage_id, confirm, dry_run)` —
+  workspace, dry-run-first. Runs the M1 validator against observed state;
+  records the handoff (`from` / `to` / `artifact_refs` / `contract_verdict`);
+  promotes next ready stages. Failed validation → `returned_for_rework` once,
+  then `blocked`.
+- `hermes_swarm_approve(workflow_id, confirm, dry_run)` — **owner** level,
+  direct. Records the final human approval; the workflow never auto-advances
+  past this gate.
+
+Caps (per workflow, env-overridable `HERMES_GPT_SWARM_MAX_PARALLEL`,
+`HERMES_GPT_SWARM_BOARD_CAP`, `HERMES_GPT_SWARM_MAX_STAGES`): default 3
+concurrent stages per workflow, 4 per board, 12 stages per workflow. Workflow
+state is stored as operational JSON under the Hermes data root
+(`swarm-workflows/`), never surfaced raw; status surfaces are bounded and
+redacted via the Mission Control envelope. Every call is audited with
+`workflow_id` / `stage` / `owner` / `verdict`; no objective text is logged.
+Worktrees and Codex verdict/transcript artifacts persist for review; `default`
+cleans them after the release gate (see the retention note on every workflow).
+
 ## Dry-run vs direct: the important bit
 
 `HERMES_GPT_OPERATOR_APPLY_MODE=dry_run` means mutating tools only preview.

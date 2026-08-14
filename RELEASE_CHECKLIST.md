@@ -6,6 +6,7 @@ Use this checklist before publishing any release artifact.
 - `python -m pytest`
 - `python -m pytest test_operator_mission.py` — Mission Control redaction, no-raw-body, read-only, audit, and allowlist tests must be green (risk review R1: mandatory redaction test is a release blocker).
 - `python -m pytest test_operator_contract.py` — Work Contracts schema, false-"done" rejection (S2 exit criterion), D6 test gating, redaction, read-only, and audit tests must be green.
+- `python -m pytest test_operator_swarm.py` — Swarm Orchestration DAG validation, scheduler bounds, contract dispatch, verifiable completion (S2), bounded rework, worktree plans (NG5), Codex review posture, approval gate, mutation gates, audit, and redaction tests must be green.
 - `hermes-gpt update --help` and the check-only `hermes-gpt update` path work without modifying the checkout.
 - Run `hermes_release_doctor(full_tests=true)` and confirm status is `PASS` or only `WARN` (no `BLOCKED`).
 - Run the Windows/Linux Python 3.10-3.12 CI matrix before publishing.
