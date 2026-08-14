@@ -35,6 +35,7 @@ See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention poli
 | --- | --- |
 | Understand the repository and current docs | [Documentation map](docs/README.md) |
 | Run Hermes GPT locally | [Local quickstart](#local-quickstart) |
+| Authenticate a remote MCP connector | [OAuth and bearer authentication](docs/oauth.md) |
 | Use Codex as an MCP client | [Codex guide](docs/codex.md) |
 | Use ChatGPT or another trusted client to operate Hermes | [Operator Mode](docs/operator-mode.md) |
 | Let ChatGPT dispatch bounded work to the Codex CLI on Windows | [Windows ChatGPT -> Codex guide](docs/windows-chatgpt-codex.md) |
@@ -115,6 +116,13 @@ http://127.0.0.1:7677/mcp
 ```
 
 Keep the server on loopback. A remote client such as ChatGPT cannot use your machine's `127.0.0.1` directly, so remote access requires a deliberately configured private/authenticated boundary. Do not publish an unauthenticated Operator endpoint to the internet.
+
+Hermes GPT can enforce either a strong static bearer token or a built-in,
+single-confidential-client OAuth authorization-code flow with rotating refresh
+tokens. OAuth credentials are memory-backed and fail closed on missing client
+authentication, unsupported scope/resource, expiry, or replay. See
+[OAuth and bearer authentication](docs/oauth.md) before enabling the `remote`
+profile; authentication does not activate Operator mutation or Owner Mode.
 
 ## Operator Mode
 
@@ -254,6 +262,7 @@ Git checkout updates require a clean checkout on the default branch and use fast
 Current operational documentation:
 
 - [Documentation map and source-of-truth rules](docs/README.md)
+- [OAuth and bearer authentication](docs/oauth.md)
 - [Operator Mode](docs/operator-mode.md)
 - [Codex integration](docs/codex.md)
 - [Windows ChatGPT -> Codex deployment](docs/windows-chatgpt-codex.md)

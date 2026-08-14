@@ -5,12 +5,15 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from starlette.testclient import TestClient
 
+import oauth_auth
 import server
 
 
@@ -22,6 +25,14 @@ GATE_ENVS = [
     server.ENABLE_VISION_ENV,
     server.ENABLE_WEB_ENV,
     server.UNSAFE_REMOTE_ENV,
+    oauth_auth.AUTH_TOKEN_ENV,
+    oauth_auth.OAUTH_ENABLE_ENV,
+    oauth_auth.OAUTH_ISSUER_ENV,
+    oauth_auth.OAUTH_CLIENT_ID_ENV,
+    oauth_auth.OAUTH_CLIENT_SECRET_ENV,
+    oauth_auth.OAUTH_REDIRECT_URI_ENV,
+    oauth_auth.OAUTH_SCOPE_ENV,
+    server.TRUSTED_PROXY_IPS_ENV,
 ]
 
 
@@ -297,6 +308,158 @@ def test_remote_profile_requires_explicit_unsafe_ack(monkeypatch):
 
     with pytest.raises(SystemExit, match="Remote profile requires real authentication"):
         server.main()
+
+
+def test_http_asgi_app_exposes_confidential_oauth_and_protects_mcp(monkeypatch):
+    monkeypatch.setenv(oauth_auth.OAUTH_ENABLE_ENV, "1")
+    monkeypatch.setenv(oauth_auth.OAUTH_ISSUER_ENV, "https://mcp.example.com")
+    monkeypatch.setenv(oauth_auth.OAUTH_CLIENT_ID_ENV, "chatgpt-client")
+    monkeypatch.setenv(
+        oauth_auth.OAUTH_CLIENT_SECRET_ENV,
+        "test-client-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    )
+    monkeypatch.setenv(
+        oauth_auth.OAUTH_REDIRECT_URI_ENV,
+        "https://chatgpt.com/connector/oauth/callback",
+    )
+    built = server.build_server(http=True)
+    for tool in tools_by_name(built).values():
+        assert tool.meta == {"securitySchemes": [{"type": "oauth2", "scopes": ["hermes"]}]}
+    app = server.build_asgi_app(built, http=True)
+    with TestClient(app, base_url="https://mcp.example.com") as client:
+        metadata = client.get("/.well-known/oauth-authorization-server")
+        assert metadata.status_code == 200
+        assert "refresh_token" in metadata.json()["grant_types_supported"]
+        unauthenticated = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+        assert unauthenticated.status_code == 401
+
+        authorization = client.get(
+            "/oauth/authorize",
+            params={
+                "response_type": "code",
+                "client_id": "chatgpt-client",
+                "redirect_uri": "https://chatgpt.com/connector/oauth/callback",
+                "scope": "openid hermes offline_access",
+                "resource": "https://mcp.example.com/mcp",
+            },
+            follow_redirects=False,
+        )
+        code = urllib.parse.parse_qs(
+            urllib.parse.urlparse(authorization.headers["location"]).query
+        )["code"][0]
+        issued = client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": "chatgpt-client",
+                "client_secret": "test-client-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                "code": code,
+                "redirect_uri": "https://chatgpt.com/connector/oauth/callback",
+            },
+        ).json()
+        authenticated = client.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {issued['access_token']}"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        )
+        assert authenticated.status_code == 200
+
+
+def test_auth_enabled_requires_complete_valid_oauth_configuration(monkeypatch):
+    monkeypatch.setenv(oauth_auth.OAUTH_ENABLE_ENV, "1")
+    monkeypatch.delenv(oauth_auth.OAUTH_CLIENT_SECRET_ENV, raising=False)
+    with pytest.raises(ValueError, match=oauth_auth.OAUTH_CLIENT_SECRET_ENV):
+        server.auth_enabled()
+
+
+def test_auth_enabled_rejects_weak_static_bearer(monkeypatch):
+    monkeypatch.delenv(oauth_auth.OAUTH_ENABLE_ENV, raising=False)
+    monkeypatch.setenv(oauth_auth.AUTH_TOKEN_ENV, "weak")
+    with pytest.raises(ValueError, match="43 to 128"):
+        server.auth_enabled()
+
+
+def test_static_bearer_tool_metadata_is_truthful(monkeypatch):
+    monkeypatch.delenv(oauth_auth.OAUTH_ENABLE_ENV, raising=False)
+    monkeypatch.setenv(
+        oauth_auth.AUTH_TOKEN_ENV,
+        "test-static-bearer-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    )
+    built = server.build_server(http=True)
+    for tool in tools_by_name(built).values():
+        assert tool.meta == {"securitySchemes": [{"type": "http", "scheme": "bearer"}]}
+
+
+def test_authenticated_remote_http_requires_tls_or_explicit_loopback_proxy(monkeypatch):
+    monkeypatch.delenv(server.TRUSTED_PROXY_IPS_ENV, raising=False)
+    with pytest.raises(SystemExit, match="direct TLS"):
+        server.authenticated_http_security_options(
+            profile=server.REMOTE_PROFILE,
+            host="127.0.0.1",
+            cert=None,
+            key=None,
+            configured_auth=True,
+        )
+
+    assert server.authenticated_http_security_options(
+        profile=server.REMOTE_PROFILE,
+        host="0.0.0.0",
+        cert="server.crt",
+        key="server.key",
+        configured_auth=True,
+    ) == (False, "")
+
+    monkeypatch.setenv(server.TRUSTED_PROXY_IPS_ENV, "127.0.0.1,::1")
+    assert server.authenticated_http_security_options(
+        profile=server.REMOTE_PROFILE,
+        host="127.0.0.1",
+        cert=None,
+        key=None,
+        configured_auth=True,
+    ) == (True, "127.0.0.1,::1")
+
+
+def test_trusted_proxy_configuration_rejects_wildcards_and_nonloopback(monkeypatch):
+    for value in ("*", "0.0.0.0", "192.0.2.1"):
+        monkeypatch.setenv(server.TRUSTED_PROXY_IPS_ENV, value)
+        with pytest.raises(SystemExit):
+            server.authenticated_http_security_options(
+                profile=server.REMOTE_PROFILE,
+                host="127.0.0.1",
+                cert=None,
+                key=None,
+                configured_auth=True,
+            )
+
+    monkeypatch.setenv(server.TRUSTED_PROXY_IPS_ENV, "127.0.0.1")
+    with pytest.raises(SystemExit, match="loopback bind"):
+        server.authenticated_http_security_options(
+            profile=server.REMOTE_PROFILE,
+            host="0.0.0.0",
+            cert=None,
+            key=None,
+            configured_auth=True,
+        )
+
+
+def test_oauth_is_rejected_for_legacy_sse_transport(monkeypatch):
+    monkeypatch.setenv(oauth_auth.OAUTH_ENABLE_ENV, "1")
+    monkeypatch.setenv(oauth_auth.OAUTH_ISSUER_ENV, "https://mcp.example.com")
+    monkeypatch.setenv(oauth_auth.OAUTH_CLIENT_ID_ENV, "chatgpt-client")
+    monkeypatch.setenv(
+        oauth_auth.OAUTH_CLIENT_SECRET_ENV,
+        "test-client-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    )
+    monkeypatch.setenv(
+        oauth_auth.OAUTH_REDIRECT_URI_ENV,
+        "https://chatgpt.com/connector/oauth/callback",
+    )
+    built = server.build_server(http=False)
+    with pytest.raises(ValueError, match="streamable HTTP"):
+        server.build_asgi_app(built, http=False)
 
 
 def test_default_hermes_root_normalizes_profile_scoped_env(monkeypatch):

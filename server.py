@@ -2,14 +2,23 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import importlib.metadata
 import inspect
 import json
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any, List
 
+from starlette.applications import Starlette
+from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.routing import BaseRoute, Mount, Route
+
+import oauth_auth
 import operator_policy as op_policy
 import operator_cron as op_cron
 import operator_skills as op_skills
@@ -28,6 +37,7 @@ LOCAL_DEV_PROFILE = "local-dev"
 REMOTE_PROFILE = "remote"
 UNSAFE_REMOTE_ACK = "--i-understand-this-is-unsafe"
 UNSAFE_REMOTE_ENV = "HERMES_GPT_UNSAFE_REMOTE_NOAUTH"
+TRUSTED_PROXY_IPS_ENV = "HERMES_GPT_TRUSTED_PROXY_IPS"
 ENABLE_WRITE_ENV = "HERMES_GPT_ENABLE_WRITE"
 ENABLE_MEMORY_WRITE_ENV = "HERMES_GPT_ENABLE_MEMORY_WRITE"
 ENABLE_SESSION_SEARCH_ENV = "HERMES_GPT_ENABLE_SESSION_SEARCH"
@@ -290,12 +300,21 @@ def clean_error(tool_name: str, exc: Exception) -> RuntimeError:
 
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 import_hermes()
 
 
 def tool_meta(extra: dict[str, Any] | None = None) -> dict[str, Any]:
-    meta = dict(NOAUTH_META)
+    oauth_config = oauth_auth.config_from_env()
+    if oauth_config is not None:
+        meta: dict[str, Any] = {
+            "securitySchemes": [{"type": "oauth2", "scopes": [oauth_config.scope]}]
+        }
+    elif oauth_auth.static_bearer_from_env() is not None:
+        meta = {"securitySchemes": [{"type": "http", "scheme": "bearer"}]}
+    else:
+        meta = dict(NOAUTH_META)
     if extra:
         meta.update(extra)
     return meta
@@ -1302,6 +1321,107 @@ def hermes_swarm_approve(workflow_id: str, confirm: bool = False, dry_run: bool 
     )
 
 
+def oauth_state_from_env() -> oauth_auth.OAuthState | None:
+    config = oauth_auth.config_from_env()
+    return oauth_auth.OAuthState(config) if config is not None else None
+
+
+def auth_enabled() -> bool:
+    return oauth_auth.static_bearer_from_env() is not None or oauth_auth.config_from_env() is not None
+
+
+def trusted_proxy_ips_from_env() -> str:
+    raw_value = os.environ.get(TRUSTED_PROXY_IPS_ENV, "").strip()
+    if not raw_value:
+        return ""
+    addresses: list[str] = []
+    for value in raw_value.split(","):
+        candidate = value.strip()
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError as exc:
+            raise ValueError(f"{TRUSTED_PROXY_IPS_ENV} must contain only comma-separated IP addresses.") from exc
+        if not address.is_loopback:
+            raise ValueError(f"{TRUSTED_PROXY_IPS_ENV} accepts loopback proxy addresses only.")
+        addresses.append(str(address))
+    return ",".join(dict.fromkeys(addresses))
+
+
+def authenticated_http_security_options(
+    *,
+    profile: str,
+    host: str,
+    cert: str | None,
+    key: str | None,
+    configured_auth: bool,
+) -> tuple[bool, str]:
+    if bool(cert) != bool(key):
+        raise SystemExit("TLS requires both --cert and --key.")
+    if profile != REMOTE_PROFILE or not configured_auth:
+        return False, ""
+    if cert and key:
+        return False, ""
+    try:
+        trusted_proxies = trusted_proxy_ips_from_env()
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not trusted_proxies or not is_loopback_host(host):
+        raise SystemExit(
+            "Authenticated remote mode requires direct TLS (--cert and --key), or a loopback bind behind an "
+            f"explicit trusted HTTPS proxy configured with {TRUSTED_PROXY_IPS_ENV}."
+        )
+    return True, trusted_proxies
+
+
+async def health_root(_request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok", "server": "hermes-gpt", "mcp_path": "/mcp"})
+
+
+def build_asgi_app(server: FastMCP, *, http: bool) -> Any:
+    oauth_state = getattr(server, "_hermes_oauth_state", None)
+    if oauth_state is not None and not http:
+        raise ValueError("Built-in OAuth is supported only with streamable HTTP (--http).")
+    raw_mcp_app = server.streamable_http_app() if http else server.sse_app()
+    mcp_app = oauth_auth.DefaultMcpAcceptMiddleware(raw_mcp_app)
+    routes: list[BaseRoute] = [Route("/", health_root, methods=["GET", "POST", "OPTIONS"])]
+    if oauth_state is not None:
+        async def resource_metadata(request: Request) -> JSONResponse:
+            return oauth_auth.protected_resource_metadata(request, oauth_state)
+
+        async def authorization_server_metadata(request: Request) -> JSONResponse:
+            return oauth_auth.authorization_metadata(request, oauth_state)
+
+        async def authorize(request: Request) -> Response:
+            return oauth_auth.authorize(request, oauth_state)
+
+        async def token(request: Request) -> JSONResponse:
+            return await oauth_auth.token(request, oauth_state)
+
+        routes.extend(
+            [
+                Route("/.well-known/oauth-protected-resource", resource_metadata, methods=["GET"]),
+                Route("/.well-known/oauth-protected-resource/mcp", resource_metadata, methods=["GET"]),
+                Route("/.well-known/oauth-authorization-server", authorization_server_metadata, methods=["GET"]),
+                Route("/oauth/authorize", authorize, methods=["GET"]),
+                Route("/oauth/token", token, methods=["POST"]),
+            ]
+        )
+    routes.append(Mount("/", app=mcp_app))
+    app = Starlette(routes=routes, lifespan=raw_mcp_app.router.lifespan_context)
+    issuer = oauth_state.config.issuer if oauth_state is not None else ""
+    parsed_issuer = urllib.parse.urlparse(issuer)
+    issuer_origin = f"{parsed_issuer.scheme}://{parsed_issuer.netloc}" if parsed_issuer.netloc else ""
+    origins = [origin for origin in ("https://chatgpt.com", issuer_origin) if origin]
+    static_bearer = oauth_auth.static_bearer_from_env() or ""
+    return CORSMiddleware(
+        oauth_auth.BearerAuthMiddleware(app, oauth_state, static_token=static_bearer),
+        allow_origins=origins,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+        max_age=86400,
+    )
+
+
 def build_server(
     *,
     host: str = "127.0.0.1",
@@ -1309,6 +1429,16 @@ def build_server(
     http: bool = False,
     include_local_settings: bool = False,
 ) -> FastMCP:
+    oauth_state = oauth_state_from_env()
+    allowed_hosts = [host, f"{host}:{port}", "127.0.0.1", f"127.0.0.1:{port}", "localhost", f"localhost:{port}"]
+    allowed_origins = ["https://chatgpt.com"]
+    if oauth_state is not None:
+        issuer = urllib.parse.urlparse(oauth_state.config.issuer)
+        if issuer.hostname:
+            allowed_hosts.append(issuer.hostname)
+            if issuer.port:
+                allowed_hosts.append(f"{issuer.hostname}:{issuer.port}")
+        allowed_origins.append(f"{issuer.scheme}://{issuer.netloc}")
     server = FastMCP(
         "hermes-gpt",
         host=host,
@@ -1318,7 +1448,12 @@ def build_server(
         message_path="/messages/",
         stateless_http=http,
         json_response=http,
+        transport_security=TransportSecuritySettings(
+            allowed_hosts=list(dict.fromkeys(allowed_hosts)),
+            allowed_origins=list(dict.fromkeys(allowed_origins)),
+        ),
     )
+    setattr(server, "_hermes_oauth_state", oauth_state)
     register_tools(server)
     return server
 
@@ -1573,7 +1708,7 @@ def _run_legacy_server(argv: list[str]) -> None:
         "--profile",
         choices=[LOCAL_DEV_PROFILE, REMOTE_PROFILE],
         default=LOCAL_DEV_PROFILE,
-        help="Release safety profile. Remote no-auth is refused unless explicitly acknowledged.",
+        help="Release safety profile. Remote mode requires authentication unless unsafe no-auth is explicitly acknowledged.",
     )
     parser.add_argument(
         UNSAFE_REMOTE_ACK,
@@ -1585,17 +1720,26 @@ def _run_legacy_server(argv: list[str]) -> None:
 
     if args.http and args.sse:
         raise SystemExit("Choose only one of --http or --sse.")
-    if args.profile == REMOTE_PROFILE and not (args.unsafe_remote_ack and env_enabled(UNSAFE_REMOTE_ENV)):
+    configured_auth = auth_enabled()
+    proxy_headers, forwarded_allow_ips = authenticated_http_security_options(
+        profile=args.profile,
+        host=args.host,
+        cert=args.cert,
+        key=args.key,
+        configured_auth=configured_auth,
+    )
+    remote_unsafe_noauth = args.unsafe_remote_ack and env_enabled(UNSAFE_REMOTE_ENV)
+    if args.profile == REMOTE_PROFILE and not (configured_auth or remote_unsafe_noauth):
         raise SystemExit(
-            "Remote profile requires real authentication, which is not implemented yet. "
+            "Remote profile requires real authentication. Configure a static bearer token or confidential-client OAuth. "
             f"For temporary experiments only, pass {UNSAFE_REMOTE_ACK} and set {UNSAFE_REMOTE_ENV}=1."
         )
-    if args.profile == LOCAL_DEV_PROFILE and not is_loopback_host(args.host):
+    if args.profile == LOCAL_DEV_PROFILE and not is_loopback_host(args.host) and not configured_auth:
         eprint(
             "WARNING: local-dev profile is bound to a non-loopback host. "
             "Do not expose hermes-gpt without real authentication."
         )
-    if args.profile == REMOTE_PROFILE:
+    if args.profile == REMOTE_PROFILE and remote_unsafe_noauth and not configured_auth:
         eprint("WARNING: remote no-auth mode is explicitly unsafe and intended only for temporary experiments.")
 
     transport = "streamable-http" if args.http else "sse" if args.sse else "stdio"
@@ -1610,7 +1754,7 @@ def _run_legacy_server(argv: list[str]) -> None:
         # Run with uvicorn instead of FastMCP.run() so TLS can be enabled for
         # local-only testing when cert/key are provided.
         import uvicorn
-        app = server.streamable_http_app() if args.http else server.sse_app()
+        app = build_asgi_app(server, http=args.http)
 
         uvicorn.run(
             app,
@@ -1618,8 +1762,8 @@ def _run_legacy_server(argv: list[str]) -> None:
             port=args.port,
             ssl_certfile=args.cert if args.cert else None,
             ssl_keyfile=args.key if args.key else None,
-            proxy_headers=True,
-            forwarded_allow_ips="*",
+            proxy_headers=proxy_headers,
+            forwarded_allow_ips=forwarded_allow_ips,
         )
 
 
