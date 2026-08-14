@@ -235,7 +235,7 @@ def _add_forbidden_evidence(contract: dict, *, profile: str = "hermes-dev") -> N
         changed=True,
         summary="wrote public_publish file",
         profile=profile,
-        extra={"forbidden_action": "public_publish"},
+        extra={"forbidden_action": "public_publish", "task_id": contract["task_id"]},
     )
 
 
@@ -611,11 +611,50 @@ def test_forbidden_action_scan_fails_high_severity(hermes_root):
         changed=True,
         summary="read secret_access entry",
         profile="hermes-dev",
+        extra={"task_id": c["task_id"]},
     )
     out = _run_validate(c, hermes_root)
     assert out["verdict"] == "NOT_SATISFIED"
     by_kind = {ch["kind"]: ch["status"] for ch in out["checks"]}
     assert by_kind["forbidden"] == "FAIL"
+
+
+def test_forbidden_action_ignores_unrelated_contract_audit(hermes_root):
+    """L1: a concurrent contract's audit event cannot fail this task."""
+    ws = hermes_root.parent / "ws"
+    cache = ws / "src" / "nexusos" / "cache.py"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("def cached(): pass\n", encoding="utf-8")
+    c = _contract_for_ws(ws, task_id="t-done")
+    _add_review_evidence(c, reviewer="default")
+    op.audit_record(
+        tool="hermes_workspace_write_file",
+        level="workspace",
+        apply_mode="direct",
+        dry_run=False,
+        success=True,
+        changed=True,
+        summary="wrote public_publish file",
+        profile="hermes-dev",
+        extra={"forbidden_action": "public_publish", "task_id": "other-contract"},
+    )
+    out = _run_validate(c, hermes_root)
+    by_kind = {ch["kind"]: ch["status"] for ch in out["checks"]}
+    assert out["verdict"] == "SATISFIED"
+    assert by_kind["forbidden"] == "PASS"
+
+
+def test_run_state_retry_selection_is_order_independent(hermes_root, monkeypatch):
+    """L2: the latest retry wins regardless of source-list ordering."""
+    c = _contract(task_id="retry-task")
+    old_success = {"status": "done", "outcome": "completed", "started_at": "2026-08-13T10:00:00+00:00"}
+    latest_failure = {"status": "done", "outcome": "failed", "started_at": "2026-08-13T11:00:00+00:00"}
+    monkeypatch.setattr(contract_mod, "_observed_runs", lambda *_: [old_success, latest_failure])
+    first = contract_mod._check_run_state(c, hermes_root)
+    monkeypatch.setattr(contract_mod, "_observed_runs", lambda *_: [latest_failure, old_success])
+    second = contract_mod._check_run_state(c, hermes_root)
+    assert first["status"] == second["status"] == "FAIL"
+    assert first["detail"] == second["detail"]
 
 
 # ---------------------------------------------------------------------------

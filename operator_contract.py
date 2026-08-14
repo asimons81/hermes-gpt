@@ -537,8 +537,21 @@ def _check_run_state(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
             "status": "UNVERIFIED",
             "detail": f"no observed run/outcome for task_id {task_id}",
         }
-    # Any matching terminal-success run passes; the first run is the primary.
-    primary = runs[0]
+    # Retries produce multiple records for a task. Select the latest observed
+    # record by stable keys rather than relying on SQLite/list traversal order.
+    # A newer retry is authoritative; an older successful attempt cannot mask a
+    # currently-running or failed retry.
+    def run_sort_key(run: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+        return (
+            str(run.get("started_at") or run.get("dispatched_at") or ""),
+            str(run.get("ended_at") or run.get("completed_at") or ""),
+            str(run.get("status") or ""),
+            str(run.get("outcome") or run.get("state") or ""),
+            str(run.get("board") or run.get("scope") or ""),
+            str(run.get("error") or ""),
+        )
+
+    primary = max(runs, key=run_sort_key)
     status = str(primary.get("status") or "")
     outcome = str(primary.get("outcome") or primary.get("state") or "")
     error = primary.get("error")
@@ -549,7 +562,11 @@ def _check_run_state(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
             "status": "FAIL",
             "detail": f"observed {source} run errored: {_truncate(str(error), 200)}",
         }
-    if status in outcome_ok or outcome in outcome_ok:
+    if outcome:
+        outcome_passes = outcome in outcome_ok
+    else:
+        outcome_passes = status in outcome_ok
+    if outcome_passes:
         return {
             "kind": "run_state",
             "status": "PASS",
@@ -724,12 +741,16 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
         return {"kind": "forbidden", "status": "PASS", "detail": "no forbidden actions declared"}
 
     assigned_agent = contract["assigned_agent"]
+    task_id = contract["task_id"]
     labels = [fa["action"].lower() for fa in forbidden]
     signals: list[dict[str, Any]] = []
 
-    # Audit trail scan (D5): records by the assignee whose tool/summary/extra
-    # references a forbidden action label.
+    # Audit trail scan (D5): scope strictly to this contract's task identity.
+    # Profile-only matching allowed an unrelated concurrent contract to fail this
+    # one; records without a matching task_id are intentionally ignored.
     for rec in _observed_audit():
+        if str(rec.get("task_id") or "") != task_id:
+            continue
         profile = str(rec.get("profile") or "")
         if profile != assigned_agent and profile not in ("", "unknown"):
             continue

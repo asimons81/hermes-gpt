@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
@@ -325,8 +326,27 @@ def _truncate(text: str | None, limit: int = _ERROR_STRING_CAP) -> str:
 
 
 def _sanitize_error(text: str | None) -> str:
-    """Redact secret-looking substrings, cap length, keep meaning."""
-    return op.redact_output(_truncate(text, _ERROR_STRING_CAP))
+    """Return a bounded, secret- and PII-stripped operational summary.
+
+    This function is intentionally used only at the Mission Control view boundary
+    for free-text fields (failures, audit, cron, and delegation summaries).  It
+    is conservative: a false positive loses diagnostic detail, while a false
+    negative can disclose third-party data to a trusted client.
+    """
+    value = op.redact_output(_truncate(text, _ERROR_STRING_CAP))
+    # Contact details and handles are never useful for operational status.
+    value = re.sub(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[redacted-email]", value)
+    value = re.sub(r"(?<!\w)(?:\+?\d[\d().\-\s]{6,}\d)(?!\w)", "[redacted-phone]", value)
+    value = re.sub(r"(?<![\w@])@[A-Za-z0-9_]{1,32}\b", "[redacted-username]", value)
+    # Explicit identity labels and common two-token personal-name patterns.
+    value = re.sub(
+        r"(?i)\b(name|contact|customer|client|user|owner|assignee)\s*[:=]\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b",
+        lambda m: f"{m.group(1)}=[redacted-name]",
+        value,
+    )
+    value = re.sub(r"\b(?:Mr|Mrs|Ms|Dr)\.\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b", "[redacted-name]", value)
+    value = re.sub(r"\b[A-Z][a-z]{1,30}\s+[A-Z][a-z]{1,30}\b", "[redacted-name]", value)
+    return value
 
 
 # ---------------------------------------------------------------------------

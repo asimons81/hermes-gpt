@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-gpt"
-version = "0.5.0"
+version = "0.6.0"
 description = "Local-dev MCP sidecar for exposing selected Hermes Agent capabilities."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -69,6 +69,8 @@ py-modules = [
   "docs/release-notes-v0.5.0b1.md",
   "docs/release-notes-v0.5.0b2.md",
   "docs/release-notes-v0.5.0.md",
+  "docs/release-notes-v0.6.0.md",
+  "docs/retention-policy.md",
 ]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",

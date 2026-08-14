@@ -257,7 +257,13 @@ Tools:
   `INVALID_CONTRACT`) with per-check detail and `false_done_detected`. Evidence
   is observed-only (kanban runs, async delegations, artifacts on disk, audit
   trail); a worker-supplied result is never proof. A valid contract with no
-  observed run returns `INCONCLUSIVE` (fail-closed), never `SATISFIED`.
+  observed run returns `INCONCLUSIVE` (fail-closed), never `SATISFIED`. For
+  retries, the latest observed run is selected deterministically. Forbidden-action
+  audit evidence is scoped to the contract `task_id`, so concurrent work cannot
+  contaminate another contract's verdict. Review also remains fail-closed: a
+  distinct reviewer audit acceptance or human approval reference is required;
+  v0.6 ships no production review-accept writer, so unavailable evidence yields
+  `NOT_SATISFIED`.
   Test checks run only through the workspace allowlist
   (`hermes_workspace_run_test`, `shell=False`) and are individually gated at
   workspace + direct apply mode (design D6) — at `read_only` a required test is

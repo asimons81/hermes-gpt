@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-08-13
+
+- Added the v0.6 Mission Control, Work Contracts, and Swarm Orchestration surfaces with bounded, audited, fail-closed operator controls.
+- Added conservative PII stripping for Mission Control free-text failure, audit, cron, and delegation fields; raw bodies remain excluded.
+- Made Work Contract retry selection deterministic and scoped forbidden-action audit evidence to the contract task identity.
+- Added documented retention and cleanup windows for request dumps, Codex artifacts, and swarm worktrees/workflow records.
+- Documented the remaining fail-closed review-evidence limitation: v0.6 has no production review-accept writer.
+
+
 - Fixed the Codex runner on Windows selecting a protected `WindowsApps`
   executable and failing with `WinError 5`. The runner now supports an explicit
   `HERMES_GPT_CODEX_EXE` override, validates that the chosen executable is a

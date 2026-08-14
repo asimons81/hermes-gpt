@@ -655,3 +655,16 @@ def test_failures_bounded_and_sanitized(hermes_root):
     for err in out["data"]["recent_errors"]:
         assert "message" in err
     assert out["data"]["by_source"]["errors.log"] >= 1
+
+
+def test_free_text_pii_strip_removes_contact_handles_and_name_patterns():
+    raw = "Name: Jane Doe email jane.doe@example.com phone +1 (555) 123-4567 @janedoe"
+    safe = mission._sanitize_error(raw)
+    assert "Jane Doe" not in safe
+    assert "jane.doe@example.com" not in safe
+    assert "555" not in safe
+    assert "@janedoe" not in safe
+    assert "[redacted-email]" in safe
+    assert "[redacted-phone]" in safe
+    assert "[redacted-username]" in safe
+    assert "[redacted-name]" in safe
