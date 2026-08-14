@@ -3,6 +3,7 @@ include pyproject.toml
 include CHANGELOG.md
 # Public-safe docs only. Internal counsel/design/release-planning packets
 # (docs/design/*, docs/releases/*) are intentionally NOT distributed.
+include docs/README.md
 include docs/codex.md
 include docs/operator-mode.md
 include docs/release-notes-v0.2.0.md

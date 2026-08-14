@@ -1,38 +1,58 @@
-# Hermes GPT for Codex
+# Hermes GPT and Codex
 
-Hermes GPT can expose selected local Hermes Agent capabilities to the Codex app, Codex CLI, and Codex IDE integration through a local MCP server. It is a local bridge; it does not patch Codex, store OpenAI credentials, bypass approvals, or enable writes by default.
+Hermes GPT supports **two different Codex workflows**. Keep them separate when configuring systems or generating tool calls.
 
-## Install
+1. **Codex as an MCP client**: Codex loads a curated Hermes GPT MCP server and calls Hermes tools.
+2. **Codex CLI as a delegated worker/reviewer**: ChatGPT or another trusted client calls the normal Hermes GPT Operator server, which launches bounded async Codex CLI jobs through `hermes_codex_*`.
 
-Set the base gates in the environment that will launch Codex, then install the MCP entry:
+The first workflow uses the Codex/MCP feature gates. The second uses Operator `workspace` authority plus the Codex runner gate.
+
+For documentation authority rules, see [docs/README.md](README.md).
+
+## Workflow A: Codex as an MCP client
+
+### Install the MCP entry
+
+Set the base gates in the environment that launches Codex:
 
 ```powershell
 $env:HERMES_GPT_ENABLE_CODEX="1"
 $env:HERMES_GPT_ENABLE_MCP="1"
+```
+
+Install the core toolset:
+
+```powershell
 hermes-gpt codex install --toolset core
 hermes-gpt codex doctor
 ```
 
-`install` uses `codex mcp add hermes-gpt -- ...` when the Codex CLI is available. If it must edit TOML directly, it first validates the config, creates a timestamped backup, preserves unrelated configuration, and adds only `[mcp_servers."hermes-gpt"]` plus its environment table. It is idempotent.
+`install` prefers `codex mcp add hermes-gpt -- ...` when the Codex CLI supports it. If Hermes GPT must edit TOML directly, it validates the config, creates a timestamped backup, preserves unrelated settings, and changes only the Hermes GPT MCP entry. The operation is idempotent.
 
-`core` is the backward-compatible default. For the opt-in Operator control plane:
+For the opt-in Operator alias toolset:
 
 ```powershell
 hermes-gpt codex install --toolset operator --refresh
 hermes-gpt codex doctor
 ```
 
-Different requested settings require `--refresh`, which backs up and replaces only the Hermes GPT entry. Existing entries without a toolset are treated as `core`.
+Changing an existing toolset requires `--refresh`, which backs up and replaces only the Hermes GPT entry. Existing entries with no toolset metadata are treated as `core`.
 
-For a repository-local entry, run the command from inside that repository:
+### Repository-local configuration
+
+Run from the target Git repository:
 
 ```powershell
 hermes-gpt codex install --project
 ```
 
-This creates or updates `<git-root>/.codex/config.toml`; Codex CLI currently has no project-scope switch for `mcp add`.
+This creates or updates:
 
-## Verify and remove
+```text
+<git-root>/.codex/config.toml
+```
+
+### Verify or remove
 
 ```powershell
 hermes-gpt codex print-config
@@ -40,60 +60,180 @@ hermes-gpt codex doctor
 hermes-gpt codex uninstall
 ```
 
-`doctor` is read-only. It checks the Codex binary/version, target config, MCP registry, base gates, gateway status, and redaction smoke path. `uninstall` removes only the Hermes GPT MCP tables and makes a backup first.
+`doctor` is read-only. `uninstall` removes only Hermes GPT MCP configuration and creates a backup first.
 
-Before reinstalling a connector after a release, run `hermes-gpt update` to check safely; use `hermes-gpt update --apply` only when you are ready to update the checkout or installed package. See [updating](updating.md) for the exact safety behavior.
+### Core Codex MCP tools
 
-## Available Codex tools
+The curated Codex MCP server registers these names:
 
 | Tool | Behavior |
 | --- | --- |
-| `hermes_status` | Local Hermes GPT/gateway status, including state-file PID fallback. |
-| `hermes_capabilities` | Enabled features and the gate required for disabled ones. |
-| `hermes_plan` | Compact, read-only repository context and implementation plan. |
-| `hermes_vision_analyze` | Approved local raster image analysis. |
-| `hermes_web_search` | Search only; no pages are fetched. |
-| `hermes_extract_page` | Public HTTP(S) content extraction. |
-| `hermes_cron_plan` | Dry-run cron proposal from a simple schedule request. |
-| `hermes_cron_create` | Explicitly confirmed, tightly gated creation. |
-| `hermes_author_skill` | Skill draft by default; write requires explicit gates. |
-| `hermes_gateway_diagnostics` | Read-only gateway and PID diagnostics. |
+| `hermes_status` | Local Hermes GPT / gateway status. |
+| `hermes_capabilities` | Enabled features and missing gates. |
+| `hermes_plan` | Compact read-only repository context and implementation plan. |
+| `hermes_vision_analyze` | Analyze an approved local raster image. |
+| `hermes_web_search` | Search the web without fetching result pages. |
+| `hermes_extract_page` | Extract readable public HTTP(S) content with network safety checks. |
+| `hermes_cron_plan` | Produce a dry-run cron proposal. |
+| `hermes_cron_create` | Create a cron job only through explicit write/confirmation gates. |
+| `hermes_author_skill` | Draft a skill; writes require explicit gates. |
+| `hermes_gateway_diagnostics` | Read-only gateway diagnostics. |
 
-The `operator` toolset adds namespaced aliases for Operator diagnostics, audit, cron, skills, non-secret config/environment, and gateway operations. It excludes workspace, git, raw command, Owner patch, and Owner write tools. Existing Operator gates remain authoritative.
+The `operator` toolset adds curated namespaced aliases for Operator diagnostics, audit, cron, skills, non-secret config/environment, and gateway operations. It intentionally excludes broad workspace, raw git/command, and Owner file-write surfaces.
 
-## Codex jobs through Hermes GPT
+### Tool-name namespace warning
 
-The normal Operator server exposes `hermes_codex_status`, `hermes_codex_plan`, `hermes_codex_start`, `hermes_codex_review_start`, `hermes_codex_jobs`, `hermes_codex_job_status`, `hermes_codex_job_result`, and `hermes_codex_cancel`.
+The curated Codex MCP server is not identical to the main Hermes GPT server.
 
-Execution requires Operator Mode at `workspace` or acknowledged `owner` level, direct apply mode, an approved work directory, `HERMES_GPT_ENABLE_CODEX_RUNNER=1`, `confirm=true`, and `dry_run=false`. Add `HERMES_GPT_ALLOW_CODEX_WRITE=1` only for `workspace-write`; read-only jobs do not need it.
+Important example:
 
-The Codex CLI executable is resolved at status and launch time. Set `HERMES_GPT_CODEX_EXE` to an absolute path when you want to pin a specific standalone CLI — for example when a Windows desktop app install puts a protected `WindowsApps` shim earlier in `PATH` that fails with `WinError 5`. The resolver validates that the path exists, is a regular file, is not under `WindowsApps`, and answers `codex --version` before it is used; otherwise it walks `PATH` and skips protected or unlaunchable candidates. `hermes_codex_status` reports the chosen `codex_path` and `codex_source` (`env`, `path`, or `none`) so availability is never reported for an executable that cannot actually launch.
+```text
+main Hermes GPT server:  hermes_web_extract
+Codex-focused MCP:       hermes_extract_page
+```
 
-The work directory must be a trusted Git repository for the Codex CLI. If a job fails with `Not inside a trusted directory and --skip-git-repo-check was not specified`, run `codex trust` (or `git init`) in the work directory and retry.
+Agents must verify which MCP server/toolset is active before generating calls. Do not substitute a familiar tool name from another surface.
 
-Jobs use fixed arguments, `shell=False`, bounded timeouts, prompt hashes instead of raw prompt persistence, and redacted bounded results. Danger-full-access, bypass flags, arbitrary commands/config, executable paths, and extra directories are unsupported. Operator Mode is not a sandbox, and these tools do not bypass Codex permissions.
+### Feature gates for the core toolset
 
-For a Windows setup where ChatGPT connects through a private tunnel and Hermes dispatches approved jobs to the standalone Codex CLI, see [ChatGPT to Codex through Hermes GPT on Windows](windows-chatgpt-codex.md).
-
-## Safety model
-
-The server launches even when gates are absent, so Codex can list the tool schemas and receive an actionable blocked response. The base gates are:
+Base gates:
 
 ```text
 HERMES_GPT_ENABLE_CODEX=1
 HERMES_GPT_ENABLE_MCP=1
 ```
 
-Individual feature gates are `HERMES_GPT_ENABLE_VISION=1`, `HERMES_GPT_ENABLE_WEB=1`, `HERMES_GPT_ENABLE_CRON=1`, and `HERMES_GPT_ENABLE_DIAGNOSTICS=1`.
-
-Every persistent action is dry-run by default. Direct skill or cron writes require the base/feature gates plus `HERMES_GPT_ALLOW_WRITE=1` and the relevant `HERMES_GPT_ALLOW_SKILL_WRITE=1` or `HERMES_GPT_ALLOW_CRON_WRITE=1`; existing Hermes Operator Mode policy and direct-apply gates remain in force too.
-
-Local image paths resolve symlinks, must remain under an explicit `project_root` (or `HERMES_GPT_CODEX_ALLOWED_ROOTS`), and reject secret paths and unsupported types. Web extraction accepts only public HTTP(S) URLs; it blocks file URLs, localhost, private/loopback/link-local/reserved IPs, and metadata targets unless the explicit private-network override is set. Returned text is redacted for common API keys, provider/GitHub tokens, bearer/cookie/session values, and private keys.
-
-## Example Codex prompts
+Optional capabilities use gates such as:
 
 ```text
-Use hermes_plan to inspect this repository and produce a dry-run build plan. Do not edit files.
+HERMES_GPT_ENABLE_VISION=1
+HERMES_GPT_ENABLE_WEB=1
+HERMES_GPT_ENABLE_CRON=1
+HERMES_GPT_ENABLE_DIAGNOSTICS=1
+```
+
+Persistent core-tool writes are dry-run-first. Skill or cron writes require the appropriate write gates in addition to the feature gates and any applicable Operator policy.
+
+### Core-tool safety behavior
+
+- Local image paths resolve symlinks and must stay within an approved project root / allowed root.
+- Secret-looking paths are rejected.
+- Web extraction accepts public HTTP(S) URLs by default and rejects file URLs, localhost, private/loopback/link-local/reserved addresses, and metadata targets unless a specific private-network override is deliberately enabled.
+- Returned structured text is recursively redacted for common secret/token/cookie/private-key patterns.
+- The MCP server launches even when optional gates are absent so tools can return an actionable blocked response rather than disappearing silently.
+
+## Workflow B: Codex CLI as a delegated worker or reviewer
+
+This workflow uses the **normal Hermes GPT Operator server**, not the curated Codex-as-client MCP server.
+
+Tools:
+
+- `hermes_codex_status`
+- `hermes_codex_plan`
+- `hermes_codex_start`
+- `hermes_codex_review_start`
+- `hermes_codex_jobs`
+- `hermes_codex_job_status`
+- `hermes_codex_job_result`
+- `hermes_codex_cancel`
+
+### Required authority for real execution
+
+A real job requires:
+
+- Operator Mode enabled;
+- Operator level `workspace` or acknowledged `owner`;
+- the work directory allowed by Operator policy;
+- `HERMES_GPT_ENABLE_CODEX_RUNNER=1`;
+- `HERMES_GPT_OPERATOR_APPLY_MODE=direct`;
+- `confirm=true`;
+- `dry_run=false`.
+
+For `sandbox=workspace-write`, also set:
+
+```text
+HERMES_GPT_ALLOW_CODEX_WRITE=1
+```
+
+Read-only jobs do not need the write gate.
+
+**The runner path does not require `HERMES_GPT_ENABLE_CODEX` or `HERMES_GPT_ENABLE_MCP`.** Those two gates belong to Workflow A, where Codex itself is the MCP client.
+
+### Codex executable resolution
+
+Hermes GPT resolves a launchable standalone Codex CLI at status and launch time.
+
+To pin a specific executable:
+
+```powershell
+$env:HERMES_GPT_CODEX_EXE="C:\path\to\codex.exe"
+```
+
+The override must resolve to an existing regular file, must not be under a protected `WindowsApps` path, and must pass a `codex --version` probe.
+
+Without an override, Hermes GPT searches `PATH`, skips protected or unlaunchable candidates, and reports the selected path/source through `hermes_codex_status`.
+
+Important status fields include:
+
+- `codex_available`
+- `codex_path`
+- `codex_source`
+- `codex_version` when available
+- `codex_reason` when unavailable
+
+### Work-directory requirements
+
+The work directory must be both:
+
+1. allowed by Hermes GPT Operator policy; and
+2. acceptable to the Codex CLI as a trusted Git workspace.
+
+If Codex reports that the directory is not trusted, use a dedicated intended repository and establish trust there. Do not weaken Hermes GPT's path gates or initialize Git in a broad personal directory merely to satisfy the CLI.
+
+### Runner safety model
+
+Delegated jobs use:
+
+- fixed argument construction;
+- `shell=False`;
+- bounded timeouts;
+- supported sandboxes only (`read-only`, `workspace-write`);
+- bounded/redacted result material;
+- prompt hashes rather than raw prompt persistence in Operator metadata/audit;
+- approved work directories only.
+
+Danger-full-access, approval bypasses, arbitrary command injection, arbitrary executable arguments, and arbitrary extra-directory grants are unsupported.
+
+Codex review jobs are also bounded. In Swarm Orchestration, Codex can be a reviewer but never an implementation owner.
+
+## Windows ChatGPT -> Codex deployment
+
+For a Windows setup where ChatGPT connects to the normal Hermes GPT Operator server through a private boundary and Hermes GPT dispatches explicitly approved jobs to the standalone Codex CLI, use:
+
+[ChatGPT to Codex through Hermes GPT on Windows](windows-chatgpt-codex.md)
+
+That guide uses Workflow B. Do not add the Workflow A MCP-client gates unless you are also installing Hermes GPT into Codex as an MCP server.
+
+## Updating before connector changes
+
+Check first:
+
+```powershell
+hermes-gpt update
+```
+
+Apply explicitly:
+
+```powershell
+hermes-gpt update --apply
+```
+
+Installed-package updates check PyPI. GitHub and PyPI releases can temporarily differ, so a newer GitHub tag does not guarantee that the installed-package updater will offer that version. See [updating](updating.md).
+
+## Example prompts for Workflow A
+
+```text
+Use hermes_plan to inspect this repository and produce a dry-run implementation plan. Do not edit files.
 ```
 
 ```text
@@ -106,9 +246,42 @@ Use hermes_vision_analyze with this project image and keep the answer concise.
 
 ## Troubleshooting
 
-- If every tool says `CODEX_DISABLED`, set both base gates in the process that starts Codex and restart Codex.
-- If `doctor` reports no MCP entry, rerun `hermes-gpt codex install`; use `--project` when you intend the current repository only.
-- If a Codex job fails with `[WinError 5] Access is denied` on Windows, the runner selected a protected `WindowsApps` shim from the desktop app install. Set `HERMES_GPT_CODEX_EXE` to the standalone CLI's absolute path (e.g. `C:\Users\<YOU>\AppData\Roaming\npm\codex.exe`), or reorder `PATH` so the standalone CLI comes before `%LOCALAPPDATA%\Microsoft\WindowsApps`.
-- If a Codex job fails with `Not inside a trusted directory`, the work directory is not trusted by the Codex CLI; run `codex trust` (or `git init`) there first.
-- If vision rejects a path, provide `project_root` and keep the image beneath it; secret files and symlink escapes are intentionally blocked.
-- If page extraction rejects a URL, use a public `http` or `https` URL. Local/private address access is intentionally not the default.
+### Every curated MCP tool says `CODEX_DISABLED`
+
+Set both Workflow A base gates in the process that starts Codex and restart Codex:
+
+```text
+HERMES_GPT_ENABLE_CODEX=1
+HERMES_GPT_ENABLE_MCP=1
+```
+
+### `codex doctor` reports no MCP entry
+
+Re-run `hermes-gpt codex install`. Use `--project` only when you want repository-local configuration.
+
+### Runner reports no launchable Codex CLI
+
+Run `hermes_codex_status` and inspect `codex_path`, `codex_source`, and `codex_reason`. Install the standalone CLI or set `HERMES_GPT_CODEX_EXE` to a validated absolute path.
+
+### Windows access-denied errors mention WindowsApps
+
+A protected desktop-app shim is being selected by an old process/configuration or outside Hermes GPT's validated resolver path. Update/restart Hermes GPT, then verify `hermes_codex_status` selects the standalone CLI outside `WindowsApps`.
+
+### Runner says the work directory is not trusted
+
+Use a dedicated Git repository intended for the job and establish Codex trust there. Keep Hermes GPT's allowed-path policy narrow.
+
+### Vision rejects a path
+
+Provide the correct project root and keep the image beneath it. Secret paths and symlink escapes are intentionally blocked.
+
+### Page extraction rejects a URL
+
+Use a public `http` or `https` URL unless a deliberate private-network override is part of your trusted deployment.
+
+## Related docs
+
+- [Documentation map](README.md)
+- [Operator Mode](operator-mode.md)
+- [Windows ChatGPT -> Codex](windows-chatgpt-codex.md)
+- [Updating](updating.md)
