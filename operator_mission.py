@@ -695,7 +695,7 @@ def hermes_mission_cron(hermes_root: Path | None = None, trace_id: str | None = 
                     {
                         "profile": profile,
                         "job_id": str(job.get("id") or "unknown"),
-                        "name": str(job.get("name") or "cron job")[:100],
+                        "name": _sanitize_error(str(job.get("name") or "cron job")[:100]),
                         "schedule": str(job.get("schedule_display") or job.get("schedule") or "?"),
                         "enabled": bool(job.get("enabled", True)),
                         "state": str(job.get("state") or ("scheduled" if job.get("enabled", True) else "paused")),
@@ -824,7 +824,7 @@ def hermes_mission_audit(hermes_root: Path | None = None, trace_id: str | None =
                 "dry_run": bool(rec.get("dry_run", False)),
                 "success": bool(rec.get("success", True)),
                 "changed": bool(rec.get("changed", False)),
-                "summary": _truncate(rec.get("summary"), 300),
+                "summary": _sanitize_error(_truncate(rec.get("summary"), 300)),
                 "error": _sanitize_error(rec.get("error")),
                 "profile": rec.get("profile"),
                 "prompt_len": rec.get("prompt_len"),

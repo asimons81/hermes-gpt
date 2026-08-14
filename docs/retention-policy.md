@@ -10,7 +10,7 @@ Mission Control never returns request dumps, Codex CLI transcripts, raw prompts,
 ## Retention windows
 
 - Request dumps (`request_dump_*.json`): retain at most 7 days from file modification time. They are diagnostic-only and may contain raw request bodies.
-- Codex transcripts and job artifacts: retain at most 14 days after terminal job completion. Keep only bounded job metadata required for operational status.
+- Codex transcripts and job artifacts: retain at most 30 days after terminal job completion. `operator_codex` enforces this automatically (`RETENTION_DAYS=30`) during reconciliation; keep only bounded job metadata required for operational status.
 - M2 swarm worktrees: retain at most 7 days after a workflow reaches a terminal state and its declared artifacts are copied to the owning repository or attached to its Kanban card.
 - M2 verdict JSON/workflow records: retain at most 30 days after terminal state. Records must remain bounded and redacted; no transcript or prompt body is permitted.
 - Failed/abandoned workflow records: apply the same windows from the last state transition; do not preserve them indefinitely for debugging.

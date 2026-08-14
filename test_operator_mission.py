@@ -667,4 +667,63 @@ def test_free_text_pii_strip_removes_contact_handles_and_name_patterns():
     assert "[redacted-email]" in safe
     assert "[redacted-phone]" in safe
     assert "[redacted-username]" in safe
-    assert "[redacted-name]" in safe
+
+
+def test_pii_strip_applied_across_cron_audit_failures_surfaces(hermes_root):
+    """C3: raw names/emails/phones/usernames must not reach any Mission Control
+    response through free-text fields on the cron, audit, or failures surfaces
+    (and therefore neither through the overview, which compacts them)."""
+    # Seed a cron job whose name and last_error carry PII.
+    cron_dir = hermes_root / "cron"
+    jobs = json.loads((cron_dir / "jobs.json").read_text(encoding="utf-8"))
+    jobs["jobs"].append(
+        {
+            "id": "job-pii",
+            "name": "Jane Doe contact",
+            "schedule_display": "0 6 * * *",
+            "enabled": True,
+            "last_status": "failed",
+            "last_error": "boom for jane.doe@example.com @janedoe +1 (555) 010-9999",
+            "deliver": "local",
+        }
+    )
+    (cron_dir / "jobs.json").write_text(json.dumps(jobs), encoding="utf-8")
+
+    # Seed an audit record with PII in summary and error. audit_record stores
+    # truncated-but-raw text; the read-time sanitizer is the enforcement point.
+    op.audit_record(
+        tool="hermes_mission_profiles_tool",
+        level="mission",
+        apply_mode="read_only",
+        dry_run=True,
+        success=True,
+        changed=False,
+        summary="contacted Jane Doe at jane.doe@example.com",
+        error="phone +1 (555) 010-9999 for @janedoe failed",
+        profile="hermes-dev",
+    )
+
+    # Seed a kanban run whose error carries PII (failures surface).
+    boards = hermes_root / "kanban" / "boards"
+    _make_kanban_board(
+        boards,
+        "board-pii",
+        [{"task_id": "t-pii", "assignee": "hermes-dev", "status": "failed", "outcome": "failed",
+          "error": "email jane.doe@example.com user @janedoe"}],
+    )
+    mission._cache_clear()
+
+    cron = _run("hermes_mission_cron_tool", hermes_root)
+    audit = _run("hermes_mission_audit_tool", hermes_root)
+    failures = _run("hermes_mission_failures_tool", hermes_root)
+    overview = _run("hermes_mission_overview_tool", hermes_root)
+
+    raw = json.dumps([cron, audit, failures, overview])
+    assert "jane.doe@example.com" not in raw
+    assert "Jane Doe" not in raw
+    assert "010-9999" not in raw
+    assert "@janedoe" not in raw
+    assert "[redacted-email]" in raw
+    assert "[redacted-phone]" in raw
+    assert "[redacted-username]" in raw
+    assert "[redacted-name]" in raw
