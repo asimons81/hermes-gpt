@@ -300,7 +300,7 @@ def test_define_sha_is_stable(hermes_root):
 
 
 def test_define_rejects_denied_workspace(hermes_root):
-    c = _contract(allowed_scope={"workspaces": ["/home/tony/.ssh"], "profiles": ["hermes-dev"]})
+    c = _contract(allowed_scope={"workspaces": ["/home/user/.ssh"], "profiles": ["hermes-dev"]})
     out = _run_define(c, hermes_root)
     assert out["success"] is False
     assert out["code"] == "CONTRACT_DENIED"
@@ -310,7 +310,7 @@ def test_define_rejects_denied_artifact(hermes_root):
     ws = hermes_root.parent / "ws"
     c = _contract_for_ws(
         ws,
-        expected_artifacts=[{"path": "/home/tony/.ssh/id_rsa", "must_exist": True, "min_bytes": 1}],
+        expected_artifacts=[{"path": "/home/user/.ssh/id_rsa", "must_exist": True, "min_bytes": 1}],
     )
     out = _run_define(c, hermes_root)
     assert out["success"] is False

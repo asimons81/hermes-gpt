@@ -1,7 +1,6 @@
 """Swarm Orchestration engine for hermes-gpt v0.6 (M2).
 
-Implements the approved Swarm Orchestration design
-(``docs/design/v0.6-swarm-orchestration.md``, M2): a workflow engine that
+Implements the approved Swarm Orchestration design (v0.6 M2): a workflow engine that
 runs the canonical multi-stage agent workflow — research -> architecture ->
 parallel implementation/tests/docs -> integration review -> Codex review ->
 acceptance validation -> human approval — across Hermes profiles, delegated

@@ -1,8 +1,23 @@
 include README.md
 include pyproject.toml
 include CHANGELOG.md
-recursive-include docs *.md
+# Public-safe docs only. Internal counsel/design/release-planning packets
+# (docs/design/*, docs/releases/*) are intentionally NOT distributed.
+include docs/codex.md
+include docs/operator-mode.md
+include docs/release-notes-v0.2.0.md
+include docs/release-notes-v0.3.0.md
+include docs/release-notes-v0.4.0.md
+include docs/release-notes-v0.5.0b1.md
+include docs/release-notes-v0.5.0b2.md
+include docs/release-notes-v0.5.0.md
+include docs/release-notes-v0.6.0.md
+include docs/retention-policy.md
+include docs/updating.md
+include docs/windows-chatgpt-codex.md
 recursive-include examples *.ps1
+prune docs/design
+prune docs/releases
 prune logs
 prune dist
 prune build

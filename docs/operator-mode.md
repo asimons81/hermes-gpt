@@ -237,8 +237,8 @@ never needs `direct` apply mode.
 
 Work Contracts (`operator_contract.py`) add a structured work-order layer on top
 of Mission Control: declarative `hermes.work-contract/v1` documents whose
-completion is verified against **observed** state, not a worker's claim (design
-`docs/design/v0.6-work-contracts.md`).
+completion is verified against **observed** state, not a worker's claim (see the
+v0.6 Work Contracts design document).
 
 Tools:
 
@@ -278,8 +278,8 @@ ever written to the audit log or the surface.
 
 Swarm Orchestration (`operator_swarm.py` + `operator_swarm_workflows.py`) is a
 workflow engine on top of Mission Control (M0) and Work Contracts (M1): a
-declarative, validated DAG of stages (design
-`docs/design/v0.6-swarm-orchestration.md`). The canonical shape is
+declarative, validated DAG of stages (see the v0.6 Swarm Orchestration design
+document). The canonical shape is
 
 ```
 research → architecture → (implementation / tests / docs in parallel)

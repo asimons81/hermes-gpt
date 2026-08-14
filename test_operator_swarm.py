@@ -5,7 +5,7 @@ all tests run against a temp ``hermes_root`` fixture — never production
 data. ``Path.home`` is patched to the temp root so mission sources resolve
 inside the fixture.
 
-Covers the design test plan (docs/design/v0.6-swarm-orchestration.md
+Covers the design test plan (v0.6 Swarm Orchestration design
 §12.4):
 
 1. Workflow DAG validation (canonical validates; cyclic DAG, over-cap,

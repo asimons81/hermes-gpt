@@ -1,7 +1,7 @@
 """Outcome / Work Contracts for hermes-gpt v0.6 (M1).
 
-Implements the approved Work Contracts design (``docs/design/v0.6-work-contracts.md``,
-M1 on ``feat/m1-work-contracts``): structured work orders whose objective, assigned
+Implements the approved Work Contracts design (v0.6 M1,
+feat/m1-work-contracts): structured work orders whose objective, assigned
 agent/profile, allowed scope, forbidden actions, expected artifacts, tests, review
 requirements, and completion criteria are declared up front, and whose completion is
 verified against **observed** Mission Control state (run/outcome/artifacts) rather

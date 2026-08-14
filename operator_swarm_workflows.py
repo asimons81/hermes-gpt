@@ -3,7 +3,7 @@
 Holds the validated stage DAGs the swarm engine ships: the canonical
 research -> architecture -> (implementation/tests/docs parallel) ->
 integration review -> Codex review -> acceptance validation -> human
-approval shape from ``docs/design/v0.6-swarm-orchestration.md`` §5.1.
+approval shape from the v0.6 Swarm Orchestration design §5.1.
 
 The engine (``operator_swarm.py``) is DAG-generic: any workflow document
 that passes ``hermes_swarm_workflow_validate`` may run. This module is the

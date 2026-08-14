@@ -6,9 +6,9 @@ agents, Codex jobs, cron activity, delegated work, failures, pending approvals,
 health, vault, usage, and the operator audit trail) exposed to trusted clients
 (ChatGPT first).
 
-Design contract: ``docs/design/v0.6-mission-control.md`` (M0). The hard
-constraints from ``docs/releases/v0.6-data-risk-review.md`` (P0-1..P0-3) and
-``docs/releases/v0.6-plan.md`` §4.1 are enforced here:
+Design contract: v0.6 Mission Control design (M0). The hard
+constraints from the v0.6 data-risk review (P0-1..P0-3) and the
+v0.6 plan §4.1 are enforced here:
 
 - Read-only by construction: every SQLite store is opened ``file:...?mode=ro``;
   no write / dry-run / apply arguments; no mutating shell calls.
