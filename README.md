@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.6.0 - ChatGPT for Hermes Agent](assets/hermes-gpt-v0.6.0-readme-hero.jpg)
+![Hermes GPT v0.7.0 - Flight Deck: Review Evidence, Event History, and Encrypted Tokens](assets/hermes-gpt-v0.7.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
