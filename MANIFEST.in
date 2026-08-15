@@ -6,6 +6,8 @@ include CHANGELOG.md
 include docs/README.md
 include docs/codex.md
 include docs/operator-mode.md
+include docs/mcp-compatibility.md
+include docs/oauth.md
 include docs/release-notes-v0.2.0.md
 include docs/release-notes-v0.3.0.md
 include docs/release-notes-v0.4.0.md

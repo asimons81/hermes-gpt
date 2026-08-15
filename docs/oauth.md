@@ -92,11 +92,23 @@ ChatGPT may add `openid` to the authorization request. `offline_access` is requi
 An authorization-code exchange returns an access token with `expires_in=3600`. If `offline_access` was granted, it also returns a refresh token. A successful refresh returns a new access token and rotates the refresh token; replaying the old refresh token fails with `invalid_grant`.
 
 Authorization codes are short-lived signed values. Only used-code replay state,
-access tokens, and refresh tokens are held in process memory. Restarting Hermes
-GPT invalidates all issued credentials and requires the connector to authorize
-again. This avoids introducing a persistent plaintext credential store. Durable
-encrypted token storage and explicit revocation administration are separate
-future features.
+access tokens, and refresh tokens are held in process memory. Since v0.7,
+issued access and refresh tokens are also persisted to an **encrypted durable
+token store** so a server restart does not invalidate credentials:
+
+- envelope: `<hermes_data>/secrets/hermes_gpt_tokens.json` (0600), AES-256-GCM;
+- key management precedence: OS keyring (`keyring` lib) → key file
+  `<hermes_data>/secrets/hermes_gpt_token_key` (0600, created on first use) →
+  env `HERMES_GPT_TOKEN_MASTER_KEY` (CI/test only, weakest — documented);
+- no token material is ever written to the audit log or any MCP response;
+  `hermes_oauth_status` reports presence/expiry only;
+- explicit revocation: `hermes_oauth_revoke` (owner + direct + confirm)
+  deletes the envelope and optionally rotates the master key.
+
+The durable store is **subject to legal review before shipping** (ADR-001,
+risk R4). On hosts without a keyring service the key-file fallback keeps the
+key beside the ciphertext under the same 0600 directory; treat that directory
+as secret-bearing.
 
 ## Static bearer alternative
 

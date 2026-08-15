@@ -263,6 +263,7 @@ DEFAULT_DENIED_DIR_NAMES: frozenset[str] = frozenset(
         ".docker",
         ".azure",
         "vault",
+        "secrets",
         "mcp-tokens",
         "pairing",
         ".config",

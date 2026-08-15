@@ -10,6 +10,7 @@ import secrets
 import time
 import urllib.parse
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from starlette.requests import Request
@@ -34,6 +35,31 @@ _PKCE_VALUE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 _CLIENT_SECRET = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 _BASE64URL = re.compile(r"^[A-Za-z0-9_-]+$")
 _NONCE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+
+# Optional persistence hook (v0.7 S5). server.py installs it so every token
+# issuance/refresh persists through token_store without oauth_auth depending
+# on a concrete hermes_root. Never raises; token material never logged.
+_persist_hook: Any | None = None
+
+
+def set_persist_hook(hook: Any | None) -> None:
+    """Install (or clear) the durable-token persistence hook.
+
+    The hook receives ``(state, kind)`` where kind is one of
+    ``authorization_code`` | ``refresh`` and returns a bounded summary.
+    """
+    global _persist_hook
+    _persist_hook = hook
+
+
+def _run_persist_hook(state: "OAuthState", kind: str) -> None:
+    if _persist_hook is None:
+        return
+    try:
+        _persist_hook(state, kind)
+    except Exception:
+        # Persistence must never break the token exchange path.
+        pass
 
 
 def _base64url_encode(value: bytes) -> str:
@@ -283,6 +309,7 @@ class OAuthState:
         self.access_tokens[access_value] = access_item
         if refresh_item is not None:
             self.refresh_tokens[refresh_value] = refresh_item
+        _run_persist_hook(self, "authorization_code")
         return response
 
     def exchange_refresh_token(
@@ -314,6 +341,7 @@ class OAuthState:
         self.refresh_tokens.pop(refresh_token, None)
         self.refresh_tokens[rotated_value] = rotated_item
         self.access_tokens[access_value] = access_item
+        _run_persist_hook(self, "refresh")
         return {
             "access_token": access_value,
             "token_type": "Bearer",
@@ -332,6 +360,47 @@ class OAuthState:
             and item.get("expires_at", 0) > time.time()
             and item.get("resource") == self.config.resource
         )
+
+    # ------------------------------------------------------------------
+    # Durable token persistence (v0.7 S5, ADR-001). Tokens are persisted
+    # through token_store (AES-256-GCM envelope); no token material is
+    # ever written to the audit log or returned on surfaces.
+    # ------------------------------------------------------------------
+
+    def persist_tokens(self, hermes_root: Path | None = None) -> dict[str, Any]:
+        """Encrypt + persist the current access/refresh token stores."""
+        import token_store
+
+        bundle: dict[str, Any] = {}
+        for kind, store in (("access_tokens", self.access_tokens), ("refresh_tokens", self.refresh_tokens)):
+            bundle[kind] = {
+                value: item
+                for value, item in store.items()
+                if item.get("expires_at", 0) > time.time()
+            }
+        if not hermes_root:
+            hermes_root = Path.home() / ".hermes"
+        return token_store.save_tokens(hermes_root, bundle)
+
+    def restore_tokens(self, hermes_root: Path | None = None) -> dict[str, Any]:
+        """Load + decrypt persisted tokens into the in-memory stores.
+
+        Returns a bounded summary; never exposes token material.
+        """
+        import token_store
+
+        if not hermes_root:
+            hermes_root = Path.home() / ".hermes"
+        bundle = token_store.load_tokens(hermes_root)
+        if not bundle:
+            return {"restored": 0, "present": False}
+        restored = 0
+        for kind, store in (("access_tokens", self.access_tokens), ("refresh_tokens", self.refresh_tokens)):
+            for value, item in (bundle.get(kind) or {}).items():
+                if isinstance(item, dict) and item.get("expires_at", 0) > time.time():
+                    store[value] = item
+                    restored += 1
+        return {"restored": restored, "present": True}
 
 
 def config_from_env() -> OAuthConfig | None:

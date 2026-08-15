@@ -170,3 +170,6 @@ def test_sdist_does_not_ship_internal_docs(built_artifacts):
     assert any("docs/retention-policy.md" in n for n in names), (
         "sdist missing public retention policy"
     )
+    assert any("docs/mcp-compatibility.md" in n for n in names), (
+        "sdist missing public MCP compatibility manifest"
+    )
