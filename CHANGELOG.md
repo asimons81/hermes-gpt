@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added an opt-in authenticated remote boundary: static bearer compatibility or
+  a single-confidential-client OAuth authorization-code flow with optional PKCE
+  S256, stateless signed authorization codes, bounded memory-backed replay and
+  token state, one-hour access tokens, 30-day
+  rotating refresh tokens, replay/client/scope/resource validation, explicit
+  direct-TLS or loopback trusted-proxy enforcement, and ChatGPT-compatible
+  streamable-HTTP request normalization.
+
 ## 0.6.0 - 2026-08-13
 
 - Added the v0.6 Mission Control, Work Contracts, and Swarm Orchestration surfaces with bounded, audited, fail-closed operator controls.
