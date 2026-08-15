@@ -871,9 +871,14 @@ def hermes_cron_status(profile: str = "default") -> str:
     return op_cron.hermes_cron_status(profile=profile, hermes_root=_default_hermes_root())
 
 
-def hermes_cron_run(profile: str = "default", job_id: str = "", dry_run: bool = True) -> str:
+def hermes_cron_run(
+    profile: str = "default",
+    job_id: str = "",
+    dry_run: bool = True,
+    timeout: int = 1800,
+) -> str:
     return op_cron.hermes_cron_run(
-        profile=profile, job_id=job_id, dry_run=dry_run,
+        profile=profile, job_id=job_id, dry_run=dry_run, timeout=timeout,
         hermes_root=_default_hermes_root(),
     )
 
