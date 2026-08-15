@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#030303">
   <meta property="og:title" content="Hermes GPT v0.6.0 — Mission Control, Work Contracts, and Swarms">
   <meta property="og:description" content="Read-only Mission Control, observed-state work contracts, and bounded swarm workflows for Hermes Agent via MCP.">
-  <meta property="og:image" content="./assets/hermes-gpt-v0.5.0-two-way-codex-bridge.png">
+  <meta property="og:image" content="./assets/hermes-gpt-v0.6.0-readme-hero.jpg">
   <meta name="twitter:card" content="summary_large_image">
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -83,7 +83,7 @@
         <div class="double-bezel-outer">
           <div class="double-bezel-inner">
             <figure class="brand-image-wrapper">
-              <img src="./assets/hermes-gpt-v0.5.0-two-way-codex-bridge.png" alt="Hermes GPT v0.5.0 — Two-Way Codex Bridge: Hermes Agent and Codex connected through a bidirectional data channel">
+              <img src="./assets/hermes-gpt-v0.6.0-readme-hero.jpg" alt="Hermes GPT v0.6.0 — ChatGPT for Hermes Agent: Mission Control, Work Contracts, and Swarms connecting ChatGPT to the Hermes Agent Fleet">
             </figure>
           </div>
         </div>
@@ -409,6 +409,16 @@ python server.py</code></pre>
       </div>
 
       <div class="release-list">
+        <div class="release-item">
+          <div class="release-meta">
+            <span class="rel-version">v0.6.0</span>
+            <span class="rel-date">2026-08-14</span>
+          </div>
+          <div class="release-content">
+            <h4>Mission Control, Work Contracts & Swarms</h4>
+            <p>Added <code>hermes_mission_*</code> read-only Mission Control (deny-by-default, audited, PII-stripped fleet view), fail-closed <code>hermes_contract_*</code> Work Contracts that validate completion from observed state rather than worker self-report, and bounded <code>hermes_swarm_*</code> DAG-validated orchestration with capped scheduling and explicit ownership gates. Codex is never an implementation owner and receives only bounded verdict material. Documented retention windows and auto-cleanup for Codex job artifacts.</p>
+          </div>
+        </div>
         <div class="release-item">
           <div class="release-meta">
             <span class="rel-version">v0.5.0</span>
