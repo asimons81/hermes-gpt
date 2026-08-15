@@ -1,59 +1,25 @@
-## Two-Way Codex Bridge
+# Hermes GPT v0.6.0
 
-Hermes GPT v0.5.0 connects Hermes Agent and Codex in both directions while keeping the local-first, dry-run-first safety model.
+Hermes GPT v0.6.0 adds Mission Control, observed-state Work Contracts, and bounded Swarm Orchestration on top of the existing local-first, dry-run-first safety model.
 
-### Codex → Hermes (Operator toolset)
+## Mission Control (read-only)
 
-Codex can operate Hermes through an opt-in Operator control plane alongside the default `core` toolset:
+The `hermes_mission_*` surface gives a bounded, audited, read-only operational view of the Hermes deployment for trusted MCP clients. It is deny-by-default, never mutates state, and excludes raw messages, prompts, request dumps, transcripts, memory bodies, and secrets.
 
-```powershell
-hermes-gpt codex install --toolset core
-hermes-gpt codex doctor
-```
+Free-text failure, audit, cron, and delegation fields receive a conservative PII-strip pass (emails, phone-like numbers, `@` usernames, identity labels, and personal-name patterns) before they can reach a client response.
 
-```powershell
-hermes-gpt codex install --toolset operator --refresh
-hermes-gpt codex doctor
-```
+## Work Contracts (fail-closed)
 
-The Operator toolset exposes diagnostics, cron, skills, non-secret config/environment operations, and gateway controls. It deliberately excludes workspace, git, raw command, Owner patch, and Owner write tools. Existing Operator level and apply gates remain authoritative.
+`hermes_contract_*` defines, dispatches, validates, and reports declarative work contracts from observed state rather than worker self-report. Validation rejects false "done" claims (S2). Retry selection is deterministic and forbidden-action audit checks are scoped to the contract's task identity.
 
-### Hermes GPT → Codex (Async jobs)
+## Swarm Orchestration (bounded)
 
-Trusted Hermes GPT clients can plan, start, list, poll, read, and cancel asynchronous Codex tasks and reviews with `hermes_codex_*` tools. Required execution posture:
+`hermes_swarm_*` runs bounded, DAG-validated workflows on top of Work Contracts with capped scheduling, isolated worktree plans, explicit ownership gates, and Codex verdict constraints. Codex is never an implementation owner and receives only bounded verdict material.
 
-```text
-HERMES_GPT_OPERATOR_ENABLED=1
-HERMES_GPT_OPERATOR_LEVEL=workspace
-HERMES_GPT_OPERATOR_APPLY_MODE=direct
-HERMES_GPT_OPERATOR_ALLOWED_PATHS=<approved roots>
-HERMES_GPT_ENABLE_CODEX_RUNNER=1
-HERMES_GPT_ALLOW_CODEX_WRITE=1  # only for workspace-write
-```
+## Retention
 
-### Runner safety
+Request dumps, Codex transcripts/artifacts, M2 worktrees, and workflow/verdict records have documented retention windows and a maintainer-operated cleanup procedure (see `docs/retention-policy.md`). Codex job artifacts are auto-cleaned after 30 days.
 
-- Fixed argv, `shell=False`, bounded timeouts, approved work directories
-- Only `read-only` or `workspace-write` sandboxes
-- Danger-full-access, approval bypasses, arbitrary commands unsupported
-- Raw prompts never stored — length and SHA-256 only
-- Output recursively redacted and bounded
-- Restart reconciliation — orphaned PIDs are marked, not signalled
-- 30-day retention cleanup
+## Security posture
 
-### Core toolset remains backward compatible
-
-All existing core tools (`hermes_status`, `hermes_capabilities`, `hermes_plan`, `hermes_vision_analyze`, `hermes_web_search`, `hermes_extract_page`, `hermes_cron_plan`, `hermes_cron_create`, `hermes_author_skill`, `hermes_gateway_diagnostics`) retain their established schemas.
-
-### Other improvements
-
-- `hermes-gpt update` — check-first, safe fast-forward updates for clean Git checkouts
-- Version resolution consolidated in `versioning.py`
-- Toolset-aware Codex connector install with backup-first `--refresh`
-- Windows/Linux CI across Python 3.10, 3.11, and 3.12
-- Trusted PyPI publishing after successful CI
-- Updated Codex, Operator, and update documentation
-
-### Security posture
-
-Hermes GPT remains a standalone local MCP sidecar. Operator access is opt-in. Mutations are dry-run-first and explicitly gated. Codex runner jobs do not bypass Codex permissions. Workspace-write requires its dedicated write gate. Danger-full-access and bypass flags are impossible through the runner. Public unauthenticated hosting remains unsupported.
+Hermes GPT remains a standalone local MCP sidecar. Operator access is opt-in, mutations are dry-run-first and explicitly gated, and the Codex runner uses fixed argv, `shell=False`, bounded timeouts, and approved work directories. Danger-full-access, approval bypasses, and arbitrary commands are unsupported. Public unauthenticated hosting remains unsupported.

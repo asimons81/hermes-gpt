@@ -1,10 +1,12 @@
 # hermes-gpt feasibility
 
+> **Historical probe, not current setup authority.** This file records the environment inspected on 2026-06-18 before the initial sidecar implementation. Machine-specific paths, Hermes Agent versions, signatures, and capability observations below may no longer match a current installation. For current docs and source-of-truth rules, see [`docs/README.md`](docs/README.md).
+
 Date: 2026-06-18
 
 ## Decision
 
-Feasibility passed. The required capabilities are available in this environment, so the sidecar implementation was built.
+Feasibility passed. The required capabilities were available in the probed environment, so the sidecar implementation was built.
 
 ## Probe scope
 
@@ -64,7 +66,7 @@ The Hermes source root and bundled venv site-packages were added to `sys.path` f
 
 ## Build decision
 
-All required capabilities passed:
+All required capabilities passed in the probed environment:
 
 - Hermes root detection
 - FastMCP import
@@ -78,4 +80,4 @@ Optional capabilities also passed:
 - session DB import
 - session search via `SessionDB.search_messages`
 
-The server was built under `~/hermes-gpt/`.
+The server was then built under `~/hermes-gpt/`.

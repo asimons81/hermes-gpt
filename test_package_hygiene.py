@@ -1,0 +1,172 @@
+"""Package-content hygiene regression tests.
+
+Builds the wheel + sdist and asserts the release-blocking hygiene guard
+(tools/check_package_hygiene.py) reports NO forbidden private/operational
+patterns (absolute /home paths, RFC1918/Tailscale IPs, machine hostnames,
+live profile counts / operational metrics) in either artifact.
+
+Also unit-checks the scanner's pattern logic on synthetic content so a
+regression in the guard itself is caught without a full build.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent
+GUARD = REPO_ROOT / "tools" / "check_package_hygiene.py"
+
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+import check_package_hygiene as guard  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for the pattern layer (fast, no build required)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/home/tony/projects/nexusOS",
+        "workdir: /home/asimo/.hermes",
+        "path=/home/realuser/.ssh/id_rsa",
+    ],
+)
+def test_scan_flags_machine_home_paths(text):
+    findings = guard.scan_text(text)
+    assert any(name == "absolute_home_path" for name, _ in findings), findings
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/home/user/.env",  # explicit placeholder
+        "/home/example/projects",  # explicit placeholder
+        "C:\\Users\\Alice\\hermes\\server.py",  # placeholder Windows path
+        "bind 127.0.0.1:4750",  # generic localhost
+        "localhost:4750/mcp",
+    ],
+)
+def test_scan_allows_placeholders_and_localhost(text):
+    findings = guard.scan_text(text)
+    assert findings == [], findings
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "http://192.168.4.41:8765/",
+        "10.0.0.8",
+        "172.16.5.5",
+        "172.31.255.255",
+        "100.64.0.1",
+        "100.127.255.255",
+    ],
+)
+def test_scan_flags_private_and_tailscale_ips(text):
+    findings = guard.scan_text(text)
+    assert any(name in ("rfc1918_ip", "tailscale_ip") for name, _ in findings), findings
+
+
+@pytest.mark.parametrize("text", ["TONY-GAMING-TOP", "Hermex"])
+def test_scan_flags_machine_hostnames(text):
+    findings = guard.scan_text(text)
+    assert any(name == "machine_hostname" for name, _ in findings), findings
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "serves 9 profiles",
+        "operator audit log records 2,491 actions",
+        "1,453 sessions, 182,510 messages",
+        "37 async delegations",
+        "426 fleet work orders",
+        "191 dispatches",
+        "10 credentials",
+        "919 system prompts",
+    ],
+)
+def test_scan_flags_operational_metrics(text):
+    findings = guard.scan_text(text)
+    assert any(name == "operational_metric" for name, _ in findings), findings
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the server binds 127.0.0.1 by default",
+        "supported sizes: 64 KB / 128 KB / 256 KB / 512 KB",
+        "runs on Python 3.10+",
+        "no profiles configured yet",
+        "zero records in store",
+        "version 0.6.0",
+        "mcp[cli]>=1.0,<2",
+    ],
+)
+def test_scan_does_not_false_positive_on_public_content(text):
+    findings = guard.scan_text(text)
+    assert findings == [], findings
+
+
+# ---------------------------------------------------------------------------
+# Build + guard integration (real wheel and sdist)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def built_artifacts(tmp_path_factory):
+    """Build wheel + sdist once per module and return the artifact paths."""
+    outdir = tmp_path_factory.mktemp("dist")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "build", "--outdir", str(outdir)],
+            cwd=str(REPO_ROOT),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        pytest.skip(f"python -m build unavailable or failed: {exc}")
+    artifacts = sorted(outdir.glob("*.whl")) + sorted(outdir.glob("*.tar.gz"))
+    assert artifacts, "build produced no artifacts"
+    return artifacts
+
+
+def test_wheel_and_sdist_are_hygiene_clean(built_artifacts):
+    """The release-blocking guard must pass on both built artifacts."""
+    result = subprocess.run(
+        [sys.executable, str(GUARD), *[str(a) for a in built_artifacts]],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"package hygiene guard failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    assert "CLEAN" in result.stdout
+
+
+def test_sdist_does_not_ship_internal_docs(built_artifacts):
+    """Internal counsel/design packets must not be distributed."""
+    import tarfile
+
+    sdists = [a for a in built_artifacts if a.name.endswith(".tar.gz")]
+    assert sdists, "no sdist built"
+    with tarfile.open(sdists[0], "r:gz") as tf:
+        names = tf.getnames()
+    assert not any("docs/design/" in n or "docs/releases/" in n for n in names), (
+        "sdist contains internal docs/design or docs/releases packets"
+    )
+    assert any("docs/release-notes-v0.6.0.md" in n for n in names), (
+        "sdist missing public release notes"
+    )
+    assert any("docs/retention-policy.md" in n for n in names), (
+        "sdist missing public retention policy"
+    )

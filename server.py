@@ -21,6 +21,9 @@ import operator_diagnostics as op_diagnostics
 import operator_codex as op_codex
 import operator_fleet as op_fleet
 import operator_session as op_session
+import operator_mission as op_mission
+import operator_contract as op_contract
+import operator_swarm as op_swarm
 from versioning import VERSION
 
 
@@ -1350,6 +1353,22 @@ def hermes_operator_status() -> str:
             "hermes_fleet_task",
             "hermes_fleet_result",
             "hermes_fleet_authority_drift",
+            "hermes_mission_overview",
+            "hermes_mission_health",
+            "hermes_mission_profiles",
+            "hermes_mission_fleet",
+            "hermes_mission_codex",
+            "hermes_mission_cron",
+            "hermes_mission_delegations",
+            "hermes_mission_failures",
+            "hermes_mission_approvals",
+            "hermes_mission_vault",
+            "hermes_mission_usage",
+            "hermes_mission_audit",
+            "hermes_contract_define",
+            "hermes_contract_dispatch",
+            "hermes_contract_validate",
+            "hermes_contract_status",
         ]
         result = {
             "success": True,
@@ -1811,6 +1830,152 @@ def hermes_codex_cancel(job_id: str, confirm: bool = False, dry_run: bool = True
     return op_codex.hermes_codex_cancel(job_id, confirm, dry_run, _default_hermes_root())
 
 
+# --- Mission Control (v0.6 M0, read-only) --------------------------------
+
+
+def hermes_mission_overview(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_overview_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_health(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_health_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_cron(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_cron_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_fleet(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_fleet_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_audit(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_audit_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_profiles(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_profiles_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_delegations(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_delegations_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_failures(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_failures_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_approvals(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_approvals_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_codex(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_codex_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_vault(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_vault_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+def hermes_mission_usage(force_refresh: bool = False) -> str:
+    return op_mission.hermes_mission_usage_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
+
+
+# --- Work Contracts (v0.6 M1) ----------------------------------------------
+
+
+def hermes_contract_define(contract_json: str) -> str:
+    return op_contract.hermes_contract_define(contract_json=contract_json, hermes_root=_default_hermes_root())
+
+
+def hermes_contract_dispatch(
+    contract_json: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+    timeout: int = 30,
+) -> str:
+    return op_contract.hermes_contract_dispatch(
+        contract_json=contract_json,
+        confirm=confirm,
+        dry_run=dry_run,
+        timeout=timeout,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_contract_validate(contract_json: str) -> str:
+    return op_contract.hermes_contract_validate(contract_json=contract_json, hermes_root=_default_hermes_root())
+
+
+def hermes_contract_status(contract_json: str) -> str:
+    return op_contract.hermes_contract_status(contract_json=contract_json, hermes_root=_default_hermes_root())
+
+
+# --- Swarm Orchestration (v0.6 M2) ----------------------------------------
+
+
+def hermes_swarm_workflow_create(workflow_json: str, confirm: bool = False, dry_run: bool = True) -> str:
+    return op_swarm.hermes_swarm_workflow_create(
+        workflow_json=workflow_json,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_swarm_workflow_list() -> str:
+    return op_swarm.hermes_swarm_workflow_list(hermes_root=_default_hermes_root())
+
+
+def hermes_swarm_workflow_status(workflow_id: str) -> str:
+    return op_swarm.hermes_swarm_workflow_status(workflow_id=workflow_id, hermes_root=_default_hermes_root())
+
+
+def hermes_swarm_workflow_validate(workflow_json: str) -> str:
+    return op_swarm.hermes_swarm_workflow_validate(workflow_json=workflow_json, hermes_root=_default_hermes_root())
+
+
+def hermes_swarm_stage_dispatch(
+    workflow_id: str,
+    stage_id: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+    timeout: int = 30,
+) -> str:
+    return op_swarm.hermes_swarm_stage_dispatch(
+        workflow_id=workflow_id,
+        stage_id=stage_id,
+        confirm=confirm,
+        dry_run=dry_run,
+        timeout=timeout,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_swarm_stage_advance(
+    workflow_id: str,
+    stage_id: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    return op_swarm.hermes_swarm_stage_advance(
+        workflow_id=workflow_id,
+        stage_id=stage_id,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_swarm_approve(workflow_id: str, confirm: bool = False, dry_run: bool = True) -> str:
+    return op_swarm.hermes_swarm_approve(
+        workflow_id=workflow_id,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
 def build_server(
     *,
     host: str = "127.0.0.1",
@@ -1892,6 +2057,50 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_cron_pause, meta=tool_meta())
     server.add_tool(hermes_cron_copy, meta=tool_meta())
     server.add_tool(hermes_cron_move, meta=tool_meta())
+
+    # Mission Control (v0.6 M0): read-only operational view. Registered
+    # unconditionally; each surface enforces the per-client allowlist
+    # (HERMES_GPT_MISSION_ALLOWED_SURFACES) and audits every call.
+    for _mission_tool in (
+        hermes_mission_overview,
+        hermes_mission_health,
+        hermes_mission_profiles,
+        hermes_mission_fleet,
+        hermes_mission_codex,
+        hermes_mission_cron,
+        hermes_mission_delegations,
+        hermes_mission_failures,
+        hermes_mission_approvals,
+        hermes_mission_vault,
+        hermes_mission_usage,
+        hermes_mission_audit,
+    ):
+        server.add_tool(_mission_tool, meta=tool_meta())
+
+    # Work Contracts (v0.6 M1): define/dispatch/validate/status. Registered
+    # unconditionally; dispatch enforces workspace level + dry-run-first +
+    # confirm gates; validate enforces D6 test gating internally.
+    for _contract_tool in (
+        hermes_contract_define,
+        hermes_contract_dispatch,
+        hermes_contract_validate,
+        hermes_contract_status,
+    ):
+        server.add_tool(_contract_tool, meta=tool_meta())
+
+    # Swarm Orchestration (v0.6 M2): workflow engine on contracts. Registered
+    # unconditionally; each tool enforces its own level/apply/dry-run gates
+    # and audits every call (D-SW9/D-SW10).
+    for _swarm_tool in (
+        hermes_swarm_workflow_create,
+        hermes_swarm_workflow_list,
+        hermes_swarm_workflow_status,
+        hermes_swarm_workflow_validate,
+        hermes_swarm_stage_dispatch,
+        hermes_swarm_stage_advance,
+        hermes_swarm_approve,
+    ):
+        server.add_tool(_swarm_tool, meta=tool_meta())
 
     # Skills
     server.add_tool(hermes_skill_diff, meta=tool_meta())

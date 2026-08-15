@@ -1,27 +1,43 @@
 # ChatGPT to Codex through Hermes GPT on Windows
 
-This guide describes a Windows deployment in which ChatGPT is the conversational client and Hermes GPT dispatches explicitly approved jobs to the standalone Codex CLI.
+This guide covers one specific deployment path:
 
 ```text
 ChatGPT
-  -> authenticated private tunnel
-  -> Hermes GPT MCP on 127.0.0.1:4750/mcp
+  -> authenticated/private boundary
+  -> normal Hermes GPT Operator MCP on 127.0.0.1:4750/mcp
   -> Hermes Operator policy
   -> standalone Codex CLI
   -> approved Git workspace
 ```
 
-This is an advanced local setup. Hermes Operator Mode is not a sandbox, and an unauthenticated public MCP endpoint is unsafe. Keep the server on loopback, protect the tunnel, restrict the allowed workspace list, and start with read-only Codex jobs.
+This is **Codex CLI as a delegated worker/reviewer**. It is not the separate workflow where Codex itself loads Hermes GPT as an MCP server.
+
+For documentation authority rules, see [docs/README.md](README.md).
+
+## Security posture
+
+This is an advanced local setup.
+
+- Keep Hermes GPT bound to loopback.
+- Put a private or authenticated boundary in front of it for ChatGPT access.
+- Restrict allowed workspaces narrowly.
+- Start with `sandbox=read-only`.
+- Do not enable Owner Mode for an always-on connector.
+- Operator Mode is not an OS sandbox.
+- Public unauthenticated Operator hosting is unsupported.
 
 ## Prerequisites
 
 - Windows 10 or 11
-- Python 3.10 or later and a working Hermes GPT checkout
-- A private tunnel that can forward HTTPS to `http://127.0.0.1:4750`
-- The standalone Codex CLI, installed separately from the Codex or ChatGPT desktop application
-- A dedicated Git repository to use as the approved Codex work directory
+- Python 3.10+
+- Hermes GPT installed or checked out locally
+- Hermes Agent available to the Hermes GPT runtime
+- A private/authenticated HTTPS boundary that forwards to `http://127.0.0.1:4750`
+- The standalone Codex CLI
+- A dedicated Git repository to use as the approved work directory
 
-Install and authenticate the standalone CLI:
+Install and authenticate the standalone Codex CLI:
 
 ```powershell
 npm install -g @openai/codex
@@ -29,61 +45,123 @@ codex login
 codex --version
 ```
 
-The desktop application may remain installed. Confirm that the executable resolved by the Hermes launch environment is the standalone CLI and does not point into `C:\Program Files\WindowsApps`:
+The Codex or ChatGPT desktop application can remain installed. Hermes GPT must resolve a standalone CLI executable that can actually launch.
+
+## 1. Resolve the Codex CLI cleanly
+
+Inspect candidates:
 
 ```powershell
 Get-Command codex -All | Select-Object Source
 ```
 
-On systems with more than one Codex installation, put the standalone CLI directory first in `PATH` in the same process that starts Hermes. Do not rely on an interactive shell's `PATH`, because Task Scheduler can receive a different environment.
-
-## Start Hermes with the required gates
-
-The following example enables real read-only Codex dispatch for one approved workspace. Replace every placeholder before use.
+If multiple installations exist, the safest approach is to pin the standalone CLI explicitly in the environment that launches Hermes GPT:
 
 ```powershell
-$env:HERMES_GPT_ENABLE_SESSION_SEARCH = "1"
+$env:HERMES_GPT_CODEX_EXE="C:\path\to\standalone\codex.exe"
+```
+
+Hermes GPT validates this override before use. The path must:
+
+- be absolute;
+- exist as a regular file;
+- not resolve under protected `WindowsApps`;
+- pass a `codex --version` probe.
+
+Without an override, Hermes GPT searches `PATH` and skips protected or unlaunchable candidates.
+
+Task Scheduler can receive a different `PATH` from an interactive terminal, so verify resolution in the actual launch environment.
+
+## 2. Start Hermes GPT with the runner gates
+
+A minimal real **read-only Codex runner** setup looks like this:
+
+```powershell
 $env:HERMES_GPT_OPERATOR_ENABLED = "1"
 $env:HERMES_GPT_OPERATOR_LEVEL = "workspace"
 $env:HERMES_GPT_OPERATOR_APPLY_MODE = "direct"
 $env:HERMES_GPT_OPERATOR_ALLOWED_PROFILES = "default"
 $env:HERMES_GPT_OPERATOR_ALLOWED_PATHS = "C:\path\to\approved-workspace"
 $env:HERMES_GPT_ENABLE_CODEX_RUNNER = "1"
+$env:HERMES_GPT_CODEX_EXE = "C:\path\to\standalone\codex.exe"
 
 Set-Location -LiteralPath "C:\path\to\hermes-gpt"
 & ".venv\Scripts\python.exe" ".\server.py" --http --host 127.0.0.1 --port 4750
 ```
 
-Leave `HERMES_GPT_ALLOW_CODEX_WRITE` unset while validating the connection. Read-only jobs do not require it. Real job dispatch still requires `confirm=true` and `dry_run=false` on the tool call.
+`HERMES_GPT_CODEX_EXE` is optional if Hermes GPT already resolves the correct standalone CLI from `PATH`.
 
-The approved work directory must be a trusted Git repository. For a new dedicated test directory:
+Leave `HERMES_GPT_ALLOW_CODEX_WRITE` unset while validating the system. It is needed only for `sandbox=workspace-write`.
+
+### Gates you do not need for this path
+
+Do **not** add these merely because Codex is involved:
+
+```text
+HERMES_GPT_ENABLE_CODEX
+HERMES_GPT_ENABLE_MCP
+HERMES_GPT_ENABLE_SESSION_SEARCH
+```
+
+`HERMES_GPT_ENABLE_CODEX` and `HERMES_GPT_ENABLE_MCP` belong to the separate **Codex-as-MCP-client** workflow. Session search is unrelated to launching bounded Codex runner jobs.
+
+Real runner execution still requires `confirm=true` and `dry_run=false` on the job call.
+
+## 3. Prepare the approved workspace
+
+The work directory must satisfy two independent checks:
+
+1. Hermes GPT must allow it through `HERMES_GPT_OPERATOR_ALLOWED_PATHS`.
+2. The Codex CLI must accept it as a trusted Git workspace.
+
+For a new dedicated test repository:
 
 ```powershell
 Set-Location -LiteralPath "C:\path\to\approved-workspace"
 git init
 ```
 
-Do not initialize Git in a broad personal directory merely to satisfy this requirement.
+Do not initialize Git in a broad personal directory merely to satisfy the CLI.
 
-## Connect ChatGPT
+## 4. Connect ChatGPT
 
-ChatGPT cannot connect to the computer's loopback address directly. Forward the local endpoint through an authenticated private tunnel, then configure the ChatGPT connector with:
+ChatGPT cannot directly reach the computer's loopback address.
+
+Forward the local MCP endpoint through your private/authenticated boundary, then configure the connector with the resulting HTTPS endpoint:
 
 ```text
 Protocol: Streaming HTTP
-URL: https://<private-tunnel-host>/mcp
-Authentication: the protection configured for the private tunnel
+URL: https://<private-host>/mcp
+Authentication: the protection configured for that boundary
 ```
 
-Do not enter `http://127.0.0.1:4750/mcp` in ChatGPT. Do not publish an unauthenticated Operator endpoint to the public internet.
+Do not enter `http://127.0.0.1:4750/mcp` as a remote ChatGPT connector URL. Do not expose the Operator endpoint to the public internet without authentication.
 
-If ChatGPT shows an old or incomplete tool list after changing Hermes gates, reconnect or recreate the connector so its schema is refreshed.
+If the client shows an old or incomplete tool list after changing Hermes GPT, restart the intended server process and reconnect/recreate the connector so its MCP schema refreshes.
 
-## Validate the connection
+## 5. Validate policy before running Codex
 
-First ask ChatGPT to call `hermes_operator_policy`. A read-only runner setup should report Operator Mode enabled at `workspace` level, direct apply mode, a narrow allowed-path count, and Owner Mode disabled.
+First call:
 
-Next ask ChatGPT to call `hermes_codex_status`. Expected fields include:
+```text
+hermes_operator_policy
+```
+
+Confirm:
+
+- Operator Mode is enabled;
+- effective level is `workspace`;
+- apply mode is `direct` only because this deployment is intended to execute confirmed jobs;
+- allowed paths are narrow;
+- Owner Mode is not active.
+
+Then call:
+
+```text
+hermes_codex_status
+```
+
+Expected fields include values like:
 
 ```json
 {
@@ -93,11 +171,16 @@ Next ask ChatGPT to call `hermes_codex_status`. Expected fields include:
   "operator_enabled": true,
   "operator_level": "workspace",
   "apply_mode": "direct",
-  "codex_available": true
+  "codex_available": true,
+  "codex_source": "env"
 }
 ```
 
-Finally, start a minimal read-only job:
+Also inspect `codex_path` and `codex_version`. If `codex_available` is false, read `codex_reason` instead of attempting a job.
+
+## 6. Run the first read-only job
+
+Start with a minimal inspection task:
 
 ```text
 Start a Hermes Codex job in <approved-workspace> with sandbox=read-only,
@@ -105,13 +188,28 @@ confirm=true, and dry_run=false. Ask Codex only to report its working
 directory and confirm that it changed no files. Monitor it to completion.
 ```
 
-A successful job completes with return code `0`, reports the approved directory, and makes no file changes.
+A successful validation job should:
 
-## Start automatically without visible consoles
+- run in the approved repository;
+- use the standalone Codex CLI reported by `hermes_codex_status`;
+- complete without write authority;
+- make no file changes.
 
-Task Scheduler can start both the MCP server and the tunnel at logon. A task whose action launches `powershell.exe` directly may display a console even when `-WindowStyle Hidden` is present. A small Windows Script Host wrapper avoids that flash while allowing Task Scheduler to monitor the long-running child process.
+Only after that should you consider `workspace-write` and `HERMES_GPT_ALLOW_CODEX_WRITE=1` for deliberately approved write jobs.
 
-Save the following as `run-powershell-hidden.vbs` in a controlled local directory:
+## 7. Run Codex reviews
+
+Use `hermes_codex_review_start` for bounded review jobs. Review targets are constrained by the runner rather than accepting arbitrary command-line arguments.
+
+In Swarm Orchestration, Codex can provide a review verdict but is never an implementation owner.
+
+## 8. Start automatically without visible consoles
+
+Task Scheduler can start both Hermes GPT and the private tunnel/boundary at logon.
+
+Launching `powershell.exe` directly can flash a console even with `-WindowStyle Hidden`. A small Windows Script Host wrapper can hide the launcher while letting Task Scheduler monitor the process.
+
+Save as `run-powershell-hidden.vbs` in a controlled local directory:
 
 ```vbscript
 Option Explicit
@@ -125,7 +223,7 @@ command = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Fi
 WScript.Quit shell.Run(command, 0, True)
 ```
 
-Use this Task Scheduler action for each long-running PowerShell launcher:
+Task Scheduler action:
 
 ```text
 Program/script: C:\Windows\System32\wscript.exe
@@ -133,38 +231,47 @@ Arguments: "C:\path\to\run-powershell-hidden.vbs" "C:\path\to\launcher.ps1"
 Start in: the launcher's working directory
 ```
 
-Create separate tasks for Hermes and the tunnel. Configure restart-on-failure as appropriate for the machine, and keep logs free of credentials.
+Use separate tasks for Hermes GPT and the tunnel/boundary. Configure restart-on-failure as appropriate and keep logs free of credentials.
 
-## Restart safely
+## 9. Restart safely
 
-Ending a scheduled task can occasionally leave its child `python.exe` running. If a new task run produces fresh startup output but Hermes still behaves like the previous configuration, check the listener before starting another server:
+A stopped scheduled task can occasionally leave a child `python.exe` running. If a new launch appears successful but Hermes GPT still behaves like the previous process, check the listener:
 
 ```powershell
 netstat -ano | Select-String '127.0.0.1:4750'
 ```
 
-Match the listening PID to the old Hermes Python process in Task Manager before ending it. Never terminate an arbitrary Python process. After the verified stale process exits, start the Hermes task again and confirm that exactly one process is listening on port `4750`.
+Match the PID to the known Hermes GPT process before terminating anything. Never kill an arbitrary Python process.
+
+After stopping the verified stale process, restart Hermes GPT and confirm exactly one expected listener owns port `4750`.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Resolution |
 | --- | --- | --- |
-| `CODEX_START_FAILED: [WinError 5] Access is denied` | Hermes found a protected WindowsApps Codex executable | Put the standalone npm Codex directory first in the launcher's `PATH`, restart Hermes, and verify `Get-Command codex -All`. |
-| `codex_available=true` followed by `WinError 5` | The availability check found a binary that cannot be executed by Hermes | Verify the exact executable selected in the scheduled launch environment; it must not resolve into WindowsApps. |
-| `Not inside a trusted directory and --skip-git-repo-check was not specified` | The selected work directory is not a trusted Git repository | Use a dedicated repository or initialize Git in the intended workspace. |
-| New server cannot bind to port `4750` | A stale server still owns the port | Identify the listener PID, confirm that it is the old Hermes Python process, end only that process, and restart the task. |
-| PowerShell consoles appear at logon | The scheduled task launches PowerShell directly | Use the `wscript.exe` wrapper shown above. |
-| ChatGPT shows old tools or gates | The connector schema or server process is stale | Verify the listener, restart Hermes, then reconnect or recreate the ChatGPT connector. |
-| Codex stops authenticating after an update | The standalone CLI credentials or executable path changed | Run `codex login` and `codex --version`, verify executable resolution, and restart Hermes. |
+| `codex_available=false` | No launchable standalone CLI resolved | Inspect `codex_reason`; install Codex or set `HERMES_GPT_CODEX_EXE` to a valid standalone CLI. |
+| Access denied / path mentions `WindowsApps` | Old process, external launcher, or stale config is selecting a protected desktop-app shim | Update/restart Hermes GPT, pin `HERMES_GPT_CODEX_EXE`, and re-check `hermes_codex_status`. |
+| `Not inside a trusted directory...` | Codex does not trust the selected work directory | Use an intended Git repository and establish trust there. |
+| Job returns `POLICY_REFUSED` | Operator level/path gates do not authorize the workdir | Inspect `hermes_operator_policy`; narrow and correct `HERMES_GPT_OPERATOR_ALLOWED_PATHS`. |
+| Job returns runner disabled | `HERMES_GPT_ENABLE_CODEX_RUNNER=1` is missing in the running process | Set it in the actual launch environment and restart Hermes GPT. |
+| Job previews but does not execute | Server/call is still dry-run | For an approved real job, use direct mode plus `confirm=true` and `dry_run=false`. |
+| New server cannot bind port 4750 | Stale server still owns the listener | Identify and verify the listener PID before ending that specific process. |
+| ChatGPT shows old tools/gates | Stale server or cached connector schema | Verify the listener, restart Hermes GPT, then reconnect/recreate the connector. |
 
 ## Security checklist
 
-- Keep Hermes bound to `127.0.0.1`.
-- Require authentication or an equivalent private boundary on the tunnel.
-- Keep `HERMES_GPT_OPERATOR_ALLOWED_PATHS` limited to specific workspaces.
-- Leave `HERMES_GPT_ALLOW_CODEX_WRITE` unset until write jobs are deliberately required.
-- Do not enable Owner Mode for an always-on connector.
-- Use `sandbox=read-only` for initial inspection and validation jobs.
-- Never place tunnel credentials, API keys, or authentication tokens in launch scripts, logs, or documentation.
+- Keep Hermes GPT on `127.0.0.1`.
+- Require a private/authenticated remote boundary.
+- Restrict `HERMES_GPT_OPERATOR_ALLOWED_PATHS` to specific workspaces.
+- Leave `HERMES_GPT_ALLOW_CODEX_WRITE` unset until a write job is deliberately required.
+- Keep Owner Mode off for always-on access.
+- Validate with `sandbox=read-only` first.
+- Pin `HERMES_GPT_CODEX_EXE` when executable ambiguity exists.
+- Never put tunnel credentials, API keys, tokens, or private keys in launch scripts, logs, prompts, or documentation.
 
-See [Hermes GPT for Codex](codex.md) for the Codex-facing MCP connector and runner safety model, and [Operator Mode](operator-mode.md) for policy levels, gates, diagnostics, and recovery.
+## Related docs
+
+- [Documentation map](README.md)
+- [Hermes GPT and Codex](codex.md)
+- [Operator Mode](operator-mode.md)
+- [Updating](updating.md)

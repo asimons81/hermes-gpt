@@ -3,248 +3,69 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.5.0 — Two-Way Codex Bridge](assets/hermes-gpt-v0.5.0-two-way-codex-bridge.png)
+![Hermes GPT v0.6.0 - ChatGPT for Hermes Agent](assets/hermes-gpt-v0.6.0-readme-hero.jpg)
 
-`hermes-gpt` is a standalone MCP sidecar for Hermes Agent. It imports selected local Hermes Agent internals at runtime and exposes them to MCP clients without modifying Hermes Agent source files.
+`hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
-```bash
-pip install hermes-gpt
-```
+## Current status
 
-Or clone from [GitHub](https://github.com/asimons81/hermes-gpt).
+- **Repository / GitHub release:** v0.6.0
+- **Python requirement:** 3.10+
+- **Deployment posture:** local-dev / trusted-machine only
+- **Remote public hosting:** unsupported without a real authenticated private boundary
 
-This is a **local-dev release**.
+> [!IMPORTANT]
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. At the v0.6.0 GitHub release, PyPI still served v0.5.0. Do not assume a PyPI install contains v0.6 features unless the badge reports v0.6.0 or newer.
 
-## v0.5.0 Two-Way Codex Bridge
+For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
 
-v0.5.0 adds a two-way bridge: Codex can opt into Hermes Operator tools, and trusted Hermes GPT clients can delegate asynchronous tasks and reviews to Codex. Updates remain check-first and mutations remain gated and dry-run-first. See [Codex setup](docs/codex.md), [Operator Mode](docs/operator-mode.md), [session history](docs/session-history.md), [session control](docs/session-control.md), [updating](docs/updating.md), and the [v0.5.0 release notes](docs/release-notes-v0.5.0.md).
+## What v0.6.0 adds
 
-### Updating Hermes GPT
+v0.6.0 adds three coordinated control-plane layers on top of the existing Operator and Codex integrations:
 
-```powershell
-hermes-gpt update
-hermes-gpt update --apply
-```
+1. **Mission Control** - bounded, audited, read-only operational views through `hermes_mission_*`.
+2. **Work Contracts** - declarative `hermes_contract_*` work orders whose completion is validated from observed state rather than worker self-report.
+3. **Swarm Orchestration** - bounded `hermes_swarm_*` DAG workflows with explicit ownership, capped concurrency, fail-closed validation, review gates, and final human approval.
 
-The first command only checks. `--apply` fast-forwards a clean checkout on its default branch, or upgrades an installed PyPI package. It never creates merge commits, rebases, downgrades packages, or overwrites tracked local changes.
+See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention policy](docs/retention-policy.md).
 
-## Codex App / Codex CLI Support
+## Choose the path you need
 
-The v0.5.0 core connector is a curated tool surface for planning, local vision analysis, web search/extraction, cron planning, skill drafts, and gateway diagnostics; it does not modify Codex itself or bypass its permissions.
+| Goal | Start here |
+| --- | --- |
+| Understand the repository and current docs | [Documentation map](docs/README.md) |
+| Run Hermes GPT locally | [Local quickstart](#local-quickstart) |
+| Use Codex as an MCP client | [Codex guide](docs/codex.md) |
+| Use ChatGPT or another trusted client to operate Hermes | [Operator Mode](docs/operator-mode.md) |
+| Let ChatGPT dispatch bounded work to the Codex CLI on Windows | [Windows ChatGPT -> Codex guide](docs/windows-chatgpt-codex.md) |
+| Update an install safely | [Updating](docs/updating.md) |
+| Review v0.6 data cleanup rules | [Retention policy](docs/retention-policy.md) |
+| Understand historical implementation decisions | [Design and release artifacts](docs/README.md#historical-and-internal-artifacts) |
 
-### Session-history parity for Codex (Unreleased)
+## Local quickstart
 
-The four session-history capabilities were originally exposed only through the
-full ChatGPT connector and were intentionally absent from the curated Codex
-`core` and `operator` toolsets. The separately installed **Hermes GPT Session
-History** Codex integration now exposes the same read-only operations as native
-Codex tools: `hermes_session_list`, `hermes_session_search`,
-`hermes_session_read`, and `hermes_session_export`.
-
-This integration does not add session mutation. It keeps the existing Hermes
-gates, bounds, safe projections, role filtering, and in-memory-only export
-contract. See [session history](docs/session-history.md) for availability,
-privacy defaults, and the verified native-tool smoke test.
-
-```powershell
-$env:HERMES_GPT_ENABLE_CODEX="1"
-$env:HERMES_GPT_ENABLE_MCP="1"
-hermes-gpt codex install --toolset core
-hermes-gpt codex doctor
-```
-
-Use `hermes-gpt codex install --toolset operator --refresh` for the opt-in Operator control plane. The installer creates a backup before refreshing only the Hermes GPT entry. Use `--project` for `<repo>/.codex/config.toml`, and `uninstall` to remove only that entry. Full setup, runner gates, and troubleshooting live in [docs/codex.md](docs/codex.md). For a Windows deployment where ChatGPT dispatches approved jobs to the standalone Codex CLI, see [docs/windows-chatgpt-codex.md](docs/windows-chatgpt-codex.md).
-
-Operator-dispatched Codex tasks default to `execution_mode="normal"`. Trusted clients may explicitly select job-scoped `execution_mode="nolo"`, which adds Codex's `-a never` approval policy while retaining the requested `read-only` or `workspace-write` sandbox. NOLO therefore removes Codex approval interruptions without disabling sandbox containment. `HERMES_GPT_ALLOW_CODEX_WRITE=1` is required only when the requested sandbox is `workspace-write`; read-only NOLO remains read-only. Hermes still gates the requested launch directory, direct apply mode, `confirm=true`, and `dry_run=false`. NOLO is not a persistent global toggle.
-
-## What's New in v0.4.0
-
-v0.4.0 is the Tool Surface Expansion release. It adds env-gated Hermes tool wrappers, a cron creation operator tool, and ships the first external contribution.
-
-- **New env-gated MCP tools:**
-  - `hermes_vision_analyze` — analyze images through Hermes Agent (`HERMES_GPT_ENABLE_VISION=1`)
-  - `hermes_web_search` — search the web (`HERMES_GPT_ENABLE_WEB=1`)
-  - `hermes_web_extract` — extract page content (same env gate)
-- **New operator tool:**
-  - `hermes_cron_create` — create cron jobs from scratch with full field support: schedule, prompt, script, skills, deliver, repeat, workdir, no_agent, model, context_from, enabled_toolsets
-- **First external contribution:** Gateway PID fallback from `gateway_state.json` when `gateway.pid` is missing (fixes macOS detection)
-- **Expanded gateway diagnostics:** New fields — `gateway_state`, `gateway_kind`, `gateway_pid_source`, `gateway_updated_at`, `gateway_exit_reason`, `gateway_active_agents`
-- **Infrastructure:** Vercel static site deploys correctly, HTTP smoke test no longer fails CI
-- **Published on PyPI:** `pip install hermes-gpt`
-
-## What’s New in v0.3.0
-
-v0.3.0 is the Operator Reliability Release. It makes Hermes GPT self-diagnosing, safely recoverable, and release-checkable.
-
-- New operator diagnostics tools:
-  - `hermes_operator_doctor` — read-only deep health check across operator, gateway, config, env, cron, skills, policy, audit, and connector surfaces.
-  - `hermes_operator_snapshot` — single current-state summary.
-  - `hermes_release_doctor` — release readiness checks with PASS / WARN / BLOCKED classification.
-  - `hermes_operator_recover` — conservative dry-run-first recovery sequence.
-- All operator-facing failures now return a structured error envelope:
-  `{success, ok, error, layer, code, safe_message, suggested_action, trace_id}`.
-- Diagnostic and recovery statuses use PASS / WARN / FAIL / UNSUPPORTED.
-- Connector re-registration is explicitly reported as unsupported unless a real supported command/API exists.
-- `hermes_operator_recover` is dry-run by default and requires `apply=true` for mutations.
-
-## What’s New in v0.2.0
-
-v0.2.0 adds tiered Operator / Owner Mode so trusted MCP clients can see the full Hermes GPT surface while the default posture stays safe.
-
-- Default mode remains read-only.
-- Recommended always-on connector/tunnel mode is `dry_run`.
-- Direct mutation requires both:
-  - `HERMES_GPT_OPERATOR_APPLY_MODE=direct`
-  - the mutating tool call sets `dry_run=false`
-- Owner Mode requires the exact break-glass acknowledgement:
-  - `HERMES_GPT_OWNER_ACK=I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE`
-- Operator Mode is not a sandbox.
-- Do not expose publicly without real auth, VPN, Tailscale, or an equivalent private boundary.
-
-What v0.2.0 adds:
-
-- operator policy, status, and audit tools
-- cron tools
-- skill tools
-- config and env tools
-- gateway tools
-- workspace tools
-- owner tools behind explicit acknowledgement
-- audit logging with hashes and lengths instead of raw prompt/content
-- Hermes data-root normalization for operator profile operations
-- packaging fixes so operator modules ship in the release
-
-| Mode | Env posture | What happens |
-| --- | --- | --- |
-| Read-only | no operator env vars | read/list/status tools only; mutations refuse |
-| Dry-run Operator | operator enabled + apply_mode=dry_run | mutation tools return plans/previews only |
-| Direct Operator | operator enabled + apply_mode=direct | writes allowed only when tool call also sets `dry_run=false` |
-| Owner Mode | level=owner + exact owner ack | break-glass local owner tools; still denies secret paths |
-
-For the full Operator Mode guide, new-user quickstart, and tunnel safety model, see `docs/operator-mode.md`.
-
-## Fleet routing through one connector
-
-When the local Hermes install already has authenticated named peers in its A2A
-registry, one Hermes GPT connector can route bounded tasks to those peers:
-
-- `hermes_fleet_list()` lists registered peers without exposing bearer tokens.
-- `hermes_fleet_status(agent)` runs a metadata-only A2A compatibility check.
-- `hermes_fleet_dispatch(agent, message, confirm, dry_run)` submits a task only
-  to a registered peer. A real dispatch requires workspace-level Operator Mode,
-  direct apply mode, `dry_run=false`, and `confirm=true`.
-- `hermes_fleet_task(agent, task_id)` returns a safe status summary without
-  returning task prompts or histories.
-- `hermes_fleet_dispatch_work_order(...)` validates and submits a canonical,
-  profile-aware work order.
-- `hermes_fleet_result(agent, task_id)` returns only a safe completion bundle.
-- `hermes_fleet_authority_drift()` reports registry, manifest, profile, role,
-  and Agent Card drift.
-
-This is deliberately not a generic remote shell: callers cannot provide a peer
-URL or token, and dispatch is constrained to the local authenticated A2A
-registry. Use `hermes_fleet_list` before selecting a target. Keep the connector
-behind an authenticated private boundary; A2A peer authentication does not make
-an unauthenticated public MCP endpoint safe.
-
-Structured dispatch reads `HERMES_GPT_FLEET_AUTHORITY_MANIFEST`, defaulting to
-`<Hermes data root>/config/fleet-authority.json`. The server-controlled path is
-absolute, non-symlinked, size-bounded, and checked by the secret-path policy.
-Copy `examples/fleet-authority.example.json`, set expected roles and identities,
-install it with service-account-only permissions, and run the drift tool before
-enabling direct mode. Confirmed structured dispatch rechecks the live peer
-identity and host role against that manifest immediately before sending. Never
-place URLs, credentials, or tokens in the manifest.
-
-## Security posture
-
-By default, `hermes-gpt` is designed for a trusted local machine:
-
-- HTTP binds to `127.0.0.1` by default.
-- Tools advertise `noauth` only for local-dev MCP clients.
-- Write, patch, terminal execution, memory writes, session search, and session control are disabled or hidden by default.
-- Remote/public release is not supported until real OAuth or another ChatGPT-compatible authentication layer is added.
-
-Do not expose this server publicly without authentication. A temporary tunnel is acceptable only for short local testing when you understand that any enabled tool is reachable through that URL.
-
-## Prerequisites
-
-- Python 3.10+
-- A local Hermes Agent install
-- MCP Python SDK and Uvicorn
-
-Install dependencies:
+### Install from PyPI
 
 ```bash
-cd ~/hermes-gpt
-python -m pip install -r requirements.txt
+python -m pip install hermes-gpt
 ```
 
-## Local MCP clients
+Check the PyPI badge before relying on version-specific features.
 
-Stdio mode is for local MCP clients that support subprocess MCP servers:
+### Run the current source checkout
 
 ```bash
-cd ~/hermes-gpt
-python server.py
+git clone https://github.com/asimons81/hermes-gpt.git
+cd hermes-gpt
+python -m pip install .
+hermes-gpt
 ```
 
-Example client command:
+The final v0.6.0 wheel and sdist are also attached to the [GitHub v0.6.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.6.0).
 
-```json
-{
-  "command": "python",
-  "args": ["C:\\Users\\<YOU>\\hermes-gpt\\server.py"]
-}
-```
+## Default local MCP surface
 
-## Local HTTP
-
-HTTP mode uses FastMCP streamable HTTP:
-
-```bash
-cd ~/hermes-gpt
-python server.py --http --host 127.0.0.1 --port 7677
-```
-
-Local endpoint:
-
-```text
-http://127.0.0.1:7677/mcp
-```
-
-If you bind to anything other than loopback in the default `local-dev` profile, the server prints a warning. This warning means the configuration is not release-safe.
-
-## ChatGPT local testing
-
-ChatGPT developer mode expects a remote MCP endpoint. Do not enter a localhost URL such as `http://127.0.0.1:4750`; ChatGPT fetches the MCP configuration through its connector path, where `127.0.0.1` is not your machine.
-
-For short local testing only:
-
-```powershell
-cd C:\Users\<YOU>\hermes-gpt
-python server.py --http --host 127.0.0.1 --port 4750
-```
-
-In another terminal:
-
-```powershell
-& "C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --url http://127.0.0.1:4750 --http-host-header 127.0.0.1:4750
-```
-
-In ChatGPT, configure:
-
-- Protocol: Streaming HTTP
-- MCP server URL: `https://<your-trycloudflare-host>/mcp`
-- Authentication: No Authentication
-
-If ChatGPT only shows the old 5-tool surface, reconnect or recreate the connector and follow the workflow in `docs/operator-mode.md`.
-
-Example scripts for local setup live under `examples/`.
-
-## Tool gates
-
-Default visible tools:
+With no optional feature gates enabled, the server exposes a small read-oriented surface:
 
 - `hermes_read_file(path, offset=1, limit=500)`
 - `hermes_search_files(pattern, target="content", path=".", file_glob=None, limit=50)`
@@ -252,242 +73,220 @@ Default visible tools:
 - `hermes_skill_list()`
 - `hermes_skill_view(name)`
 
-Opt-in tools and actions:
+Optional legacy feature gates remain available for compatibility:
 
-| Capability | Env var | Default |
+| Capability | Gate | Default |
 | --- | --- | --- |
-| Write file and patch tools | `HERMES_GPT_ENABLE_WRITE=1` | Hidden |
-| Memory `add`, `replace`, `remove` | `HERMES_GPT_ENABLE_MEMORY_WRITE=1` | Disabled |
-| Session search | `HERMES_GPT_ENABLE_SESSION_SEARCH=1` | Hidden |
-| Session continue/send jobs | `HERMES_GPT_ENABLE_SESSION_CONTROL=1` | Hidden |
-| Terminal command execution | `HERMES_GPT_ENABLE_TERMINAL=1` | Hidden |
+| File write / patch | `HERMES_GPT_ENABLE_WRITE=1` | hidden |
+| Memory mutation | `HERMES_GPT_ENABLE_MEMORY_WRITE=1` | disabled |
+| Session search/history | `HERMES_GPT_ENABLE_SESSION_SEARCH=1` | hidden |
+| Session control | `HERMES_GPT_ENABLE_SESSION_CONTROL=1` | hidden |
+| Terminal execution | `HERMES_GPT_ENABLE_TERMINAL=1` | hidden |
+| Vision | `HERMES_GPT_ENABLE_VISION=1` | hidden |
+| Web search / extraction | `HERMES_GPT_ENABLE_WEB=1` | hidden |
 
-Terminal timeout is capped at 120 seconds even when enabled.
+For new automation and maintenance work, prefer Operator Mode instead of enabling broad legacy write gates.
 
-### Session history tools
+## Session history and control
 
-Session history is hidden unless `HERMES_GPT_ENABLE_SESSION_SEARCH=1` is set. When enabled, the four read-only tools are:
+Session history and session control are independent, opt-in surfaces.
 
-- `hermes_session_search(query, limit=20, offset=0)` — preserves a plain-text search response. It depends on the installed read-only FTS/search API; it does not activate, rebuild, or mutate FTS state. If that API is unavailable, the tool reports the limitation instead of claiming there were no matches.
-- `hermes_session_list(limit=20, offset=0, include_archived=false)` — returns safe session metadata and bounded pagination.
-- `hermes_session_read(session_id, limit=50, offset=0, include_inactive=false, include_system_messages=false, include_tool_messages=false)` — resolves exact or unique-prefix IDs and returns safe messages.
-- `hermes_session_export(session_id, format="json", limit=500, offset=0, include_inactive=false, include_system_messages=false, include_tool_messages=false, include_lineage=false)` — returns bounded in-memory JSON or Markdown only; it never creates files or returns file paths.
+With `HERMES_GPT_ENABLE_SESSION_SEARCH=1`, Hermes GPT exposes four bounded read-only history tools: `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, and `hermes_session_export`. The default transcript roles are `user` and `assistant`; `system`, `tool`, and `function` content additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`. Export stays in memory, is size/message bounded, creates no files or paths, and lineage export fails closed.
 
-List, read, and export pagination advances by database rows examined, including rows filtered from the response, so filtered internal roles do not cause duplicate or infinite pages. Responses are bounded by the configured `MAX_RESPONSE_BYTES` limit, and export requests are bounded by `MAX_EXPORT_MESSAGES`.
+With `HERMES_GPT_ENABLE_SESSION_CONTROL=1`, Hermes GPT exposes `hermes_session_continue`, `hermes_session_send`, `hermes_session_job_status`, and `hermes_session_job_result`. Control jobs are bounded, use fixed argv with `shell=False`, allow only one active job per session, persist prompt length/hash rather than raw prompts, and return bounded redacted results. A server restart fails closed by marking unowned running jobs orphaned rather than signaling a persisted PID.
 
-The default message roles are `user` and `assistant`. Access to `system`, `tool`, and `function` messages additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`; redaction and safe projection remain active when that gate is enabled. `include_lineage=true` is intentionally fail-closed until a bounded safe lineage projection is proven.
+See [session history](docs/session-history.md) and [session control](docs/session-control.md). Treat transcript data as private local data.
 
-Session transcripts may contain private prompts, credentials, personal data, paths, tool output, and other sensitive material. Treat session-history results as private local data and do not expose the MCP endpoint publicly or share returned content without reviewing it.
+## Run modes
 
-For an end-to-end native MCP smoke test with small limits, safe role filters,
-Markdown export, redacted reporting, and optional read-only model inspection,
-see [docs/session-history.md](docs/session-history.md).
+### Stdio
 
-### Session control tools
+For a local MCP client that can launch a subprocess:
 
-Session control is independent from the read-only history gate and is hidden unless `HERMES_GPT_ENABLE_SESSION_CONTROL=1` is set. It exposes:
+```bash
+hermes-gpt
+```
 
-- `hermes_session_continue(session_id, prompt, timeout=900)` — resolves an exact or unique-prefix ID through the read-only session database, then starts one asynchronous `hermes --resume <id> --oneshot <prompt>` turn.
-- `hermes_session_send(session_id, prompt, timeout=900)` — an alias for clients that use send terminology.
-- `hermes_session_job_status(job_id)` — returns bounded job metadata without the prompt.
-- `hermes_session_job_result(job_id, max_chars=24000)` — returns the bounded, redacted response and completion state.
+or from a checkout:
 
-Timeouts are clamped to 10–3600 seconds, prompts are limited to 65,536 characters, result text is limited to 24,000 characters, and subprocesses always use fixed argument arrays with `shell=False`. Only one session-control job may run per session. Raw prompts are never persisted in job metadata; only their length and SHA-256 digest are stored. A server restart marks unowned running jobs as `orphaned` and never signals a process based on a persisted PID alone.
+```bash
+python server.py
+```
 
-This feature invokes the provider/model already configured for Hermes and may consume that provider's quota or incur its charges. Keep it disabled on public or untrusted endpoints. See [docs/session-control.md](docs/session-control.md) for setup and the monitor/result workflow.
+### Local streamable HTTP
 
-The broad `HERMES_GPT_ENABLE_*` flags still work for backward compatibility,
-but for tiered, safe operation prefer the **Operator / Owner Mode** tools
-documented below.
+```bash
+python server.py --http --host 127.0.0.1 --port 7677
+```
 
-## Hermes GPT Operator Mode
+Endpoint:
 
-Operator / Owner Mode is a tiered control plane that lets trusted MCP
-clients (like ChatGPT) operate Hermes safely: cron jobs, skills, profile
-config wiring, safe non-secret env keys, gateway/runtime status and restart,
-scoped workspace edits, and (with explicit acknowledgement) owner-level
-command and file access.
+```text
+http://127.0.0.1:7677/mcp
+```
 
-### Safety model
+Keep the server on loopback. A remote client such as ChatGPT cannot use your machine's `127.0.0.1` directly, so remote access requires a deliberately configured private/authenticated boundary. Do not publish an unauthenticated Operator endpoint to the internet.
 
-- **Default behavior is read-only.** Mutating operator tools refuse unless
-  operator mode is explicitly enabled.
-- **Dry-run is the default.** Even when operator mode is enabled, every
-  mutating tool defaults to `dry_run=True` and returns a plan instead of
-  mutating. To actually mutate, you must set
-  `HERMES_GPT_OPERATOR_APPLY_MODE=direct` AND pass `dry_run=False` to the
-  tool call.
-- **Direct mutation requires explicit opt-in.** `HERMES_GPT_OPERATOR_APPLY_MODE=direct`
-  is required for any write to happen.
-- **Owner Mode requires an explicit break-glass activation and acknowledgement.**
-  Setting `HERMES_GPT_OPERATOR_LEVEL=owner` alone is clamped to effective
-  `workspace` operation. Owner tools require both `HERMES_GPT_OWNER_ACTIVE=1`
-  and `HERMES_GPT_OWNER_ACK=I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE`.
-- **No secrets exposed.** Config `get` redacts secret-looking keys; `env`
-  tools never return values; skill/cron prompts are logged and surfaced
-  only as `prompt_len` + `prompt_sha256`.
-- **No `.env` raw read/write.** The denied-path policy refuses `.env`,
-  `auth.json`, `mcp-tokens/`, `.ssh/`, `.aws/`, `vault/`, and any
-  secret-looking filename.
-- **No `shell=True` anywhere.** Every subprocess invocation uses
-  `shell=False` with a fixed argv.
-- **No `git add -A`, no `git push`, no destructive filesystem operations.**
-  Workspace `run_test` only allows a conservative allowlist (pytest, ruff,
-  mypy, npm test/lint, git status/diff). Owner `run_command` blocks
-  catastrophic patterns (`rm -rf /`, `del /s`, `format`, `curl | bash`,
-  `git push --force`, `git add -A`, `git add .`, anything touching
-  `.env`/`vault`/`token`/`.ssh`).
-- **Operator Mode is not a sandbox.** Use OS-level isolation (container,
-  VM, or a tool like OpenShell) for untrusted input. The operator gates
-  are defense-in-depth, not a security boundary — same stance as Hermes
-  Agent's own SECURITY.md.
-- **Do not expose remote without real auth.** Operator Mode does not add
-  any authentication. Bind to loopback only, or put a real auth layer
-  (VPN, Tailscale, OAuth) in front before exposing on a network.
+## Operator Mode
 
-### Operator levels
+Operator Mode is the policy-gated control plane for trusted clients. Tool visibility does not grant mutation authority.
 
-Levels are ordered; each level includes all capabilities of the levels
-above it in this list.
-
-| Level | Capabilities |
+| Level | Adds |
 | --- | --- |
-| `read_only` | status, policy, audit tail, cron list/status, skill diff/list/view, config get, env status, gateway status, git status/diff |
-| `cron` | + cron run, cron pause, cron copy, cron move |
-| `skills` | + skill create, edit, patch, write_file, copy, sync_to_default, delete |
-| `skills_config` | + config set/patch, env set/copy (non-secret keys only) |
-| `workspace` | + scoped workspace patch/write, test/lint allowlist, gateway restart |
-| `owner` | + raw command, raw file patch/write — still gated by explicit owner ack and still denies secret paths |
+| `read_only` | status, policy, audit, list/view/diff, Mission Control |
+| `cron` | cron run/pause/copy/move |
+| `skills` | skill create/edit/patch/write/copy/sync/delete |
+| `skills_config` | non-secret config and environment writes |
+| `workspace` | scoped workspace writes/tests, gateway restart, Codex jobs, contract/swarm dispatch |
+| `owner` | break-glass raw command/file operations and final swarm approval; secret paths remain denied |
 
-### Env flags
+Mutation requires both the server and the individual call to opt in:
 
-| Env var | Default | Purpose |
-| --- | --- | --- |
-| `HERMES_GPT_OPERATOR_ENABLED` | unset (false) | Enable operator mode |
-| `HERMES_GPT_OPERATOR_LEVEL` | `read_only` | Operator level (see table above) |
-| `HERMES_GPT_OPERATOR_APPLY_MODE` | `dry_run` | `dry_run` returns plans; `direct` allows mutation |
-| `HERMES_GPT_OPERATOR_ALLOWED_PROFILES` | `default` | Comma-separated profile names, or `*` for all existing |
-| `HERMES_GPT_OPERATOR_ALLOWED_PATHS` | empty | Comma-separated workspace root paths; empty disables workspace writes |
-| `HERMES_GPT_OPERATOR_DENIED_PATHS` | built-in defaults | Extra denied paths (additions only; cannot weaken defaults) |
-| `HERMES_GPT_OWNER_ACTIVE` | unset | Must be truthy to activate break-glass Owner Mode; otherwise configured `owner` is clamped to `workspace` |
-| `HERMES_GPT_OWNER_ACK` | unset | Must equal `I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE` for owner tools |
-
-### Examples
-
-Read-only default (no env vars needed):
-
-```powershell
-hermes-gpt
+```text
+HERMES_GPT_OPERATOR_ENABLED=1
+HERMES_GPT_OPERATOR_APPLY_MODE=direct
 ```
 
-Cron dry-run:
+and the mutating call must use `dry_run=false`. Tools that require explicit confirmation also require `confirm=true`.
 
-```powershell
-$env:HERMES_GPT_OPERATOR_ENABLED="1"
-$env:HERMES_GPT_OPERATOR_LEVEL="cron"
-$env:HERMES_GPT_OPERATOR_APPLY_MODE="dry_run"
-$env:HERMES_GPT_OPERATOR_ALLOWED_PROFILES="default,hermes-researcher"
-hermes-gpt
+Owner Mode additionally requires:
+
+```text
+HERMES_GPT_OWNER_ACTIVE=1
+HERMES_GPT_OWNER_ACK=I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE
 ```
 
-Skills/config dry-run:
+See [docs/operator-mode.md](docs/operator-mode.md) for the complete policy model and exact gates.
 
-```powershell
-$env:HERMES_GPT_OPERATOR_ENABLED="1"
-$env:HERMES_GPT_OPERATOR_LEVEL="skills_config"
-$env:HERMES_GPT_OPERATOR_APPLY_MODE="dry_run"
-$env:HERMES_GPT_OPERATOR_ALLOWED_PROFILES="default,hermes-researcher,hermes-trt-manager,hermes-nexus-wiki"
-hermes-gpt
+## Mission Control
+
+Mission Control is structurally read-only. It exposes bounded operational summaries for:
+
+`overview`, `health`, `profiles`, `fleet`, `codex`, `cron`, `delegations`, `failures`, `approvals`, `vault`, `usage`, and `audit`.
+
+Important authorization semantics for `HERMES_GPT_MISSION_ALLOWED_SURFACES`:
+
+- **unset:** all read-only Mission Control surfaces are available;
+- **set to a comma-separated list:** only listed valid surfaces are available;
+- **set to an empty value:** all Mission Control surfaces are denied.
+
+Mission Control excludes raw message, memory, transcript, request-dump, credential, token, and profile-secret bodies. Prompt-like content is surfaced only as bounded metadata such as length and SHA-256. Free-text operational fields receive conservative redaction / PII stripping before they leave the host.
+
+## Work Contracts
+
+The `hermes_contract_*` family makes completion verifiable instead of trusting a worker's `done` claim.
+
+- `hermes_contract_define` validates and canonicalizes a contract.
+- `hermes_contract_dispatch` is workspace-level and dry-run-first.
+- `hermes_contract_validate` checks observed runs, artifacts, audit evidence, tests, and review evidence.
+- `hermes_contract_status` links a contract to bounded observed state.
+
+Validation is fail-closed. Missing evidence cannot become `SATISFIED`. v0.6.0 does not ship a production review-accept writer, so required review evidence must already exist through an authorized external review path or human approval reference.
+
+## Swarm Orchestration
+
+The `hermes_swarm_*` family runs bounded DAG workflows on top of Work Contracts.
+
+Typical shape:
+
+```text
+research -> architecture -> implementation/tests/docs
+         -> integration review -> Codex review
+         -> acceptance validation -> HUMAN APPROVAL
 ```
 
-Workspace direct with allowed path:
+Key properties:
 
-```powershell
-$env:HERMES_GPT_OPERATOR_ENABLED="1"
-$env:HERMES_GPT_OPERATOR_LEVEL="workspace"
-$env:HERMES_GPT_OPERATOR_APPLY_MODE="direct"
-$env:HERMES_GPT_OPERATOR_ALLOWED_PATHS="C:\Users\<YOU>\hermes-gpt,C:\Users\<YOU>\AppData\Local\hermes\hermes-agent"
-hermes-gpt
-```
+- explicit stage ownership;
+- validated dependencies and cycle rejection;
+- default caps of 3 concurrent stages per workflow, 4 per board, and 12 stages per workflow;
+- one bounded rework retry before blocking for human attention;
+- Codex can review but is never an implementation owner;
+- final approval is an Owner-level human gate.
 
-Owner Mode (WARNING: can mutate your machine):
+## Codex integration
 
-```powershell
-$env:HERMES_GPT_OPERATOR_ENABLED="1"
-$env:HERMES_GPT_OPERATOR_LEVEL="owner"
-$env:HERMES_GPT_OPERATOR_APPLY_MODE="direct"
-$env:HERMES_GPT_OWNER_ACTIVE="1"
-$env:HERMES_GPT_OWNER_ACK="I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
-hermes-gpt
-```
+Hermes GPT supports two different Codex relationships. Keep them conceptually separate:
 
-### Audit log
+1. **Codex as MCP client** - install the curated Hermes GPT MCP toolset into Codex. See [docs/codex.md](docs/codex.md).
+2. **Codex CLI as delegated worker/reviewer** - a trusted Hermes GPT client can start bounded async Codex jobs through `hermes_codex_*`. This requires Operator `workspace` level, an approved work directory, `HERMES_GPT_ENABLE_CODEX_RUNNER=1`, direct mode for execution, `confirm=true`, and `dry_run=false`.
 
-Every mutating tool call appends a JSONL record to:
+`HERMES_GPT_ALLOW_CODEX_WRITE=1` is required only for `workspace-write` jobs.
 
-- `%USERPROFILE%\AppData\Local\hermes\logs\hermes_gpt_operator_audit.jsonl` (preferred), or
-- `<hermes-gpt>\logs\hermes_gpt_operator_audit.jsonl` (fallback)
+Delegated Codex jobs default to `execution_mode="normal"`. Trusted clients may opt into job-scoped `execution_mode="nolo"`, which adds Codex's `-a never` approval policy while retaining the requested `read-only` or `workspace-write` sandbox. NOLO does not enable `danger-full-access`, does not bypass Hermes workspace/confirmation gates, and does not create persistent global approval-bypass state.
 
-Each record contains: `timestamp`, `tool`, `level`, `apply_mode`, `dry_run`,
-`success`, `changed`, `summary`, `error`, profile(s), path summary, job_id /
-skill_name / key (when relevant), and `prompt_len` + `prompt_sha256` /
-`content_len` + `content_sha256` for skill/cron content. The audit log
-**never** records full prompts, full config values, raw `.env` contents,
-vault contents, or command output likely to contain secrets. Read it with
-the `hermes_operator_audit_tail` tool.
+### Tool-name note
 
-### Owner Mode warning
+The main Hermes GPT server and the curated Codex MCP server have one intentional naming difference:
 
-Owner Mode can mutate your machine. Use it only on a trusted local
-machine. It is **not a sandbox** — it is the explicit break-glass path
-for the local owner. Even in Owner Mode, secret paths (`.env`, `auth.json`,
-`.ssh/`, `mcp-tokens/`, etc.) remain denied; no secret override is
-shipped in this release.
+- main server web extraction: `hermes_web_extract`
+- Codex-focused MCP extraction: `hermes_extract_page`
 
-## Remote profile
+Do not silently substitute one name for the other when generating tool calls.
 
-`--profile remote` is intentionally blocked because authentication is not implemented:
+## Fleet routing
+
+When Hermes already has authenticated peers in its local A2A registry, Hermes GPT can route bounded work to named peers through `hermes_fleet_*`.
+
+Callers cannot provide arbitrary peer URLs or bearer tokens. Real dispatch remains constrained by Operator level, direct mode, confirmation, the local registry, and the server-controlled fleet authority manifest. See [Operator Mode](docs/operator-mode.md#fleet-routing-through-the-local-a2a-registry).
+
+## Security invariants
+
+These rules are part of the product contract, not optional recommendations:
+
+- loopback is the default network boundary;
+- public unauthenticated hosting is unsupported;
+- Operator Mode is not a sandbox;
+- mutations are off by default and dry-run-first when enabled;
+- secret-looking paths such as `.env`, `auth.json`, token stores, `.ssh`, `.aws`, and vault secrets remain denied;
+- subprocesses use fixed argv and `shell=False` on protected execution paths;
+- raw prompts are not written into Operator audit records;
+- Mission Control never exposes raw messages, memory bodies, transcripts, request dumps, or credentials;
+- Owner Mode does not disable secret-path protections.
+
+Use OS-level isolation for untrusted input.
+
+## Updating
+
+Updates are check-first:
 
 ```bash
-python server.py --http --profile remote
+hermes-gpt update
 ```
 
-For temporary experiments only, you can bypass this block with both:
+Apply only after reviewing the result:
 
 ```bash
-HERMES_GPT_UNSAFE_REMOTE_NOAUTH=1
-python server.py --http --profile remote --i-understand-this-is-unsafe
+hermes-gpt update --apply
 ```
 
-Do not use this bypass for release.
+Git checkout updates require a clean checkout on the default branch and use fast-forward-only behavior. Installed-package updates use pip only when a newer package version is available. See [docs/updating.md](docs/updating.md).
 
-## Release checklist
+## Documentation
 
-Before publishing:
+Current operational documentation:
 
-- No `*.pem` files.
-- No `*.log` or `*.err.log` files.
-- No `__pycache__/` or `*.pyc`.
-- `python -m py_compile server.py` passes.
-- `pytest` passes.
-- Server binds to loopback by default.
-- Terminal, write tools, memory writes, session search, and session control are disabled by default.
+- [Documentation map and source-of-truth rules](docs/README.md)
+- [Operator Mode](docs/operator-mode.md)
+- [Codex integration](docs/codex.md)
+- [Windows ChatGPT -> Codex deployment](docs/windows-chatgpt-codex.md)
+- [Updating](docs/updating.md)
+- [Retention policy](docs/retention-policy.md)
+- [v0.6.0 release notes](docs/release-notes-v0.6.0.md)
+- [Changelog](CHANGELOG.md)
 
-## Current capability notes
+Historical release notes and pre-release design / risk / planning artifacts remain in the repository for provenance. They are not authoritative instructions for current runtime behavior. See [docs/README.md](docs/README.md) before using them as implementation guidance.
 
-The feasibility probe passed in this environment:
+## Development and verification
 
-- Hermes source root: `C:\Users\<YOU>\AppData\Local\hermes\hermes-agent`
-- File tools: available
-- Terminal tool: available, gated by `HERMES_GPT_ENABLE_TERMINAL=1`
-- Memory tool: available
-- Skill discovery: available through local and bundled skill directories
-- Session search: available through `SessionDB.search_messages`
-- FastMCP stdio: available
-- FastMCP streamable HTTP: available
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
+python tools/check_package_hygiene.py dist/*
+```
 
-See `FEASIBILITY.md` for probe details and exact signatures.
+Release-specific checks are listed in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).
