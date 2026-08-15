@@ -9,15 +9,27 @@
 
 ## Current status
 
-- **Repository / GitHub release:** v0.6.0
+- **Repository / GitHub release:** v0.7.0
 - **Python requirement:** 3.10+
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 
 > [!IMPORTANT]
-> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. At the v0.6.0 GitHub release, PyPI still served v0.5.0. Do not assume a PyPI install contains v0.6 features unless the badge reports v0.6.0 or newer.
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.7 features unless the badge reports v0.7.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.7.0 adds
+
+v0.7.0 "Flight Deck" adds four coordinated capabilities on top of the v0.6 control plane:
+
+1. **Production review evidence** - `hermes_review_accept`, an owner-gated writer with distinct-reviewer enforcement, feeding `hermes_contract_validate`.
+2. **Structured event history** - `hermes_events_query` / `hermes_events_tail`, a read-only redacted timeline over audit/swarm/codex/cron/kanban.
+3. **Durable encrypted token storage** - OAuth credentials survive restarts (AES-256-GCM envelope) with `hermes_oauth_status` / `hermes_oauth_revoke`.
+4. **Restart reconciliation** - `hermes_swarm_reconcile` marks interrupted swarm stages blocked (never auto-advances); stage advance is idempotent.
+
+Plus the MCP compatibility manifest, cross-machine seam interfaces (stretch,
+interfaces only), and a CI hermeticity fix. See the [v0.7.0 release notes](docs/release-notes-v0.7.0.md), the [MCP compatibility manifest](docs/mcp-compatibility.md), and [retention policy](docs/retention-policy.md).
 
 ## What v0.6.0 adds
 
@@ -63,7 +75,7 @@ python -m pip install .
 hermes-gpt
 ```
 
-The final v0.6.0 wheel and sdist are also attached to the [GitHub v0.6.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.6.0).
+The final v0.6.0 wheel and sdist are also attached to the [GitHub v0.6.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.6.0). The v0.7.0 release notes cover the Flight Deck surfaces (`hermes_review_accept`, `hermes_events_*`, `hermes_oauth_*`, `hermes_swarm_reconcile`); operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
 
 ## Default local MCP surface
 

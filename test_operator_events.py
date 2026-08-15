@@ -212,3 +212,22 @@ def test_events_tail_bounded(hermes_root):
     out = json.loads(ev.hermes_events_tail(limit=2, hermes_root=hermes_root))
     assert out["count_returned"] <= 2
     assert out["truncated"] is True
+
+
+def test_events_calls_are_audited(hermes_root, tmp_path):
+    """Every events call writes an audit record (S6 per-tool audit wiring)."""
+    import operator_policy as op
+
+    log = tmp_path / "audit.jsonl"
+    op.set_audit_log_override(log)
+    try:
+        _seed_all_sources(hermes_root)
+        json.loads(ev.hermes_events_query(hermes_root=hermes_root))
+        json.loads(ev.hermes_events_tail(hermes_root=hermes_root))
+        records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        tools = {r["tool"] for r in records}
+        assert "hermes_events_query" in tools
+        assert "hermes_events_tail" in tools
+        assert all(r["changed"] is False for r in records)  # read-only
+    finally:
+        op.set_audit_log_override(None)

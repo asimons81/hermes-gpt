@@ -16,9 +16,9 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.6.0**.
+Repository version: **0.7.0**.
 
-The final GitHub release is `v0.6.0`. PyPI is an independent distribution channel and can lag the repository release. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set.
+The final GitHub release is `v0.7.0`. PyPI is an independent distribution channel and can lag the repository release. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set.
 
 ## Current operational docs
 
@@ -27,11 +27,12 @@ The final GitHub release is `v0.6.0`. PyPI is an independent distribution channe
 | [`../README.md`](../README.md) | current | project overview, current release, quickstart, safety invariants, entry-point selection |
 | [`oauth.md`](oauth.md) | current | static bearer and confidential-client OAuth configuration, token lifecycle, refresh rotation, and remote authentication limits |
 | [`mcp-compatibility.md`](mcp-compatibility.md) | current | pinned MCP protocol revisions, transport matrix, trusted-client auth metadata |
-| [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration |
+| [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration, Flight Deck v0.7 surfaces |
 | [`codex.md`](codex.md) | current | Codex-as-MCP-client setup and delegated Codex CLI jobs |
 | [`windows-chatgpt-codex.md`](windows-chatgpt-codex.md) | current | Windows ChatGPT -> Hermes GPT -> Codex CLI deployment |
 | [`updating.md`](updating.md) | current | check-first Git and PyPI update behavior |
 | [`retention-policy.md`](retention-policy.md) | current | local diagnostic artifact retention and cleanup |
+| [`release-notes-v0.7.0.md`](release-notes-v0.7.0.md) | current release record | shipped v0.7 behavior and gates |
 | [`release-notes-v0.6.0.md`](release-notes-v0.6.0.md) | current release record | shipped v0.6 behavior and known limitations |
 | [`../RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) | maintainer | release verification and publication gates |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | historical/current | concise version history |

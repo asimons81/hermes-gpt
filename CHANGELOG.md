@@ -1,14 +1,45 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-08-15
 
-- Added an opt-in authenticated remote boundary: static bearer compatibility or
-  a single-confidential-client OAuth authorization-code flow with optional PKCE
-  S256, stateless signed authorization codes, bounded memory-backed replay and
-  token state, one-hour access tokens, 30-day
-  rotating refresh tokens, replay/client/scope/resource validation, explicit
-  direct-TLS or loopback trusted-proxy enforcement, and ChatGPT-compatible
-  streamable-HTTP request normalization.
+Flight Deck: durable, interactive, verifiable autonomy.
+
+- Added the production review-accept writer `hermes_review_accept` (owner +
+  direct + confirm) with distinct-reviewer enforcement at write time, bounded
+  verdicts, referenced-not-copied evidence, and a durable append-only
+  review-evidence store read by `hermes_contract_validate`.
+- Added the structured event history surface `hermes_events_query` /
+  `hermes_events_tail`: a read-only, redacted, bounded timeline over audit,
+  swarm, codex, cron, and kanban stores with per-source allowlist
+  (`HERMES_GPT_EVENTS_ALLOWED_SOURCES`) and retention window
+  (`HERMES_GPT_EVENTS_MAX_AGE_DAYS`, default 90).
+- Added durable encrypted token storage (ADR-001): OAuth access/refresh
+  tokens persist through an AES-256-GCM envelope at
+  `<hermes_data>/secrets/hermes_gpt_tokens.json` (0600) with keyring → key
+  file → env key precedence; server restarts no longer invalidate issued
+  credentials. Added `hermes_oauth_status` (read-only) and
+  `hermes_oauth_revoke` (owner-gated, pending legal scope decision).
+- Added restart reconciliation `hermes_swarm_reconcile`: marks swarm stages
+  stuck in `running` as `blocked` (reason `interrupted_by_restart`), never
+  auto-advances, and reloads the durable token envelope. `hermes_swarm_stage_advance`
+  is now idempotent for already-validated/done stages.
+- Added the MCP compatibility manifest (`docs/mcp-compatibility.md`) pinning
+  the minimum supported protocol revision 2024-11-05 through the installed
+  SDK's latest (2025-11-25), transport matrix, and auth metadata, with
+  compatibility tests against the running SDK.
+- Added cross-machine seam interfaces (`seams.py`: `DispatchAdapter`,
+  `EvidenceProvider` protocols) validated by a two-process-one-host fake;
+  no remote implementation is shipped (stretch).
+- Promoted OAuth from Unreleased to shipped and documented: static bearer
+  compatibility or a single-confidential-client OAuth authorization-code flow
+  with optional PKCE S256, stateless signed authorization codes, one-hour
+  access tokens, 30-day rotating refresh tokens with replay rejection,
+  explicit direct-TLS or loopback trusted-proxy enforcement, and
+  ChatGPT-compatible streamable-HTTP request normalization. Added the
+  `cryptography` dependency (required) and `keyring` (optional dev).
+- Fixed CI hermeticity: `_call_skill_manager` no longer fails when the Hermes
+  Agent source tree is absent (optional-import degradation); profile-scoping
+  tests skip only when `hermes_constants` is unavailable.
 
 ## 0.6.0 - 2026-08-13
 
