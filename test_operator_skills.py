@@ -166,6 +166,10 @@ def test_skill_create_direct_uses_skill_manager_when_available(hermes_root, clea
 def test_skill_create_scopes_manager_to_requested_profile(
     hermes_root, clean_env, audit_override, monkeypatch
 ):
+    pytest.importorskip(
+        "hermes_constants",
+        reason="profile-scoping verification needs the Hermes Agent source tree",
+    )
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "skills")
     monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")

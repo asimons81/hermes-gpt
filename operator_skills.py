@@ -225,10 +225,19 @@ def _call_skill_manager(
             token = set_hermes_home_override(profile_home)
             reset_home = reset_hermes_home_override
         except Exception as exc:
-            return {
-                "success": False,
-                "error": f"Could not scope skill mutation to {profile_home}: {exc}",
-            }
+            # Optional-import degradation (CI and other hosts without the
+            # Hermes Agent source tree on sys.path). Scoping is a no-op for
+            # the default profile (default home == hermes_root), so we may
+            # safely proceed without it there. For a non-default profile we
+            # cannot guarantee the write targets the requested profile home,
+            # so we fail closed instead of writing to the wrong profile.
+            if hermes_root is not None and profile_home == Path(hermes_root).resolve():
+                pass  # default profile: scoping unnecessary
+            else:
+                return {
+                    "success": False,
+                    "error": f"Could not scope skill mutation to {profile_home}: {exc}",
+                }
     try:
         result = manager.skill_manage(**kwargs)  # type: ignore[union-attr]
     finally:
