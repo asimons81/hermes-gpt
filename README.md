@@ -9,9 +9,9 @@
 
 ## Current status
 
-- **Repository version:** 0.7.0 (local checkout, not yet released)
-- **Latest GitHub release:** v0.6.0
-- **Latest PyPI release:** 0.6.0
+- **Repository version:** 0.7.0
+- **Latest GitHub release:** v0.7.0
+- **Latest PyPI release:** 0.7.0
 - **Python requirement:** 3.10+
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
