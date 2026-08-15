@@ -57,6 +57,7 @@ py-modules = [
   "codex_core",
   "codex_mcp",
   "codex_config",
+  "seams",
   "updater",
   "versioning",
 ]
