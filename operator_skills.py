@@ -200,13 +200,41 @@ def _get_skill_manager(hermes_root: Path | None = None) -> Any | None:
     return module
 
 
-def _call_skill_manager(action: str, name: str, hermes_root: Path | None = None, **payload: Any) -> dict[str, Any]:
+def _call_skill_manager(
+    action: str,
+    name: str,
+    hermes_root: Path | None = None,
+    profile_home: Path | None = None,
+    **payload: Any,
+) -> dict[str, Any]:
     manager = _get_skill_manager(hermes_root)
     if manager is None:
         return {"success": False, "error": "Hermes skill manager is unavailable for direct mutation."}
     kwargs = {k: v for k, v in payload.items() if v is not None}
     kwargs.update({"action": action, "name": name})
-    result = manager.skill_manage(**kwargs)  # type: ignore[union-attr]
+
+    token = None
+    reset_home = None
+    if profile_home is not None:
+        try:
+            from hermes_constants import (
+                reset_hermes_home_override,
+                set_hermes_home_override,
+            )
+
+            token = set_hermes_home_override(profile_home)
+            reset_home = reset_hermes_home_override
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": f"Could not scope skill mutation to {profile_home}: {exc}",
+            }
+    try:
+        result = manager.skill_manage(**kwargs)  # type: ignore[union-attr]
+    finally:
+        if token is not None and reset_home is not None:
+            reset_home(token)
+
     if isinstance(result, dict):
         return result
     if isinstance(result, str):
@@ -383,6 +411,7 @@ def hermes_skill_create(
             "create",
             canon,
             hermes_root=hermes_root,
+            profile_home=profile_home,
             content=content,
             category=None,
         )
@@ -493,6 +522,7 @@ def hermes_skill_edit(
             "edit",
             canon,
             hermes_root=hermes_root,
+            profile_home=profile_home,
             content=content,
         )
         if not result.get("success", False):
@@ -627,6 +657,7 @@ def hermes_skill_patch(
             "patch",
             canon,
             hermes_root=hermes_root,
+            profile_home=profile_home,
             old_string=old_string,
             new_string=new_string,
             file_path=file_path,
@@ -745,6 +776,7 @@ def hermes_skill_write_file(
             "write_file",
             canon,
             hermes_root=hermes_root,
+            profile_home=profile_home,
             file_path=file_path,
             file_content=file_content,
         )
@@ -1007,6 +1039,7 @@ def hermes_skill_delete(
             "delete",
             canon,
             hermes_root=hermes_root,
+            profile_home=profile_home,
             absorbed_into="",
         )
         if not result.get("success", False):

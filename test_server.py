@@ -33,6 +33,7 @@ GATE_ENVS = [
     oauth_auth.OAUTH_REDIRECT_URI_ENV,
     oauth_auth.OAUTH_SCOPE_ENV,
     server.TRUSTED_PROXY_IPS_ENV,
+    server.ALLOWED_HOSTS_ENV,
 ]
 
 
@@ -49,6 +50,28 @@ def tool_names(mcp_server) -> list[str]:
 def tools_by_name(mcp_server):
     tools = asyncio.run(mcp_server.list_tools())
     return {tool.name: tool for tool in tools}
+
+
+def test_build_server_extends_transport_allowlist_from_env(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setenv(server.ALLOWED_HOSTS_ENV, "gpt.example.com, api.example.com:443")
+    observed = {}
+
+    class FakeMCP:
+        def __init__(self, *args, **kwargs):
+            observed.update(kwargs)
+
+        def add_tool(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(server, "FastMCP", FakeMCP)
+    server.build_server(http=True)
+
+    allowed = observed["transport_security"].allowed_hosts
+    assert "gpt.example.com" in allowed
+    assert "api.example.com:443" in allowed
+    assert "localhost" in allowed
+    assert "127.0.0.1" in allowed
 
 
 def test_default_tool_surface_is_read_or_local_metadata_only(monkeypatch):

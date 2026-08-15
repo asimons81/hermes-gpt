@@ -163,6 +163,45 @@ def test_skill_create_direct_uses_skill_manager_when_available(hermes_root, clea
     assert (hermes_root / "skills" / "new-skill" / "SKILL.md").exists()
 
 
+def test_skill_create_scopes_manager_to_requested_profile(
+    hermes_root, clean_env, audit_override, monkeypatch
+):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "skills")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PROFILES_ENV, "default,target-profile")
+    observed = {}
+
+    class FakeSkillManager:
+        @staticmethod
+        def skill_manage(**kwargs):
+            from hermes_constants import get_hermes_home
+
+            home = get_hermes_home()
+            observed["home"] = home
+            target = home / "skills" / kwargs["name"] / "SKILL.md"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(kwargs["content"], encoding="utf-8")
+            return json.dumps({"success": True, "path": str(target)}, indent=2)
+
+    monkeypatch.setattr(
+        osk, "_get_skill_manager", lambda hermes_root=None: FakeSkillManager, raising=False
+    )
+    out = osk.hermes_skill_create(
+        profile="target-profile",
+        name="new-skill",
+        content=_VALID_FRONTMATTER,
+        dry_run=False,
+        hermes_root=hermes_root,
+    )
+    parsed = json.loads(out)
+    expected_home = hermes_root / "profiles" / "target-profile"
+    assert parsed["success"] is True
+    assert observed["home"] == expected_home
+    assert (expected_home / "skills" / "new-skill" / "SKILL.md").exists()
+    assert not (hermes_root / "skills" / "new-skill" / "SKILL.md").exists()
+
+
 def test_skill_create_refuses_direct_mutation_without_skill_manager(hermes_root, clean_env, audit_override, monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "skills")

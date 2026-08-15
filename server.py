@@ -38,6 +38,7 @@ REMOTE_PROFILE = "remote"
 UNSAFE_REMOTE_ACK = "--i-understand-this-is-unsafe"
 UNSAFE_REMOTE_ENV = "HERMES_GPT_UNSAFE_REMOTE_NOAUTH"
 TRUSTED_PROXY_IPS_ENV = "HERMES_GPT_TRUSTED_PROXY_IPS"
+ALLOWED_HOSTS_ENV = "HERMES_GPT_ALLOWED_HOSTS"
 ENABLE_WRITE_ENV = "HERMES_GPT_ENABLE_WRITE"
 ENABLE_MEMORY_WRITE_ENV = "HERMES_GPT_ENABLE_MEMORY_WRITE"
 ENABLE_SESSION_SEARCH_ENV = "HERMES_GPT_ENABLE_SESSION_SEARCH"
@@ -1431,6 +1432,12 @@ def build_server(
 ) -> FastMCP:
     oauth_state = oauth_state_from_env()
     allowed_hosts = [host, f"{host}:{port}", "127.0.0.1", f"127.0.0.1:{port}", "localhost", f"localhost:{port}"]
+    extra_allowed_hosts = [
+        item.strip()
+        for item in os.environ.get(ALLOWED_HOSTS_ENV, "").split(",")
+        if item.strip()
+    ]
+    allowed_hosts.extend(extra_allowed_hosts)
     allowed_origins = ["https://chatgpt.com"]
     if oauth_state is not None:
         issuer = urllib.parse.urlparse(oauth_state.config.issuer)
