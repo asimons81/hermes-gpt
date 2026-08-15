@@ -102,6 +102,7 @@ stores are created lazily on first use. New environment variables:
 
 ## Verification
 
-- Full test suite green: `python -m pytest` (583+ tests, all new slices
-  covered: MCP compat, recovery, review, events, token store, seams).
+- Full test suite green: `python -m pytest` (646 tests collected — 643
+  passed, 3 skipped; all new slices covered: MCP compat, recovery, review,
+  events, token store, seams).
 - CI green on Python 3.10–3.12 via `.github/workflows/ci.yml`.

@@ -16,9 +16,9 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.7.0**.
+Repository version: **0.7.0** (local checkout, not yet released).
 
-The final GitHub release is `v0.7.0`. PyPI is an independent distribution channel and can lag the repository release. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set.
+The latest published releases are GitHub `v0.6.0` and PyPI `0.6.0`. PyPI is an independent distribution channel and can lag the repository release. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set.
 
 ## Current operational docs
 
