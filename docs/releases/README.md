@@ -7,6 +7,7 @@ Files in this directory preserve the release brief, integrated plan, risk review
 - `v0.7-flight-deck-research-package.md` — grounded research package + release brief (G1).
 - `v0.7-flight-deck-risk-register.md` — architecture risk register (G2; input to legal review).
 - `v0.7-flight-deck-implementation-plan.md` — implementation plan with independently verifiable slices (G3).
+- `v0.7-flight-deck-legal-risk-review.md` — legal/compliance/privacy/security risk review memo with go/no-go gate recommendations (G2; input to implementation and G4/G5).
 
 These are **current release-program artifacts** for the v0.7.0 Flight Deck
 release. Status statements such as "DRAFT", "pending approval", or "candidate"
