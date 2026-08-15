@@ -389,6 +389,55 @@ def test_owner_run_command_direct_runs(workspace_tree, clean_env, audit_override
     assert captured["argv"] == ["echo", "hello"]
 
 
+def test_owner_run_command_defers_exact_self_restart(workspace_tree, clean_env, audit_override, monkeypatch):
+    _enable_owner(monkeypatch)
+    captured = {}
+
+    def fake_runner(argv, timeout=120, workdir=None):
+        captured["argv"] = argv
+        return (0, "Running timer as unit: run-test.timer", "")
+
+    out = ows.hermes_owner_run_command(
+        command="systemctl --user restart hermes-gpt-server.service",
+        dry_run=False,
+        runner=fake_runner,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["deferred_self_restart"] is True
+    assert parsed["argv"] == [
+        "systemctl", "--user", "restart", "hermes-gpt-server.service"
+    ]
+    assert captured["argv"][:4] == [
+        "systemd-run", "--user", "--on-active=3s", "--collect"
+    ]
+    assert captured["argv"][-4:] == [
+        "systemctl", "--user", "restart", "hermes-gpt-server.service"
+    ]
+
+
+def test_owner_run_command_does_not_defer_other_systemctl_commands(
+    workspace_tree, clean_env, audit_override, monkeypatch
+):
+    _enable_owner(monkeypatch)
+    captured = {}
+
+    def fake_runner(argv, timeout=120, workdir=None):
+        captured["argv"] = argv
+        return (0, "active", "")
+
+    parsed = json.loads(ows.hermes_owner_run_command(
+        command="systemctl --user is-active hermes-gpt-server.service",
+        dry_run=False,
+        runner=fake_runner,
+    ))
+    assert parsed["success"] is True
+    assert parsed["deferred_self_restart"] is False
+    assert captured["argv"] == [
+        "systemctl", "--user", "is-active", "hermes-gpt-server.service"
+    ]
+
+
 def test_owner_run_command_windows_quoted_argument(monkeypatch, clean_env, audit_override):
     monkeypatch.setattr(ows.os, "name", "nt", raising=False)
     _enable_owner(monkeypatch)
