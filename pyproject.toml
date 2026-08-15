@@ -16,6 +16,7 @@ dependencies = [
   "mcp[cli]>=1.0,<2",
   "packaging>=23",
   "uvicorn",
+  "cryptography>=42",
   "tomli; python_version < '3.11'",
 ]
 
@@ -25,6 +26,7 @@ dev = [
   "build",
   "twine",
   "pyyaml",
+  "keyring",
 ]
 
 [project.scripts]
@@ -45,8 +47,13 @@ py-modules = [
   "operator_codex",
   "operator_mission",
   "operator_contract",
+  "operator_review",
+  "operator_events",
+  "operator_oauth",
+  "token_store",
   "operator_swarm",
   "operator_swarm_workflows",
+  "operator_recovery",
   "codex_core",
   "codex_mcp",
   "codex_config",

@@ -29,7 +29,11 @@ import operator_codex as op_codex
 import operator_fleet as op_fleet
 import operator_mission as op_mission
 import operator_contract as op_contract
+import operator_review as op_review
+import operator_events as op_events
+import operator_oauth as op_oauth
 import operator_swarm as op_swarm
+import operator_recovery as op_recovery
 from versioning import VERSION
 
 
@@ -791,6 +795,59 @@ def hermes_operator_recover(profile: str = "default", apply: bool = False) -> st
     )
 
 
+def hermes_swarm_reconcile(apply: bool = False) -> str:
+    """Reconcile state after a restart (ADR-007): mark interrupted swarm
+    stages blocked (never auto-advance) and reload the durable token store.
+    Dry-run by default; apply requires workspace+direct."""
+    return op_recovery.hermes_operator_reconcile(
+        apply=apply, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_events_query(
+    source: str = "",
+    subject_id: str = "",
+    kind: str = "",
+    since: str = "",
+    until: str = "",
+    limit: int = 50,
+) -> str:
+    """Query the normalized event timeline (read-only, redacted, bounded)."""
+    return op_events.hermes_events_query(
+        source=source,
+        subject_id=subject_id,
+        kind=kind,
+        since=since,
+        until=until,
+        limit=limit,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_events_tail(limit: int = 20) -> str:
+    """Recent events across all allowed sources (read-only, redacted)."""
+    return op_events.hermes_events_tail(
+        limit=limit, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_oauth_status() -> str:
+    """Durable token store status: presence/expiry only (read-only)."""
+    return op_oauth.hermes_oauth_status(hermes_root=_default_hermes_root())
+
+
+def hermes_oauth_revoke(
+    confirm: bool = False, dry_run: bool = True, rotate_key: bool = True
+) -> str:
+    """Revoke durable OAuth tokens (owner + direct + confirm, pending legal)."""
+    return op_oauth.hermes_oauth_revoke(
+        confirm=confirm,
+        dry_run=dry_run,
+        rotate_key=rotate_key,
+        hermes_root=_default_hermes_root(),
+    )
+
+
 # --- Fleet wrappers (named A2A peers only) ---------------------------------
 
 
@@ -1262,6 +1319,33 @@ def hermes_contract_status(contract_json: str) -> str:
     return op_contract.hermes_contract_status(contract_json=contract_json, hermes_root=_default_hermes_root())
 
 
+def hermes_review_accept(
+    contract_sha256: str,
+    task_id: str,
+    assignee: str,
+    reviewer: str,
+    verdict: str,
+    evidence_refs: list[str] | None = None,
+    approval_reference: str = "",
+    dry_run: bool = True,
+    confirm: bool = False,
+) -> str:
+    """Write a review-acceptance record for a contract (owner-gated, distinct
+    reviewer enforced, audited). Evidence is referenced, never copied."""
+    return op_review.hermes_review_accept(
+        contract_sha256=contract_sha256,
+        task_id=task_id,
+        assignee=assignee,
+        reviewer=reviewer,
+        verdict=verdict,
+        evidence_refs=evidence_refs,
+        approval_reference=approval_reference,
+        dry_run=dry_run,
+        confirm=confirm,
+        hermes_root=_default_hermes_root(),
+    )
+
+
 # --- Swarm Orchestration (v0.6 M2) ----------------------------------------
 
 
@@ -1329,7 +1413,17 @@ def hermes_swarm_approve(workflow_id: str, confirm: bool = False, dry_run: bool 
 
 def oauth_state_from_env() -> oauth_auth.OAuthState | None:
     config = oauth_auth.config_from_env()
-    return oauth_auth.OAuthState(config) if config is not None else None
+    if config is None:
+        return None
+    state = oauth_auth.OAuthState(config)
+    # v0.7 S5: restore durable tokens from the encrypted envelope so a
+    # restart does not invalidate issued credentials (ADR-001). Best-effort:
+    # a missing/corrupt envelope fails closed to empty stores.
+    try:
+        state.restore_tokens(_default_hermes_root())
+    except Exception:
+        pass
+    return state
 
 
 def auth_enabled() -> bool:
@@ -1466,6 +1560,15 @@ def build_server(
         ),
     )
     setattr(server, "_hermes_oauth_state", oauth_state)
+    if oauth_state is not None:
+        # v0.7 S5: persist every token issuance/refresh through token_store.
+        def _persist(state, kind: str) -> None:
+            try:
+                state.persist_tokens(_default_hermes_root())
+            except Exception:
+                pass
+
+        oauth_auth.set_persist_hook(_persist)
     register_tools(server)
     return server
 
@@ -1504,6 +1607,7 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_operator_snapshot, meta=tool_meta())
     server.add_tool(hermes_release_doctor, meta=tool_meta())
     server.add_tool(hermes_operator_recover, meta=tool_meta())
+    server.add_tool(hermes_swarm_reconcile, meta=tool_meta())
 
     # Fleet routing: named peers in the local authenticated A2A registry only.
     server.add_tool(hermes_fleet_list, meta=tool_meta())
@@ -1542,6 +1646,17 @@ def register_tools(server: FastMCP) -> None:
     ):
         server.add_tool(_mission_tool, meta=tool_meta())
 
+    # Event history (v0.7 S4): read-only normalized timeline over durable
+    # stores. Registered unconditionally; each tool enforces the per-client
+    # allowlist (HERMES_GPT_EVENTS_ALLOWED_SOURCES) and audits every call.
+    server.add_tool(hermes_events_query, meta=tool_meta())
+    server.add_tool(hermes_events_tail, meta=tool_meta())
+
+    # Trusted-client OAuth (v0.7 S5): durable token store surfaces. Status is
+    # read-only; revoke is owner-gated (pending legal scope decision).
+    server.add_tool(hermes_oauth_status, meta=tool_meta())
+    server.add_tool(hermes_oauth_revoke, meta=tool_meta())
+
     # Work Contracts (v0.6 M1): define/dispatch/validate/status. Registered
     # unconditionally; dispatch enforces workspace level + dry-run-first +
     # confirm gates; validate enforces D6 test gating internally.
@@ -1552,6 +1667,9 @@ def register_tools(server: FastMCP) -> None:
         hermes_contract_status,
     ):
         server.add_tool(_contract_tool, meta=tool_meta())
+
+    # Review-evidence writer (v0.7 S3): owner-gated, distinct reviewer.
+    server.add_tool(hermes_review_accept, meta=tool_meta())
 
     # Swarm Orchestration (v0.6 M2): workflow engine on contracts. Registered
     # unconditionally; each tool enforces its own level/apply/dry-run gates
