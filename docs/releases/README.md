@@ -8,6 +8,12 @@ Files in this directory preserve the release brief, integrated plan, risk review
 - `v0.7-flight-deck-risk-register.md` — architecture risk register (G2; input to legal review).
 - `v0.7-flight-deck-implementation-plan.md` — implementation plan with independently verifiable slices (G3).
 - `v0.7-flight-deck-legal-risk-review.md` — legal/compliance/privacy/security risk review memo with go/no-go gate recommendations (G2; input to implementation and G4/G5).
+- `v0.7-flight-deck-implementation-evidence.md` — implementation evidence + JUnit test report for slices S0-S9 (G3; t_d31703e4).
+- `v0.7-flight-deck-verification-report.md` — independent verification report, G4 code-level pass with gate conditions (t_8e69d56b).
+- `v0.7-flight-deck-defect-list.md` — recorded defects D1-D8 from the independent pass (t_8e69d56b; not yet fixed).
+- `v0.7-flight-deck-demo-script.md` — runnable local demo of the v0.7 surfaces (t_8e69d56b).
+- `v0.7-flight-deck-trt-handoff.md` — TRT technical editorial source pack with verified claims and guardrails (t_8e69d56b).
+- `v0.7-flight-deck-tony-handoff.md` — Tony approval-gate summary (t_8e69d56b).
 
 These are **current release-program artifacts** for the v0.7.0 Flight Deck
 release. Status statements such as "DRAFT", "pending approval", or "candidate"
