@@ -1,0 +1,37 @@
+name: PR8 merge repair
+
+on:
+  push:
+    branches:
+      - repair/pr8-current-master
+
+permissions:
+  contents: write
+
+jobs:
+  merge-master:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge current master
+        run: |
+          set -o pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master
+          if git merge --no-ff --no-commit origin/master; then
+            git commit -m "merge: resolve PR #8 against current master"
+            git push origin HEAD:repair/pr8-current-master
+          else
+            echo "MERGE_CONFLICTS_BEGIN"
+            git diff --name-only --diff-filter=U
+            for f in $(git diff --name-only --diff-filter=U); do
+              echo "===== CONFLICT: $f ====="
+              git checkout --conflict=merge -- "$f" || true
+              git diff --cc -- "$f" || true
+            done
+            echo "MERGE_CONFLICTS_END"
+            exit 1
+          fi
