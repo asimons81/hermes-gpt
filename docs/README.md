@@ -90,8 +90,8 @@ These are version records, not current setup instructions:
 
 The following directories contain valuable provenance, but they are not operational source-of-truth documents:
 
-- `design/` - v0.6 technical design documents written before or during implementation.
-- `releases/` - release brief, integrated plan, risk reviews, counsel packet, and surface manifest created during pre-release work.
+- `design/` - technical design documents written before or during implementation. v0.6 designs are historical; v0.7 Flight Deck architecture and ADRs are current design artifacts for the v0.7 release cycle.
+- `releases/` - release brief, integrated plan, risk reviews, counsel packet, and surface manifest created during pre-release work. v0.6 artifacts are historical; v0.7 Flight Deck research package, risk register, and implementation plan are current release-program artifacts.
 
 Some of these files intentionally preserve phrases such as "candidate", "gate", or "before release" because they record the state at the time they were written. Agents must not treat those historical status statements as the current release state.
 

@@ -1,6 +1,21 @@
-# v0.6 release-planning artifacts
+# Release-planning artifacts
 
-Files in this directory preserve the v0.6.0 brief, integrated plan, risk reviews, counsel packet, and related pre-release evidence.
+Files in this directory preserve the release brief, integrated plan, risk reviews, counsel packet, and related pre-release evidence.
+
+## Current v0.7 Flight Deck artifacts
+
+- `v0.7-flight-deck-research-package.md` — grounded research package + release brief (G1).
+- `v0.7-flight-deck-risk-register.md` — architecture risk register (G2; input to legal review).
+- `v0.7-flight-deck-implementation-plan.md` — implementation plan with independently verifiable slices (G3).
+
+These are **current release-program artifacts** for the v0.7.0 Flight Deck
+release. Status statements such as "DRAFT", "pending approval", or "candidate"
+record the state at the time the artifact was written; they are not runtime
+instructions.
+
+## Historical v0.6 artifacts
+
+The following preserve the v0.6.0 brief, integrated plan, risk reviews, counsel packet, and related pre-release evidence.
 
 They are retained for provenance. They are **not current release-status or runtime instructions**.
 
