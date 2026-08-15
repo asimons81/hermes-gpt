@@ -899,18 +899,22 @@ def run_argv(
     workdir: str | None = None,
     env: dict[str, str] | None = None,
     max_output_chars: int = 4096,
+    timeout_cap: int = 600,
 ) -> tuple[int, str, str]:
     """Run ``argv`` as a subprocess with shell=False (hard rule).
 
     Returns (returncode, stdout, stderr). Output is truncated to a sane
-    bound to avoid filling the audit log or context window.
+    bound to avoid filling the audit log or context window. ``timeout_cap``
+    defaults to 10 minutes; narrowly scoped callers such as the cron runner
+    may explicitly raise it, up to the hard two-hour ceiling below.
     """
     import subprocess
 
     if not isinstance(argv, list) or not argv:
         raise ValueError("argv must be a non-empty list")
 
-    capped_timeout = max(1, min(int(timeout), 600))
+    safe_timeout_cap = max(1, min(int(timeout_cap), 7200))
+    capped_timeout = max(1, min(int(timeout), safe_timeout_cap))
     capped_output = max(1, min(int(max_output_chars), 1_048_576))
     try:
         proc = subprocess.run(

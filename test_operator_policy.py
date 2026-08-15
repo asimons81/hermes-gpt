@@ -495,6 +495,24 @@ def test_run_argv_runs_without_shell(tmp_path):
     assert "hello" in out
 
 
+def test_run_argv_allows_explicit_higher_timeout_cap(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    captured = {}
+
+    def fake_run(*_args, **kwargs):
+        captured["timeout"] = kwargs["timeout"]
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    rc, out, err = op.run_argv(
+        ["example"], timeout=1800, timeout_cap=7200
+    )
+    assert rc == 0
+    assert captured["timeout"] == 1800
+
+
 def test_run_argv_refuses_empty_argv():
     with pytest.raises(ValueError):
         op.run_argv([], timeout=5)

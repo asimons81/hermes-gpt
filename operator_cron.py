@@ -360,8 +360,15 @@ def hermes_cron_run(
             )
 
         policy.require_mutation(dry_run)
-        run_fn = runner or op.run_argv
-        rc, out, err = run_fn(argv, timeout=timeout, workdir=None)
+        if runner is None:
+            rc, out, err = op.run_argv(
+                argv,
+                timeout=timeout,
+                workdir=None,
+                timeout_cap=7200,
+            )
+        else:
+            rc, out, err = runner(argv, timeout=timeout, workdir=None)
         redacted_out = op.redact_output(out)
         redacted_err = op.redact_output(err)
 
