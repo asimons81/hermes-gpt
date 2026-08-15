@@ -192,24 +192,43 @@ def _read_ticker_heartbeat(profile_home: Path) -> float | None:
 
 
 def _gateway_adapters_summary(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return sanitized adapter/platform summary.
+    """Return sanitized adapter/platform summary across gateway-state schemas.
 
-    Supports both formats:
+    Hermes has emitted two platform-state shapes over time:
 
-    Legacy:
-    {
-      "telegram": {"connected": true}
-    }
+    Legacy::
 
-    Newer:
-    {
-      "platforms": {
-        "telegram": {"connected": true}
-      }
-    }
+        {"telegram": {"connected": true}}
 
-    No tokens, URLs, or secret-like values are surfaced.
+    Current::
+
+        {"platforms": {"telegram": {"state": "connected", ...}}}
+
+    Prefer an explicit legacy ``connected`` boolean when present; otherwise
+    derive connectivity from the current ``state`` field.  Only safe status
+    metadata is surfaced.  Tokens, URLs, and secret-like values are never
+    copied into the result.
     """
+
+    def _sanitize(name: str, entry: dict[str, Any]) -> dict[str, Any]:
+        if "connected" in entry:
+            connected = bool(entry.get("connected"))
+        else:
+            connected = str(entry.get("state") or "").strip().lower() == "connected"
+
+        result: dict[str, Any] = {
+            "name": name,
+            "connected": connected,
+        }
+        platform_state = entry.get("state")
+        if isinstance(platform_state, str) and platform_state.strip():
+            result["state"] = platform_state.strip()
+        if isinstance(entry.get("needs_attention"), bool):
+            result["needs_attention"] = entry["needs_attention"]
+        if isinstance(entry.get("updated_at"), str) and entry["updated_at"].strip():
+            result["updated_at"] = entry["updated_at"].strip()
+        return result
+
     adapters: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -217,12 +236,7 @@ def _gateway_adapters_summary(state: dict[str, Any]) -> list[dict[str, Any]]:
     for key in legacy_keys:
         entry = state.get(key)
         if isinstance(entry, dict):
-            adapters.append(
-                {
-                    "name": key,
-                    "connected": bool(entry.get("connected", False)),
-                }
-            )
+            adapters.append(_sanitize(key, entry))
             seen.add(key)
 
     platforms = state.get("platforms")
@@ -232,12 +246,7 @@ def _gateway_adapters_summary(state: dict[str, Any]) -> list[dict[str, Any]]:
             if name in seen:
                 continue
             if isinstance(entry, dict):
-                adapters.append(
-                    {
-                        "name": name,
-                        "connected": bool(entry.get("connected", False)),
-                    }
-                )
+                adapters.append(_sanitize(name, entry))
                 seen.add(name)
 
     return adapters
