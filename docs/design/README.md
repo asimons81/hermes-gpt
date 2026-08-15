@@ -6,6 +6,9 @@ Files in this directory preserve technical design work produced before or during
 
 - `v0.7-flight-deck-architecture.md` — v0.7 architecture and technical design (current design for the v0.7 release cycle; pending G2 review).
 - `v0.7-flight-deck-adrs.md` — architecture decision records for v0.7 (D1–D4 and supporting decisions).
+- `v0.7-flight-deck-interaction-design.md` — Flight Deck interaction and visual design: user flows (launch/monitor, event history, evidence review, authority), wireframes, visual direction, interaction specs, and reusable asset list (kanban t_dd366ab6).
+- `v0.7-flight-deck-wireframes.html` — self-contained wireframe gallery for the Flight Deck views.
+- `assets/v0.7-flight-deck-wireframes/*.svg` — individual Flight Deck wireframes.
 
 These are **design authority, not runtime authority**: verify any implementation
 claim against the current module and its tests before acting.

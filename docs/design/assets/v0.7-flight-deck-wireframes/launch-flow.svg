@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0E1630"/>
+      <stop offset="1" stop-color="#131A2E"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="780" fill="#0B1020"/>
+  <rect width="1200" height="780" fill="url(#grid)"/>
+
+  <!-- Top bar -->
+  <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+  <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+  <text x="24" y="44" fill="#8B98B8" font-size="11">launch flow · define → validate → dry-run → confirm → dispatch</text>
+  <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+  <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+  <text x="760" y="22" fill="#8B98B8" font-size="12">profile: tony</text>
+  <text x="760" y="40" fill="#8B98B8" font-size="12">client: ChatGPT (MCP)</text>
+
+  <!-- Left nav -->
+  <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+  <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+  <text x="16" y="90" fill="#22D3EE" font-size="12" font-weight="700">▸ LAUNCH</text>
+  <text x="16" y="118" fill="#8B98B8" font-size="12">TASK MONITOR</text>
+  <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+  <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+  <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+
+  <!-- Step 1: define -->
+  <rect x="204" y="80" width="972" height="150" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="104" fill="#22D3EE" font-size="12" font-weight="700">STEP 1 · DEFINE WORK</text>
+  <text x="224" y="124" fill="#8B98B8" font-size="11">work-contract or swarm workflow JSON — pasted or built from template · hermes_contract_define / hermes_swarm_workflow_validate</text>
+  <rect x="224" y="140" width="932" height="72" rx="4" fill="#0A0F20" stroke="#2A3550"/>
+  <text x="240" y="162" fill="#5B6A8F" font-size="11">{"task_id": "rel-2026-08", "objective": "produce verifiable v0.7 release package",</text>
+  <text x="240" y="180" fill="#5B6A8F" font-size="11"> "scope": ["/home/tony/hermes-gpt"], "forbidden_actions": ["publish", "secret_access"],</text>
+  <text x="240" y="198" fill="#5B6A8F" font-size="11"> "expected_artifacts": ["docs", "tests", "release-notes"], "review_requirements": {...}}</text>
+
+  <!-- Step 2: validate -->
+  <rect x="204" y="246" width="972" height="80" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="270" fill="#22D3EE" font-size="12" font-weight="700">STEP 2 · VALIDATE</text>
+  <text x="224" y="290" fill="#8B98B8" font-size="11">observed-state fail-closed validation · schema + caps + forbidden actions + review requirements</text>
+  <rect x="224" y="298" width="130" height="24" rx="3" fill="#34D399" opacity="0.15"/>
+  <text x="236" y="314" fill="#34D399" font-size="10" font-weight="700">VALID ✓</text>
+  <text x="370" y="314" fill="#8B98B8" font-size="10">contract_sha256 9f2c…e1a7 pinned at this point</text>
+
+  <!-- Step 3: dry-run -->
+  <rect x="204" y="342" width="972" height="80" rx="6" fill="#131A2E" stroke="#FBBF24"/>
+  <text x="224" y="366" fill="#FBBF24" font-size="12" font-weight="700">STEP 3 · DRY-RUN DISPATCH</text>
+  <text x="224" y="386" fill="#8B98B8" font-size="11">hermes_contract_dispatch / hermes_swarm_stage_dispatch with dry_run=true — computes plan, writes audit, mutates nothing</text>
+  <rect x="224" y="394" width="220" height="24" rx="3" fill="#FBBF24" opacity="0.15"/>
+  <text x="236" y="410" fill="#FBBF24" font-size="10" font-weight="700">DRY-RUN · NO-OP</text>
+  <text x="460" y="410" fill="#8B98B8" font-size="10">plan: dispatch to developer · 3 stages · est. 4h · audit event written</text>
+
+  <!-- Step 4: confirm -->
+  <rect x="204" y="438" width="972" height="80" rx="6" fill="#131A2E" stroke="#34D399"/>
+  <text x="224" y="462" fill="#34D399" font-size="12" font-weight="700">STEP 4 · CONFIRM</text>
+  <text x="224" y="482" fill="#8B98B8" font-size="11">explicit confirm=true at the gated tool — the only mutation point; UI has no separate mutate button</text>
+  <rect x="224" y="490" width="150" height="24" rx="3" fill="#34D399" opacity="0.2"/>
+  <text x="236" y="506" fill="#34D399" font-size="10" font-weight="700">CONFIRM →</text>
+  <text x="390" y="506" fill="#8B98B8" font-size="10">requires level ≥ workspace (contract dispatch) · owner for swarm approve</text>
+
+  <!-- Step 5: dispatched -->
+  <rect x="204" y="534" width="972" height="80" rx="6" fill="#131A2E" stroke="#22D3EE"/>
+  <text x="224" y="558" fill="#22D3EE" font-size="12" font-weight="700">STEP 5 · DISPATCHED &amp; MONITORING</text>
+  <text x="224" y="578" fill="#8B98B8" font-size="11">task created · event written · monitor view opens · restart-safe from this point (S2 reconcile on restart)</text>
+  <rect x="224" y="586" width="180" height="24" rx="3" fill="#22D3EE" opacity="0.15"/>
+  <text x="236" y="602" fill="#22D3EE" font-size="10" font-weight="700">DISPATCHED ✓</text>
+  <text x="420" y="602" fill="#8B98B8" font-size="10">swf-9b31 · stage 1/6 · next event expected in ~2m → monitor</text>
+
+  <!-- Failure branch -->
+  <rect x="204" y="630" width="972" height="96" rx="6" fill="#131A2E" stroke="#FB7185"/>
+  <text x="224" y="654" fill="#FB7185" font-size="12" font-weight="700">FAILURE BRANCHES</text>
+  <text x="224" y="674" fill="#8B98B8" font-size="11">· validation fail → return to STEP 1 with error list (no dispatch attempted)</text>
+  <text x="224" y="692" fill="#8B98B8" font-size="11">· confirm denied (level too low) → AUTHZ_DENIED envelope + suggested_action shown · nothing mutated</text>
+  <text x="224" y="710" fill="#8B98B8" font-size="11">· restart mid-flight → reconcile marks interrupted stages blocked · operator re-advances explicitly (fail-closed)</text>
+
+  <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+  <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="764" fill="#5B6A8F" font-size="10">launch = define → validate → dry-run → confirm → dispatch · every step audited · dry-run-first invariant (v0.6 posture)</text>
+</svg>

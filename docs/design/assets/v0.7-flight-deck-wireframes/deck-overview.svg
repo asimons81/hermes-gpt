@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0E1630"/>
+      <stop offset="1" stop-color="#131A2E"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="780" fill="#0B1020"/>
+  <rect width="1200" height="780" fill="url(#grid)"/>
+
+  <!-- Top bar -->
+  <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+  <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+  <text x="24" y="44" fill="#8B98B8" font-size="11">hermes-gpt v0.7 · control-plane theme · read-only presentation</text>
+  <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+  <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+  <text x="760" y="22" fill="#8B98B8" font-size="12">profile: tony</text>
+  <text x="760" y="40" fill="#8B98B8" font-size="12">client: ChatGPT (MCP)</text>
+
+  <!-- Left nav -->
+  <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+  <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+  <text x="16" y="90" fill="#22D3EE" font-size="12" font-weight="700">▸ OVERVIEW</text>
+  <text x="16" y="118" fill="#8B98B8" font-size="12">TASKS</text>
+  <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+  <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+  <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+  <line x1="16" y1="222" x2="164" y2="222" stroke="#2A3550"/>
+  <text x="16" y="248" fill="#8B98B8" font-size="11">mission surfaces</text>
+  <text x="16" y="272" fill="#5B6A8F" font-size="11">overview · health</text>
+  <text x="16" y="290" fill="#5B6A8F" font-size="11">profiles · fleet</text>
+  <text x="16" y="308" fill="#5B6A8F" font-size="11">codex · cron</text>
+  <text x="16" y="326" fill="#5B6A8F" font-size="11">delegations</text>
+  <text x="16" y="344" fill="#5B6A8F" font-size="11">failures</text>
+  <text x="16" y="362" fill="#5B6A8F" font-size="11">approvals · vault</text>
+  <text x="16" y="380" fill="#5B6A8F" font-size="11">usage · audit</text>
+
+  <!-- Hero: health strip -->
+  <rect x="204" y="80" width="972" height="64" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="104" fill="#E6EDF7" font-size="14" font-weight="700">System status</text>
+  <text x="224" y="126" fill="#8B98B8" font-size="11">hermes_mission_health · TTL 5s · allowlist: all</text>
+  <text x="880" y="104" fill="#34D399" font-size="12">health: nominal</text>
+  <text x="880" y="126" fill="#8B98B8" font-size="11">uptime 3d 04h · CI: RED (S0 gate)</text>
+
+  <!-- Active tasks -->
+  <rect x="204" y="160" width="640" height="300" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="186" fill="#E6EDF7" font-size="13" font-weight="700">Active long-running tasks</text>
+  <text x="224" y="206" fill="#8B98B8" font-size="11">hermes_swarm_workflow_list · hermes_mission_codex · hermes_mission_cron</text>
+
+  <!-- task row 1 -->
+  <rect x="224" y="224" width="600" height="56" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <circle cx="244" cy="244" r="5" fill="#22D3EE"/>
+  <text x="258" y="240" fill="#E6EDF7" font-size="12">swf-8f21 · release-research · stage: research/write</text>
+  <text x="258" y="258" fill="#8B98B8" font-size="10">owner researcher · parents 2 · status RUNNING</text>
+  <text x="700" y="240" fill="#22D3EE" font-size="11">running 42m</text>
+  <text x="700" y="258" fill="#8B98B8" font-size="10">→ monitor</text>
+
+  <!-- task row 2 -->
+  <rect x="224" y="288" width="600" height="56" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <circle cx="244" cy="308" r="5" fill="#FBBF24"/>
+  <text x="258" y="304" fill="#E6EDF7" font-size="12">codex-17a2 · docs-diff-sweep</text>
+  <text x="258" y="322" fill="#8B98B8" font-size="10">async job · 30d retention · pid 41122</text>
+  <text x="700" y="304" fill="#FBBF24" font-size="11">blocked</text>
+  <text x="700" y="322" fill="#8B98B8" font-size="10">reason: orphaned pid</text>
+
+  <!-- task row 3 -->
+  <rect x="224" y="352" width="600" height="56" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <circle cx="244" cy="372" r="5" fill="#A78BFA"/>
+  <text x="258" y="368" fill="#E6EDF7" font-size="12">ctr-3c01 · work-contract/v1 · review pending</text>
+  <text x="258" y="386" fill="#8B98B8" font-size="10">assigned developer · evidence required · fail-closed</text>
+  <text x="700" y="368" fill="#A78BFA" font-size="11">awaiting_approval</text>
+  <text x="700" y="386" fill="#8B98B8" font-size="10">→ review evidence</text>
+
+  <!-- Recent events -->
+  <rect x="860" y="160" width="316" height="300" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="880" y="186" fill="#E6EDF7" font-size="13" font-weight="700">Recent events</text>
+  <text x="880" y="206" fill="#8B98B8" font-size="11">hermes_events_tail(20)</text>
+  <text x="880" y="232" fill="#5B6A8F" font-size="10">14:02:11 · swarm · stage_done</text>
+  <text x="880" y="248" fill="#8B98B8" font-size="10">swf-8f21 research/write → review</text>
+  <text x="880" y="272" fill="#5B6A8F" font-size="10">14:00:47 · codex · job_finished</text>
+  <text x="880" y="288" fill="#8B98B8" font-size="10">codex-17a2 exit 0 · 14 artifacts</text>
+  <text x="880" y="312" fill="#5B6A8F" font-size="10">13:58:03 · cron · run_started</text>
+  <text x="880" y="328" fill="#8B98B8" font-size="10">job nightly-sweep · pid 4901</text>
+  <text x="880" y="352" fill="#5B6A8F" font-size="10">13:55:40 · kanban · task_done</text>
+  <text x="880" y="368" fill="#8B98B8" font-size="10">t_9a2f · architecture review</text>
+  <text x="880" y="404" fill="#22D3EE" font-size="11">→ open event history</text>
+  <text x="880" y="424" fill="#8B98B8" font-size="10">90d window · allowlist: all</text>
+
+  <!-- Authority posture -->
+  <rect x="204" y="480" width="972" height="150" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="506" fill="#E6EDF7" font-size="13" font-weight="700">Least-privilege authority posture</text>
+  <text x="224" y="526" fill="#8B98B8" font-size="11">read_only → cron → skills → skills_config → workspace → owner</text>
+
+  <rect x="224" y="544" width="150" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="240" y="562" fill="#8B98B8" font-size="10">current level</text>
+  <text x="240" y="578" fill="#E6EDF7" font-size="13" font-weight="700">workspace</text>
+
+  <rect x="388" y="544" width="150" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="404" y="562" fill="#8B98B8" font-size="10">apply mode</text>
+  <text x="404" y="578" fill="#FBBF24" font-size="13" font-weight="700">dry-run</text>
+
+  <rect x="552" y="544" width="190" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="568" y="562" fill="#8B98B8" font-size="10">owner mode</text>
+  <text x="568" y="578" fill="#8B98B8" font-size="12">not active</text>
+
+  <rect x="756" y="544" width="200" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="772" y="562" fill="#8B98B8" font-size="10">mutation gates</text>
+  <text x="772" y="578" fill="#E6EDF7" font-size="12">dry-run → confirm</text>
+
+  <text x="224" y="616" fill="#8B98B8" font-size="11">Every mutating action requires explicit confirm. UI renders surfaces only — no bypass tooling.</text>
+
+  <!-- Footer -->
+  <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+  <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="764" fill="#5B6A8F" font-size="10">D2-A presentation contract · sources: mission_*, events_*, contract_status, swarm_workflow_status · redacted · read-only</text>
+</svg>

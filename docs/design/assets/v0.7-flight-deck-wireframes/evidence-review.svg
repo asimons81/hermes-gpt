@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0E1630"/>
+      <stop offset="1" stop-color="#131A2E"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="780" fill="#0B1020"/>
+  <rect width="1200" height="780" fill="url(#grid)"/>
+
+  <!-- Top bar -->
+  <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+  <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+  <text x="24" y="44" fill="#8B98B8" font-size="11">evidence review · production review evidence · hermes_review_accept</text>
+  <text x="960" y="22" fill="#A78BFA" font-size="12">◆ owner required</text>
+  <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+
+  <!-- Left nav -->
+  <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+  <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+  <text x="16" y="90" fill="#8B98B8" font-size="12">OVERVIEW</text>
+  <text x="16" y="118" fill="#8B98B8" font-size="12">TASK MONITOR</text>
+  <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+  <text x="16" y="174" fill="#22D3EE" font-size="12" font-weight="700">▸ EVIDENCE REVIEW</text>
+  <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+
+  <!-- Contract under review -->
+  <rect x="204" y="80" width="972" height="120" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="104" fill="#E6EDF7" font-size="14" font-weight="700">ctr-3c01 · work-contract/v1 · awaiting review</text>
+  <text x="224" y="126" fill="#8B98B8" font-size="11">task_id rel-2026-08 · objective: produce verifiable v0.7 release package · scope: /home/tony/hermes-gpt</text>
+  <text x="224" y="144" fill="#8B98B8" font-size="11">forbidden_actions: publish, secret access · expected_artifacts: docs, tests, release notes</text>
+  <rect x="224" y="156" width="110" height="24" rx="3" fill="#A78BFA" opacity="0.15"/>
+  <text x="234" y="172" fill="#A78BFA" font-size="10" font-weight="700">NOT_SATISFIED</text>
+  <text x="356" y="172" fill="#8B98B8" font-size="10">no acceptance record yet · fail-closed validator</text>
+  <text x="900" y="104" fill="#8B98B8" font-size="11">source: hermes_contract_status</text>
+  <text x="900" y="122" fill="#8B98B8" font-size="11">validator: observed-state</text>
+
+  <!-- Evidence check -->
+  <rect x="204" y="216" width="640" height="308" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="240" fill="#E6EDF7" font-size="13" font-weight="700">Observed evidence</text>
+  <text x="224" y="260" fill="#8B98B8" font-size="11">evidence referenced, never copied · no raw prompts/transcripts</text>
+
+  <rect x="224" y="276" width="600" height="34" rx="4" fill="#0F1730" stroke="#34D399"/>
+  <text x="236" y="297" fill="#34D399" font-size="11">✔ expected_artifacts present</text>
+  <text x="700" y="297" fill="#8B98B8" font-size="10">14 files · hashes match</text>
+
+  <rect x="224" y="318" width="600" height="34" rx="4" fill="#0F1730" stroke="#34D399"/>
+  <text x="236" y="339" fill="#34D399" font-size="11">✔ contract_sha256 pinned</text>
+  <text x="700" y="339" fill="#8B98B8" font-size="10">9f2c…e1a7</text>
+
+  <rect x="224" y="360" width="600" height="34" rx="4" fill="#0F1730" stroke="#FBBF24"/>
+  <text x="236" y="381" fill="#FBBF24" font-size="11">○ review evidence missing</text>
+  <text x="700" y="381" fill="#8B98B8" font-size="10">record absent</text>
+
+  <rect x="224" y="402" width="600" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="423" fill="#8B98B8" font-size="11">· forbidden actions audit</text>
+  <text x="700" y="423" fill="#8B98B8" font-size="10">no violations found</text>
+
+  <text x="224" y="470" fill="#8B98B8" font-size="11">hermes_contract_validate re-runs after acceptance → flips to SATISFIED</text>
+
+  <!-- Review accept panel -->
+  <rect x="860" y="216" width="316" height="308" rx="6" fill="#131A2E" stroke="#A78BFA"/>
+  <text x="880" y="240" fill="#E6EDF7" font-size="13" font-weight="700">Review acceptance</text>
+  <text x="880" y="260" fill="#8B98B8" font-size="11">hermes_review_accept · owner + direct + confirm</text>
+
+  <text x="880" y="290" fill="#8B98B8" font-size="11">reviewer (distinct)</text>
+  <rect x="880" y="300" width="276" height="32" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="892" y="321" fill="#E6EDF7" font-size="11">default (≠ assignee developer)</text>
+
+  <text x="880" y="350" fill="#8B98B8" font-size="11">verdict</text>
+  <rect x="880" y="360" width="276" height="32" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="892" y="381" fill="#E6EDF7" font-size="11">SATISFIED ▾</text>
+
+  <text x="880" y="410" fill="#8B98B8" font-size="11">evidence refs (required)</text>
+  <rect x="880" y="420" width="276" height="32" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="892" y="441" fill="#E6EDF7" font-size="11">14 artifact paths + test log</text>
+
+  <rect x="880" y="468" width="276" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="892" y="490" fill="#FBBF24" font-size="11">DRY-RUN first ▾</text>
+  <text x="880" y="508" fill="#FB7185" font-size="10">self-review rejected · reviewer ≠ assignee enforced</text>
+
+  <!-- Help/flow -->
+  <rect x="204" y="540" width="972" height="184" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="564" fill="#E6EDF7" font-size="13" font-weight="700">Review flow (interaction spec)</text>
+  <text x="224" y="588" fill="#8B98B8" font-size="11">1 → 2 → 3 → 4 (owner confirm) → hermes_contract_validate</text>
+  <rect x="224" y="604" width="170" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="622" fill="#8B98B8" font-size="10">1 inspect evidence</text>
+  <text x="236" y="638" fill="#5B6A8F" font-size="10">read-only surfaces</text>
+  <polygon points="400,626 416,614 416,638" fill="#2A3550"/>
+  <rect x="424" y="604" width="170" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="436" y="622" fill="#8B98B8" font-size="10">2 dry-run accept</text>
+  <text x="436" y="638" fill="#5B6A8F" font-size="10">no mutation</text>
+  <polygon points="600,626 616,614 616,638" fill="#2A3550"/>
+  <rect x="624" y="604" width="170" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="636" y="622" fill="#8B98B8" font-size="10">3 confirm</text>
+  <text x="636" y="638" fill="#5B6A8F" font-size="10">owner ack required</text>
+  <polygon points="800,626 816,614 816,638" fill="#2A3550"/>
+  <rect x="824" y="604" width="180" height="44" rx="4" fill="#0F1730" stroke="#A78BFA"/>
+  <text x="836" y="622" fill="#A78BFA" font-size="10">4 record written</text>
+  <text x="836" y="638" fill="#5B6A8F" font-size="10">audited · JSONL append</text>
+  <text x="224" y="676" fill="#8B98B8" font-size="11">acceptance record: record_id, contract_sha256, reviewer (distinct), verdict, evidence_refs, created_at — never raw prompts.</text>
+  <text x="224" y="696" fill="#8B98B8" font-size="11">retention aligns with contract records · legal review of 30d window (open question).</text>
+
+  <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+  <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="764" fill="#5B6A8F" font-size="10">D3-A owner-gated writer · sources: contract_status, events, review-evidence store · UI calls gated hermes_review_accept only</text>
+</svg>
