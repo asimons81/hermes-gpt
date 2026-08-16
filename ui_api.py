@@ -23,12 +23,11 @@ browser payload goes through redaction by construction. ``ui_chat`` passes
 from __future__ import annotations
 
 import importlib
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -54,6 +53,7 @@ class _SPAStaticFiles(StaticFiles):
             return FileResponse(str(index_path))
         return response
 
+
 # Envelope + redaction boundary (canonical implementation in ui_security).
 ok = ui_security.ok
 err = ui_security.err
@@ -78,8 +78,29 @@ def _index_file() -> Any:
     return FileResponse(index)
 
 
+async def _ui_not_built_app(scope, receive, send):  # type: ignore[no-untyped-def]
+    """ASGI placeholder returned when the built SPA directory is absent."""
+    from starlette.responses import PlainTextResponse
+
+    response = PlainTextResponse("UI static assets not built", status_code=404)
+    await response(scope, receive, send)
+
+
+def _ui_not_built(_request: Any) -> Any:
+    """HTTP handler placeholder returned when the built SPA directory is absent."""
+    return JSONResponse(
+        {"ok": False, "err": "UI static assets not built"},
+        status_code=404,
+    )
+
+
 def _static_routes() -> list[BaseRoute]:
-    """Serve the built SPA (web/dist) under /ui when present.
+    """Serve the built SPA (web/dist) under /ui.
+
+    The route and mount are always registered so the URL contract is stable
+    even when the built SPA directory is absent (e.g. in CI before ``npm run
+    build``). When the dist is missing, both the bare /ui path and any /ui/*
+    subpath return a 404 placeholder instead of being omitted entirely.
 
     The Mount("/ui") makes StaticFiles serve the directory. Because a Starlette
     Mount only matches when the path has a trailing slash, we also add an exact
@@ -90,13 +111,20 @@ def _static_routes() -> list[BaseRoute]:
     mount satisfies.
     """
     dist = ui_security.ui_dir()
-    if not dist.is_dir() or not (dist / "index.html").is_file():
-        return []
+    if dist.is_dir() and (dist / "index.html").is_file():
+        return [
+            Route("/ui", lambda _request: _index_file(), methods=["GET"]),
+            Mount(
+                "/ui",
+                app=_SPAStaticFiles(directory=str(dist), html=True),
+                name="ui-static",
+            ),
+        ]
     return [
-        Route("/ui", lambda _request: _index_file(), methods=["GET"]),
+        Route("/ui", _ui_not_built, methods=["GET"]),
         Mount(
             "/ui",
-            app=_SPAStaticFiles(directory=str(dist), html=True),
+            app=_ui_not_built_app,
             name="ui-static",
         ),
     ]

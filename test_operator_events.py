@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -159,8 +160,9 @@ def test_allowlist_empty_denies_all(hermes_root, monkeypatch):
 
 def test_retention_window_filters_old_events(hermes_root, monkeypatch):
     monkeypatch.setenv(ev.EVENTS_MAX_AGE_DAYS_ENV, "1")
+    fresh = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
     _write_audit(hermes_root, [{"timestamp": "2020-01-01T00:00:00+00:00", "tool": "hermes_contract_validate", "profile": "dev", "success": True, "summary": "ancient"}])
-    _write_audit(hermes_root, [{"timestamp": "2026-08-15T10:00:00+00:00", "tool": "hermes_contract_validate", "profile": "dev", "success": True, "summary": "fresh"}])
+    _write_audit(hermes_root, [{"timestamp": fresh, "tool": "hermes_contract_validate", "profile": "dev", "success": True, "summary": "fresh"}])
     out = json.loads(ev.hermes_events_query(source="audit", hermes_root=hermes_root))
     assert out["count_total"] == 1
     assert out["events"][0]["summary"] == "fresh"
