@@ -130,6 +130,27 @@ def test_oauth_status_absent(hermes_root):
     assert out["store"]["presence"] == "absent"
 
 
+def test_oauth_status_audits_changed_false(hermes_root, tmp_path):
+    """Proof 3: the read-only status wrapper audits with changed=false and
+    never mutates the token store."""
+    log = tmp_path / "audit.jsonl"
+    op.set_audit_log_override(log)
+    try:
+        out = json.loads(op_oauth.hermes_oauth_status(hermes_root=hermes_root))
+        assert out["success"] is True
+        records = [
+            json.loads(line)
+            for line in log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        status_records = [r for r in records if r["tool"] == "hermes_oauth_status"]
+        assert status_records, "no audit record for hermes_oauth_status"
+        assert all(r["changed"] is False for r in status_records)
+        assert all(r["dry_run"] is True for r in status_records)
+    finally:
+        op.set_audit_log_override(None)
+
+
 def test_revoke_requires_owner(hermes_root, monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")

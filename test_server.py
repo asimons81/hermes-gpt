@@ -60,6 +60,10 @@ def test_build_server_extends_transport_allowlist_from_env(monkeypatch):
     class FakeMCP:
         def __init__(self, *args, **kwargs):
             observed.update(kwargs)
+            # build_server() now advertises versioning.VERSION on the
+            # low-level MCPServer instance (serverInfo.version); the fake
+            # mirrors that attribute so the allowlist test stays focused.
+            self._mcp_server = type("FakeLowLevel", (), {"version": None})()
 
         def add_tool(self, *args, **kwargs):
             return None

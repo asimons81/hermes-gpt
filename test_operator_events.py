@@ -167,6 +167,36 @@ def test_retention_window_filters_old_events(hermes_root, monkeypatch):
     assert out["retention_max_age_days"] == 1
 
 
+def test_max_age_invalid_falls_back_to_default(hermes_root, monkeypatch):
+    monkeypatch.setenv(ev.EVENTS_MAX_AGE_DAYS_ENV, "not-a-number")
+    assert ev._max_age_days() == ev.DEFAULT_MAX_AGE_DAYS
+
+
+def test_max_age_clamped_to_bounds(hermes_root, monkeypatch):
+    monkeypatch.setenv(ev.EVENTS_MAX_AGE_DAYS_ENV, "0")
+    assert ev._max_age_days() == 1
+    monkeypatch.setenv(ev.EVENTS_MAX_AGE_DAYS_ENV, "999999")
+    assert ev._max_age_days() == 3650
+
+
+def test_allowlist_ignores_unknown_entries(hermes_root, monkeypatch):
+    _seed_all_sources(hermes_root)
+    monkeypatch.setenv(ev.EVENTS_ALLOWED_SOURCES_ENV, "swarm,bogus")
+    out = json.loads(ev.hermes_events_query(hermes_root=hermes_root))
+    sources = {e["source"] for e in out["events"]}
+    assert sources <= {"swarm"}
+    assert out["sources_allowed"] == ["swarm"]
+
+
+def test_allowlist_restricts_tail(hermes_root, monkeypatch):
+    _seed_all_sources(hermes_root)
+    monkeypatch.setenv(ev.EVENTS_ALLOWED_SOURCES_ENV, "swarm,codex")
+    out = json.loads(ev.hermes_events_tail(limit=100, hermes_root=hermes_root))
+    sources = {e["source"] for e in out["events"]}
+    assert sources <= {"swarm", "codex"}
+    assert set(out["sources_allowed"]) == {"swarm", "codex"}
+
+
 def test_query_by_subject_id_returns_ordered_timeline(hermes_root):
     _seed_all_sources(hermes_root)
     out = json.loads(ev.hermes_events_query(subject_id="sw-1", hermes_root=hermes_root))
