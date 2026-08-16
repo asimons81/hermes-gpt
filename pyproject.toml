@@ -60,6 +60,10 @@ py-modules = [
   "seams",
   "updater",
   "versioning",
+  "ui_api",
+  "ui_security",
+  "ui_chat",
+  "ui_ops",
 ]
 
 [tool.setuptools.data-files]
@@ -85,6 +89,8 @@ py-modules = [
   "docs/release-notes-v0.7.0.md",
   "docs/retention-policy.md",
   "docs/windows-chatgpt-codex.md",
+  "docs/ui-security-boundary.md",
+  "docs/flight-deck-coverage.md",
 ]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",

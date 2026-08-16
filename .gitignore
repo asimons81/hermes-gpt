@@ -15,6 +15,9 @@ venv/
 dist/
 build/
 *.egg-info/
+node_modules/
+web/dist/
+*.tsbuildinfo
 .cloudflared.pid
 .hermes-gpt.pid
 tmp-operator-test/
