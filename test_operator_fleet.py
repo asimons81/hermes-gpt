@@ -78,6 +78,34 @@ def test_authority_manifest_accepts_human_readable_card_identities(tmp_path):
     assert peers["nous-girl"].expected_card_identity == "Nous Girl GPU Compute"
 
 
+def test_authority_manifest_accepts_gaming_4090_peer(tmp_path):
+    """gaming-4090 is a supported fleet peer (2-node fleet, corrected 2026-08-15)."""
+    path = tmp_path / "fleet-authority.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "peers": [
+            {
+                "name": "gaming-4090",
+                "expected_host_role": "gpu-compute-subordinate",
+                "expected_card_identity": "TONY-GAMING-TOP GPU Compute",
+                "allowed_profiles": ["default"],
+                "max_authorization": "read_only",
+                "allow_public_actions": False,
+            },
+        ],
+    }), encoding="utf-8")
+    peers = fleet._load_authority(path)
+    assert peers["gaming-4090"].expected_card_identity == "TONY-GAMING-TOP GPU Compute"
+    assert peers["gaming-4090"].allowed_profiles == ("default",)
+    # profile ceiling enforced: unknown profile for this peer is rejected
+    bad = json.loads(path.read_text())
+    bad["peers"][0]["allowed_profiles"] = ["default", "rza"]
+    path.write_text(json.dumps(bad), encoding="utf-8")
+    import pytest
+    with pytest.raises(PermissionError):
+        fleet._load_authority(path)
+
+
 def enable_workspace(monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
