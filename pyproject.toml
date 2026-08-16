@@ -72,6 +72,7 @@ py-modules = [
   "docs/README.md",
   "docs/oauth.md",
   "docs/operator-mode.md",
+  "docs/mcp-compatibility.md",
   "docs/release-notes-v0.2.0.md",
   "docs/release-notes-v0.3.0.md",
   "docs/release-notes-v0.4.0.md",
@@ -81,6 +82,7 @@ py-modules = [
   "docs/release-notes-v0.5.0b2.md",
   "docs/release-notes-v0.5.0.md",
   "docs/release-notes-v0.6.0.md",
+  "docs/release-notes-v0.7.0.md",
   "docs/retention-policy.md",
   "docs/windows-chatgpt-codex.md",
 ]

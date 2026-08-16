@@ -167,9 +167,38 @@ def test_sdist_does_not_ship_internal_docs(built_artifacts):
     assert any("docs/release-notes-v0.6.0.md" in n for n in names), (
         "sdist missing public release notes"
     )
+    assert any("docs/release-notes-v0.7.0.md" in n for n in names), (
+        "sdist missing v0.7 public release notes"
+    )
     assert any("docs/retention-policy.md" in n for n in names), (
         "sdist missing public retention policy"
     )
     assert any("docs/mcp-compatibility.md" in n for n in names), (
         "sdist missing public MCP compatibility manifest"
     )
+
+
+def test_wheel_contains_public_docs_and_all_py_modules(built_artifacts):
+    """Proof 10: the wheel data-files ship both v0.7 docs and every
+    pyproject.toml py-module as a top-level module."""
+    import tomllib
+    import zipfile
+
+    wheels = [a for a in built_artifacts if a.name.endswith(".whl")]
+    assert wheels, "no wheel built"
+    with zipfile.ZipFile(wheels[0]) as zf:
+        names = zf.namelist()
+
+    for suffix in (
+        "share/hermes-gpt/docs/mcp-compatibility.md",
+        "share/hermes-gpt/docs/release-notes-v0.7.0.md",
+    ):
+        assert any(n.endswith(suffix) for n in names), f"wheel missing data file: {suffix}"
+
+    with open(REPO_ROOT / "pyproject.toml", "rb") as fh:
+        pyproject = tomllib.load(fh)
+    modules = pyproject["tool"]["setuptools"]["py-modules"]
+    assert modules, "pyproject.toml declares no py-modules"
+    for module in modules:
+        top_level = f"{module}.py"
+        assert top_level in names, f"wheel missing py-module: {top_level}"
