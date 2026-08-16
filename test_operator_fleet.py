@@ -583,3 +583,20 @@ def test_authority_drift_is_bounded_and_never_returns_card_raw_fields(monkeypatc
     assert out["valid"] is False
     assert out["findings"] == [{"agent": "nous-girl", "code": "IDENTITY_MISMATCH", "severity": "error"}]
     assert "url" not in json.dumps(out) and "token" not in json.dumps(out)
+
+
+def test_authority_drift_skips_role_check_when_card_attests_no_role(monkeypatch, tmp_path):
+    """Real Hermes cards (v0.19/v0.20) carry no host_role/role field. A card
+    that attests no role must not trip HOST_ROLE_MISMATCH; a card that does
+    attest a role is still enforced."""
+    enable_read_only(monkeypatch)
+    calls = []
+    runner = runner_with({
+        (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
+        # rza card attests nothing about role -> no finding despite manifest role
+        (HERMES, "a2a", "doctor", "rza", "--timeout", "10", "--json"): (0, json.dumps({"name": "Wu-Tang RZA Router"}), ""),
+        # nous-girl attests a WRONG role -> still enforced
+        (HERMES, "a2a", "doctor", "nous-girl", "--timeout", "10", "--json"): (0, json.dumps({"name": "Nous Girl GPU Compute", "role": "fleet_commander"}), ""),
+    }, calls)
+    out = json.loads(fleet.hermes_fleet_authority_drift(runner=runner, hermes_bin=HERMES, authority_manifest=authority_manifest(tmp_path)))
+    assert out["findings"] == [{"agent": "nous-girl", "code": "HOST_ROLE_MISMATCH", "severity": "error"}]

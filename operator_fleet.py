@@ -653,7 +653,12 @@ def hermes_fleet_authority_drift(*, runner: Runner | None = None, hermes_bin: st
             expected = authorities[name]
             if reported != expected.expected_card_identity:
                 findings.append({"agent": name, "code": "IDENTITY_MISMATCH", "severity": "error"})
-            if role != expected.expected_host_role:
+            # Host-role attestation is optional on Agent Cards (neither Hermes
+            # v0.19 nor v0.20 emits host_role/role today). Only enforce the
+            # manifest's expected role when the card actually attests one;
+            # identity, allowed profiles, and the auth ceiling are enforced
+            # regardless.
+            if role is not None and role != expected.expected_host_role:
                 findings.append({"agent": name, "code": "HOST_ROLE_MISMATCH", "severity": "error"})
         return json.dumps({"success": True, "valid": not findings, "registered_count": len(registered_names),
                            "manifest_count": len(authorities), "finding_count": len(findings), "findings": findings}, indent=2)
