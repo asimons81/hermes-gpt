@@ -32,6 +32,8 @@ The latest published releases are GitHub `v0.6.0` and PyPI `0.6.0`. PyPI is an i
 | [`windows-chatgpt-codex.md`](windows-chatgpt-codex.md) | current | Windows ChatGPT -> Hermes GPT -> Codex CLI deployment |
 | [`updating.md`](updating.md) | current | check-first Git and PyPI update behavior |
 | [`retention-policy.md`](retention-policy.md) | current | local diagnostic artifact retention and cleanup |
+| [`ui-security-boundary.md`](ui-security-boundary.md) | current | conversational UI browser security boundary and opt-in UI mount |
+| [`flight-deck-coverage.md`](flight-deck-coverage.md) | current | Flight Deck browser coverage and mutation safety decisions |
 | [`release-notes-v0.7.0.md`](release-notes-v0.7.0.md) | current release record | shipped v0.7 behavior and gates |
 | [`release-notes-v0.6.0.md`](release-notes-v0.6.0.md) | current release record | shipped v0.6 behavior and known limitations |
 | [`../RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) | maintainer | release verification and publication gates |
