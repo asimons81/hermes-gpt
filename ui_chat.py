@@ -190,9 +190,15 @@ def _session_db() -> Any:
     if _session_db_instance is None:
         with _session_db_lock:
             if _session_db_instance is None:
-                from hermes_state import SessionDB
+                try:
+                    from hermes_state import SessionDB
 
-                _session_db_instance = SessionDB(db_path=_hermes_home() / "state.db")
+                    _session_db_instance = SessionDB(db_path=_hermes_home() / "state.db")
+                except Exception as exc:
+                    logger.warning("ui_chat: hermes_state.SessionDB unavailable (%s), using local shim", exc)
+                    from hermes_state import SessionDB as ShimSessionDB
+
+                    _session_db_instance = ShimSessionDB(db_path=_hermes_home() / "state.db")
     return _session_db_instance
 
 

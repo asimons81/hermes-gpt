@@ -60,6 +60,7 @@ py-modules = [
   "seams",
   "updater",
   "versioning",
+  "hermes_state",
   "ui_api",
   "ui_security",
   "ui_chat",
