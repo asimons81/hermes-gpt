@@ -306,6 +306,7 @@ def clean_error(tool_name: str, exc: Exception) -> RuntimeError:
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 
 import_hermes()
 
@@ -1559,6 +1560,16 @@ def build_server(
             allowed_origins=list(dict.fromkeys(allowed_origins)),
         ),
     )
+    # Advertise the hermes-gpt app version in the initialize handshake.
+    # mcp 1.28.x: FastMCP.__init__ has no version kwarg and constructs the
+    # low-level MCPServer with only name/instructions/website_url/icons. The
+    # low-level Server.create_initialization_options() falls back to the SDK
+    # distribution version (pkg_version("mcp")) when self.version is unset, so
+    # without this every client sees serverInfo.version="1.28.1" and cannot
+    # detect a stale process exposing an old schema. There is no public FastMCP
+    # hook for the app version in 1.28.x, so set it on the private low-level
+    # server instance (minimal, documented private-API use).
+    server._mcp_server.version = VERSION
     setattr(server, "_hermes_oauth_state", oauth_state)
     if oauth_state is not None:
         # v0.7 S5: persist every token issuance/refresh through token_store.
@@ -1607,7 +1618,13 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_operator_snapshot, meta=tool_meta())
     server.add_tool(hermes_release_doctor, meta=tool_meta())
     server.add_tool(hermes_operator_recover, meta=tool_meta())
-    server.add_tool(hermes_swarm_reconcile, meta=tool_meta())
+    server.add_tool(
+        hermes_swarm_reconcile,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Reconcile state after a restart (dry-run by default; apply requires workspace + direct)"
+        ),
+    )
 
     # Fleet routing: named peers in the local authenticated A2A registry only.
     server.add_tool(hermes_fleet_list, meta=tool_meta())
@@ -1649,13 +1666,43 @@ def register_tools(server: FastMCP) -> None:
     # Event history (v0.7 S4): read-only normalized timeline over durable
     # stores. Registered unconditionally; each tool enforces the per-client
     # allowlist (HERMES_GPT_EVENTS_ALLOWED_SOURCES) and audits every call.
-    server.add_tool(hermes_events_query, meta=tool_meta())
-    server.add_tool(hermes_events_tail, meta=tool_meta())
+    # readOnlyHint is advisory for client-side filtering (Cursor/Claude
+    # Desktop); it is not authority and never gates a call.
+    server.add_tool(
+        hermes_events_query,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Query the normalized Hermes GPT event timeline",
+            readOnlyHint=True,
+        ),
+    )
+    server.add_tool(
+        hermes_events_tail,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Tail recent Hermes GPT events across allowed sources",
+            readOnlyHint=True,
+        ),
+    )
 
     # Trusted-client OAuth (v0.7 S5): durable token store surfaces. Status is
     # read-only; revoke is owner-gated (pending legal scope decision).
-    server.add_tool(hermes_oauth_status, meta=tool_meta())
-    server.add_tool(hermes_oauth_revoke, meta=tool_meta())
+    server.add_tool(
+        hermes_oauth_status,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Durable OAuth token store status",
+            readOnlyHint=True,
+        ),
+    )
+    server.add_tool(
+        hermes_oauth_revoke,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Revoke durable OAuth tokens",
+            destructiveHint=True,
+        ),
+    )
 
     # Work Contracts (v0.6 M1): define/dispatch/validate/status. Registered
     # unconditionally; dispatch enforces workspace level + dry-run-first +
@@ -1669,7 +1716,13 @@ def register_tools(server: FastMCP) -> None:
         server.add_tool(_contract_tool, meta=tool_meta())
 
     # Review-evidence writer (v0.7 S3): owner-gated, distinct reviewer.
-    server.add_tool(hermes_review_accept, meta=tool_meta())
+    server.add_tool(
+        hermes_review_accept,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Accept a review verdict for a Work Contract"
+        ),
+    )
 
     # Swarm Orchestration (v0.6 M2): workflow engine on contracts. Registered
     # unconditionally; each tool enforces its own level/apply/dry-run gates
