@@ -87,7 +87,7 @@ def test_authority_manifest_accepts_gaming_4090_peer(tmp_path):
             {
                 "name": "gaming-4090",
                 "expected_host_role": "gpu-compute-subordinate",
-                "expected_card_identity": "TONY-GAMING-TOP GPU Compute",
+                "expected_card_identity": "TONY-GAMING-TOP",
                 "allowed_profiles": ["default"],
                 "max_authorization": "read_only",
                 "allow_public_actions": False,
@@ -95,7 +95,7 @@ def test_authority_manifest_accepts_gaming_4090_peer(tmp_path):
         ],
     }), encoding="utf-8")
     peers = fleet._load_authority(path)
-    assert peers["gaming-4090"].expected_card_identity == "TONY-GAMING-TOP GPU Compute"
+    assert peers["gaming-4090"].expected_card_identity == "TONY-GAMING-TOP"
     assert peers["gaming-4090"].allowed_profiles == ("default",)
     # profile ceiling enforced: unknown profile for this peer is rejected
     bad = json.loads(path.read_text())
