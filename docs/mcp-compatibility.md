@@ -1,7 +1,7 @@
 # MCP Compatibility
 
 - Status: current (v0.7.0, Flight Deck)
-- Owner: hermes-dev
+- Owner: default (implementation: developer profile)
 - Verified: 2026-08-15 against `mcp` 1.28.1 (`mcp.shared.version`)
 
 This manifest pins and verifies the Model Context Protocol surface that
@@ -58,6 +58,15 @@ Every tool advertises its security scheme via MCP tool metadata
 | Static bearer (`HERMES_GPT_BEARER_TOKEN`) | `http` / `bearer` |
 | Neither | `noauth` (loopback / trusted-proxy only) |
 
+## Version advertisement
+
+The `initialize` handshake advertises the hermes-gpt app version in
+`serverInfo.version` (from `versioning.VERSION`, currently `0.7.0`) — not the
+MCP SDK version. This lets a client detect a stale process that is still
+exposing an old schema. `test_mcp_compat.py::test_initialize_advertises_server_version`
+asserts the handshake reports `versioning.VERSION` and that the pinned floor
+(`2024-11-05`) remains negotiable on the running SDK.
+
 Client notes:
 
 - **ChatGPT (chatgpt.com connector)**: uses the OAuth metadata to drive the
@@ -65,6 +74,11 @@ Client notes:
 - **Codex CLI**: uses stdio or streamable HTTP with the configured scheme;
   curated tool names (`hermes_extract_page` vs `hermes_web_extract`) are
   documented in `docs/codex.md`.
+- **Any client showing an old or incomplete tool list**: compare
+  `serverInfo.version` against the expected release, then refresh the client's
+  cached tool list. See [docs/updating.md](updating.md) for the check-first
+  update and cache-refresh behavior; it is the canonical guide and is not
+  duplicated here.
 
 ## Package floor
 

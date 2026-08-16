@@ -1,6 +1,6 @@
 # Operator Mode for Hermes GPT
 
-Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.6.0 behavior.
+Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.7.0 behavior.
 
 For documentation authority and historical-artifact rules, see [docs/README.md](README.md).
 
@@ -497,4 +497,5 @@ $env:HERMES_GPT_OWNER_ACK="I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
 - [Windows ChatGPT -> Codex](windows-chatgpt-codex.md)
 - [Updating](updating.md)
 - [Retention policy](retention-policy.md)
+- [v0.7.0 release notes](release-notes-v0.7.0.md)
 - [v0.6.0 release notes](release-notes-v0.6.0.md)
