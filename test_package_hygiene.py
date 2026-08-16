@@ -181,7 +181,10 @@ def test_sdist_does_not_ship_internal_docs(built_artifacts):
 def test_wheel_contains_public_docs_and_all_py_modules(built_artifacts):
     """Proof 10: the wheel data-files ship both v0.7 docs and every
     pyproject.toml py-module as a top-level module."""
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python < 3.11
+        import tomli as tomllib
     import zipfile
 
     wheels = [a for a in built_artifacts if a.name.endswith(".whl")]
