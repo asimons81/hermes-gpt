@@ -14,6 +14,10 @@ Files in this directory preserve technical design work produced before or during
 These are **design authority, not runtime authority**: verify any implementation
 claim against the current module and its tests before acting.
 
+## Active implementation notes
+
+- `pluggable-runner-architecture.md` — execution backend boundary for work contracts and swarm stages, including Pi RPC, OMX, Fleet/Codex compatibility adapters, third-party runner registration, observed-state validation, and deployment/source-of-truth policy.
+
 ## Historical v0.6 artifacts
 
 The following preserve v0.6.0 design work. They are **historical design
