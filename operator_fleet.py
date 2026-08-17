@@ -104,6 +104,11 @@ def _a2a_mode() -> str:
 
 
 def _hermes_bin(hermes_root: Path | None = None) -> str | None:
+    configured = os.environ.get("HERMES_CLI", "").strip()
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.is_file():
+            return str(candidate)
     root = hermes_root or op.normalize_hermes_data_root(os.environ.get("HERMES_HOME"))
     if root:
         for candidate in (root / "hermes-agent" / "venv" / "bin" / "hermes", root / "hermes-agent" / "venv" / "Scripts" / "hermes.exe"):
@@ -112,6 +117,9 @@ def _hermes_bin(hermes_root: Path | None = None) -> str | None:
     discovered = shutil.which("hermes")
     if discovered:
         return discovered
+    local_bin = Path.home() / ".local" / "bin" / "hermes"
+    if local_bin.is_file():
+        return str(local_bin)
     return None
 
 

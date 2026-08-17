@@ -313,10 +313,25 @@ def hermes_gateway_status(
         )
 
 
+def _hermes_cli() -> str:
+    """Return the Hermes CLI executable used by fixed-argv gateway commands."""
+    configured = os.environ.get("HERMES_CLI", "").strip()
+    if configured:
+        return str(Path(configured).expanduser())
+    found = shutil.which("hermes")
+    if found:
+        return found
+    local_bin = Path.home() / ".local" / "bin" / "hermes"
+    if local_bin.exists():
+        return str(local_bin)
+    return "hermes"
+
+
 def _hermes_argv(profile: str, sub: list[str]) -> list[str]:
+    hermes_cli = _hermes_cli()
     if profile == "default":
-        return ["hermes", *sub]
-    return ["hermes", "-p", profile, *sub]
+        return [hermes_cli, *sub]
+    return [hermes_cli, "-p", profile, *sub]
 
 
 def _gateway_restart_argv(profile: str) -> list[str]:
