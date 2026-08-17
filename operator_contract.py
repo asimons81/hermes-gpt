@@ -55,6 +55,7 @@ import operator_policy as op
 import operator_fleet as op_fleet
 import operator_mission as mission
 import operator_workspace as op_workspace
+import operator_runners as op_runners
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -384,6 +385,7 @@ def _canonical_contract(raw: Any) -> tuple[str, dict[str, Any]]:
     if auth_value is None and isinstance(raw.get("completion_criteria"), dict):
         auth_value = raw["completion_criteria"].get("authorization")
     authorization = op_fleet._authorization(auth_value)
+    execution = op_runners.normalize_execution(raw.get("execution"))
 
     contract: dict[str, Any] = {
         "schema": CONTRACT_SCHEMA,
@@ -404,6 +406,11 @@ def _canonical_contract(raw: Any) -> tuple[str, dict[str, Any]]:
         "constraints": _string_list(raw.get("constraints") or [], field="constraints"),
         "authorization": authorization,
     }
+    # Backward compatibility: omit the default fleet selector from canonical
+    # contracts unless the caller explicitly supplied an execution block. This
+    # preserves hashes for pre-runner work contracts.
+    if execution is not None:
+        contract["execution"] = execution
     canonical = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return canonical, contract
 
@@ -458,6 +465,12 @@ def _surface_contract(contract: dict[str, Any]) -> dict[str, Any]:
         }
         for a in contract.get("expected_artifacts", [])
     ]
+    if isinstance(contract.get("execution"), dict):
+        options = contract["execution"].get("options") or {}
+        surf["execution"] = {
+            "backend": contract["execution"].get("backend"),
+            "option_keys": sorted(str(k) for k in options.keys()),
+        }
     return surf
 
 
@@ -511,8 +524,16 @@ def _observed_delegations(task_id: str, hermes_root: Path) -> list[dict[str, Any
 
 
 def _observed_runs(task_id: str, hermes_root: Path) -> list[dict[str, Any]]:
-    """All observed run/outcome records for a task id (kanban + delegations)."""
-    return _observed_kanban_runs(task_id, hermes_root) + _observed_delegations(task_id, hermes_root)
+    """All observed run/outcome records for a task id.
+
+    Existing Mission Control sources remain authoritative for legacy/fleet work;
+    pluggable runner jobs contribute their own bounded durable state.
+    """
+    return (
+        _observed_kanban_runs(task_id, hermes_root)
+        + _observed_delegations(task_id, hermes_root)
+        + op_runners.observed_runs(task_id, hermes_root=hermes_root)
+    )
 
 
 def _observed_audit(limit: int = _MAX_REVIEW_EVIDENCE_SCAN) -> list[dict[str, Any]]:
@@ -936,56 +957,20 @@ def hermes_contract_dispatch(
         _audit_call(tool=tool, dry_run=True, success=False, changed=False, summary="duplicate task_id", contract_sha256=sha, task_id=task_id)
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
-    # Map the contract onto the fleet work-order envelope (D2: extends it).
-    workspaces = contract["allowed_scope"]["workspaces"]
-    acceptance_checks = [
-        f"run_state outcome_ok={contract['completion_criteria']['run_state']['outcome_ok']}",
-        f"artifacts_present={contract['completion_criteria']['artifacts_present']}",
-        f"tests_pass={contract['completion_criteria']['tests_pass']}",
-        f"review_satisfied={contract['completion_criteria']['review_satisfied']}",
-        f"no_forbidden_actions={contract['completion_criteria']['no_forbidden_actions']}",
-    ]
-    deliverables = [a["path"] for a in contract["expected_artifacts"]]
+    # Dispatch through the selected execution backend. Contracts without an
+    # explicit selector continue to use the legacy fleet path.
+    payload = op_runners.dispatch_contract(
+        contract,
+        confirm=confirm,
+        dry_run=dry_run,
+        timeout=timeout,
+        hermes_root=root,
+        runner=runner,
+        hermes_bin=hermes_bin,
+        authority_manifest=authority_manifest,
+    )
 
-    try:
-        fleet_result = op_fleet.hermes_fleet_dispatch_work_order(
-            agent=contract["assigned_agent"],
-            task_id=task_id,
-            target_profile=contract["assigned_profile"],
-            objective=contract["objective"],
-            workspace=workspaces[0] if workspaces else "",
-            inputs=contract["inputs"],
-            constraints=contract["constraints"],
-            acceptance_checks=acceptance_checks,
-            deliverables=deliverables,
-            authorization=contract["authorization"],
-            confirm=confirm,
-            dry_run=dry_run,
-            timeout=timeout,
-            runner=runner,
-            hermes_bin=hermes_bin,
-            authority_manifest=authority_manifest,
-        )
-        payload = json.loads(fleet_result)
-    except Exception as exc:
-        payload = _contract_error(
-            code="CONTRACT_DISPATCH_ERROR",
-            safe_message=op.redact_output(str(exc))[:300],
-            suggested_action="Check fleet authority manifest, registry, and peer service.",
-            trace_id=tid,
-        )
-        _audit_call(
-            tool=tool,
-            dry_run=bool(policy.effective_dry_run(dry_run)),
-            success=False,
-            changed=False,
-            summary="dispatch failed",
-            contract_sha256=sha,
-            task_id=task_id,
-        )
-        return json.dumps(payload, ensure_ascii=False, indent=2)
-
-    # Augment the fleet envelope with the contract identity; keep shape bounded.
+    # Augment the backend envelope with the contract identity; keep shape bounded.
     payload["contract_sha256"] = sha
     payload["contract_task_id"] = task_id
     _audit_call(
