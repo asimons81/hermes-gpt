@@ -32,6 +32,7 @@ import operator_fleet as op_fleet
 import operator_session as op_session
 import operator_mission as op_mission
 import operator_contract as op_contract
+import operator_runners as op_runners
 import operator_review as op_review
 import operator_events as op_events
 import operator_oauth as op_oauth
@@ -1394,6 +1395,9 @@ def hermes_operator_status() -> str:
             "hermes_contract_dispatch",
             "hermes_contract_validate",
             "hermes_contract_status",
+            "hermes_runner_list",
+            "hermes_runner_status",
+            "hermes_runner_cancel",
         ]
         result = {
             "success": True,
@@ -1994,6 +1998,32 @@ def hermes_contract_status(contract_json: str) -> str:
     return op_contract.hermes_contract_status(contract_json=contract_json, hermes_root=_default_hermes_root())
 
 
+# --- Pluggable Runner Backends ---------------------------------------------
+
+
+def hermes_runner_list() -> str:
+    return op_runners.hermes_runner_list(hermes_root=_default_hermes_root())
+
+
+def hermes_runner_status(task_id: str) -> str:
+    return op_runners.hermes_runner_status(task_id=task_id, hermes_root=_default_hermes_root())
+
+
+def hermes_runner_cancel(
+    task_id: str,
+    backend: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    return op_runners.hermes_runner_cancel(
+        task_id=task_id,
+        backend=backend,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
 def hermes_review_accept(
     contract_sha256: str,
     task_id: str,
@@ -2412,6 +2442,15 @@ def register_tools(server: FastMCP) -> None:
         hermes_contract_status,
     ):
         server.add_tool(_contract_tool, meta=tool_meta())
+
+    # Pluggable execution backends: list/status are read-only; cancellation is
+    # workspace/direct gated internally and dry-run-first.
+    for _runner_tool in (
+        hermes_runner_list,
+        hermes_runner_status,
+        hermes_runner_cancel,
+    ):
+        server.add_tool(_runner_tool, meta=tool_meta())
 
     # Review-evidence writer (v0.7 S3): owner-gated, distinct reviewer.
     server.add_tool(
