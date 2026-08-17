@@ -328,10 +328,10 @@ def _hermes_cli() -> str:
 
 
 def _hermes_argv(profile: str, sub: list[str]) -> list[str]:
-    hermes_cli = _hermes_cli()
+    """Return the stable logical Hermes argv used by plans and injected runners."""
     if profile == "default":
-        return [hermes_cli, *sub]
-    return [hermes_cli, "-p", profile, *sub]
+        return ["hermes", *sub]
+    return ["hermes", "-p", profile, *sub]
 
 
 def _gateway_restart_argv(profile: str) -> list[str]:
@@ -346,8 +346,13 @@ def _hermes_gateway_restart_raw(
 
     No policy checks; callers must gate mutation themselves.
     """
-    run_fn = runner or op.run_argv
-    return run_fn(_gateway_restart_argv(profile), timeout=120, workdir=None)
+    argv = _gateway_restart_argv(profile)
+    if runner is None:
+        argv = [_hermes_cli(), *argv[1:]]
+        run_fn = op.run_argv
+    else:
+        run_fn = runner
+    return run_fn(argv, timeout=120, workdir=None)
 
 
 def hermes_gateway_restart(

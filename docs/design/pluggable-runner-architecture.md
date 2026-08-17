@@ -44,7 +44,7 @@ Compatibility adapter for the existing raw Codex operator runner. It is not requ
 
 ## Extension mechanism
 
-External Python packages may register additional backends through the `hermes_gpt.runners` entry-point group. This allows OpenCode or other execution runtimes to be added without changing the contract dispatcher.
+External Python packages may register additional backends through the `hermes_gpt.runners` entry-point group. Automatic entry-point loading is opt-in via `HERMES_GPT_ENABLE_RUNNER_PLUGINS=1`; the default runtime loads only built-in backends. This allows OpenCode or other execution runtimes to be added without changing the contract dispatcher while avoiding import-time execution of unapproved third-party plugins.
 
 ## Contract shape
 
@@ -64,7 +64,7 @@ Example:
 }
 ```
 
-The `execution` block is optional. Secret-like option keys (tokens, API keys, credentials, passwords, private keys) are rejected; credentials belong in the runner's trusted environment/configuration, not in contracts.
+The `execution` block is optional. Secret-like option keys (tokens, API keys, credentials, passwords, private keys) are rejected; credentials belong in the runner's trusted environment/configuration, not in contracts. Runner options may narrow permissions but may not exceed the contract authorization class: read-only contracts cannot enable Pi write-capable tools or OMX/Codex workspace-write sandboxes.
 
 ## Swarm behavior
 
@@ -74,7 +74,7 @@ Explicit stage execution configuration takes precedence over legacy backend-spec
 
 ## Durable runner state
 
-Local runner state is stored under the Hermes data root in `runner-jobs`. This state is bounded and feeds the observed-run layer used by contract validation.
+Local runner state is stored under the Hermes data root in `runner-jobs`. This state is bounded and feeds the observed-run layer used by contract validation. The transient request envelope is mode `0600` and is deleted by the worker immediately after loading; model response text is not persisted in runner metadata. Cancellation is scoped to the job workspace and recorded through the operator audit trail.
 
 The invariant is:
 

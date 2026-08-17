@@ -37,6 +37,7 @@ import operator_fleet as op_fleet
 import operator_policy as op
 
 SCHEMA_VERSION = "0.6-runner.1"
+RUNNER_PLUGINS_ENV = "HERMES_GPT_ENABLE_RUNNER_PLUGINS"
 _BACKEND_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _TASK_ID_RE = op_fleet._TASK_ID_RE
 _MAX_OPTIONS_BYTES = 8_000
@@ -57,6 +58,10 @@ def _root(hermes_root: Path | None = None) -> Path:
 def _job_paths(task_id: str, hermes_root: Path | None = None) -> tuple[Path, Path, Path]:
     root = _root(hermes_root)
     return root / f"{task_id}.json", root / f"{task_id}.request.json", root / f"{task_id}.jsonl"
+
+
+def _cancel_path(task_id: str, hermes_root: Path | None = None) -> Path:
+    return _root(hermes_root) / f"{task_id}.cancel.json"
 
 
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:
@@ -97,6 +102,32 @@ def _bounded_text(value: Any, maximum: int = _MAX_RESULT_CHARS) -> str:
     return text if len(text) <= maximum else text[: maximum - 3] + "..."
 
 
+def _audit_runner(
+    *,
+    tool: str,
+    policy: op.OperatorPolicy,
+    dry_run: bool,
+    success: bool,
+    changed: bool = False,
+    summary: str = "",
+    task_id: str = "",
+    backend: str = "",
+) -> None:
+    try:
+        op.audit_record(
+            tool=tool,
+            level=policy.level,
+            apply_mode=policy.apply_mode,
+            dry_run=dry_run,
+            success=success,
+            changed=changed,
+            summary=summary,
+            extra={"task_id": task_id, "backend": backend},
+        )
+    except Exception as exc:
+        logger.debug("runner audit failed", exc_info=exc)
+
+
 def normalize_execution(value: Any) -> dict[str, Any] | None:
     """Validate an optional contract ``execution`` selector.
 
@@ -124,6 +155,38 @@ def normalize_execution(value: Any) -> dict[str, Any] | None:
     if len(encoded.encode("utf-8")) > _MAX_OPTIONS_BYTES:
         raise ValueError(f"execution.options exceeds {_MAX_OPTIONS_BYTES} bytes")
     return {"backend": backend, "options": options}
+
+
+def _authorization_class(contract: dict[str, Any]) -> str:
+    return str(contract.get("authorization", {}).get("class") or "none")
+
+
+def _pi_tools(contract: dict[str, Any]) -> str:
+    options = ((contract.get("execution") or {}).get("options") or {})
+    auth_class = _authorization_class(contract)
+    requested = options.get("tools")
+    if requested is None or requested == "":
+        return "read" if auth_class in {"none", "read_only"} else "read,bash,edit,write"
+    if not isinstance(requested, str):
+        raise TypeError("pi_rpc execution.options.tools must be a comma-delimited string")
+    tools = [item.strip() for item in requested.split(",") if item.strip()]
+    if not tools:
+        raise ValueError("pi_rpc execution.options.tools must not be empty")
+    if auth_class in {"none", "read_only"} and set(tools) - {"read"}:
+        raise PermissionError("read-only authorization may only enable Pi's read tool")
+    return ",".join(tools)
+
+
+def _sandbox_for(contract: dict[str, Any], *, backend: str) -> str:
+    options = ((contract.get("execution") or {}).get("options") or {})
+    auth_class = _authorization_class(contract)
+    requested = options.get("sandbox")
+    sandbox = str(requested or ("read-only" if auth_class in {"none", "read_only"} else "workspace-write"))
+    if sandbox not in {"read-only", "workspace-write"}:
+        raise ValueError(f"{backend} execution.options.sandbox must be read-only or workspace-write")
+    if auth_class in {"none", "read_only"} and sandbox != "read-only":
+        raise PermissionError(f"read-only authorization may not use {backend} workspace-write sandbox")
+    return sandbox
 
 
 class RunnerBackend(Protocol):
@@ -395,11 +458,10 @@ class _LocalProcessBackend:
             start_new_session=True,
             close_fds=True,
         )
-        meta["pid"] = proc.pid
-        meta["state"] = "running"
-        meta["started_at"] = _now()
-        _atomic_json(meta_path, meta)
-        return {"success": True, "changed": True, "dry_run": False, "backend": self.name, "task_id": task_id, "state": "running", "pid": proc.pid}
+        # The worker owns durable state transitions. Avoid a parent-side write
+        # after spawn: a fast worker could otherwise complete and then be
+        # overwritten back to "running" by the parent.
+        return {"success": True, "changed": True, "dry_run": False, "backend": self.name, "task_id": task_id, "state": "queued", "pid": proc.pid}
 
     def observed_runs(self, task_id: str, *, hermes_root: Path | None = None) -> list[dict[str, Any]]:
         if not _TASK_ID_RE.fullmatch(task_id or ""):
@@ -425,6 +487,7 @@ class _LocalProcessBackend:
             return {"success": False, "code": "RUNNER_JOB_NOT_FOUND", "backend": self.name}
         if meta.get("state") in _TERMINAL_STATES:
             return {"success": True, "changed": False, "backend": self.name, "state": meta.get("state")}
+        _atomic_json(_cancel_path(task_id, hermes_root), {"task_id": task_id, "requested_at": _now()})
         pid = meta.get("pid")
         if isinstance(pid, int) and pid > 1:
             try:
@@ -454,10 +517,7 @@ class PiRpcBackend(_LocalProcessBackend):
 
     def build_plan(self, contract: dict[str, Any]) -> dict[str, Any]:
         options = ((contract.get("execution") or {}).get("options") or {})
-        auth_class = str(contract.get("authorization", {}).get("class") or "none")
-        tools = options.get("tools")
-        if not tools:
-            tools = "read" if auth_class in {"none", "read_only"} else "read,bash,edit,write"
+        tools = _pi_tools(contract)
         return {"protocol": "jsonl-rpc", "mode": "rpc", "tools": tools, "model": options.get("model"), "provider": options.get("provider")}
 
 
@@ -475,10 +535,7 @@ class OmxBackend(_LocalProcessBackend):
 
     def build_plan(self, contract: dict[str, Any]) -> dict[str, Any]:
         options = ((contract.get("execution") or {}).get("options") or {})
-        auth_class = str(contract.get("authorization", {}).get("class") or "none")
-        sandbox = options.get("sandbox") or ("read-only" if auth_class in {"none", "read_only"} else "workspace-write")
-        if sandbox not in {"read-only", "workspace-write"}:
-            raise ValueError("omx execution.options.sandbox must be read-only or workspace-write")
+        sandbox = _sandbox_for(contract, backend="omx")
         return {"mode": "exec", "json": True, "sandbox": sandbox, "model": options.get("model"), "profile": options.get("profile")}
 
 
@@ -500,8 +557,7 @@ class CodexBackend:
         import operator_codex as op_codex
         options = ((contract.get("execution") or {}).get("options") or {})
         workspace = contract["allowed_scope"]["workspaces"][0]
-        auth_class = str(contract.get("authorization", {}).get("class") or "none")
-        sandbox = options.get("sandbox") or ("read-only" if auth_class in {"none", "read_only"} else "workspace-write")
+        sandbox = _sandbox_for(contract, backend="codex")
         result = op_codex.hermes_codex_start(
             prompt=contract["objective"],
             workdir=workspace,
@@ -563,8 +619,7 @@ def _extract_pi_text(message: Any) -> str:
 
 def _worker_pi(exe: str, contract: dict[str, Any], timeout: int, log_path: Path) -> tuple[int, str]:
     options = ((contract.get("execution") or {}).get("options") or {})
-    auth_class = str(contract.get("authorization", {}).get("class") or "none")
-    tools = str(options.get("tools") or ("read" if auth_class in {"none", "read_only"} else "read,bash,edit,write"))
+    tools = _pi_tools(contract)
     argv = [exe, "--mode", "rpc", "--no-session", "--tools", tools]
     if options.get("provider"):
         argv += ["--provider", str(options["provider"])]
@@ -629,8 +684,7 @@ def _worker_pi(exe: str, contract: dict[str, Any], timeout: int, log_path: Path)
 
 def _worker_omx(exe: str, contract: dict[str, Any], timeout: int, log_path: Path) -> tuple[int, str]:
     options = ((contract.get("execution") or {}).get("options") or {})
-    auth_class = str(contract.get("authorization", {}).get("class") or "none")
-    sandbox = str(options.get("sandbox") or ("read-only" if auth_class in {"none", "read_only"} else "workspace-write"))
+    sandbox = _sandbox_for(contract, backend="omx")
     workspace = contract["allowed_scope"]["workspaces"][0]
     argv = [exe, "exec", "--json", "-C", workspace, "--sandbox", sandbox]
     if options.get("model"):
@@ -676,6 +730,13 @@ def _worker(task_id: str, jobs_root: Path) -> int:
     contract = request["contract"]
     backend_name = str(request.get("backend") or "")
     timeout = max(10, min(int(request.get("timeout") or 900), 3600))
+    # The objective is needed only to start the worker. Remove the durable
+    # request envelope as soon as it has been loaded so prompt text is not
+    # retained after dispatch.
+    try:
+        request_path.unlink()
+    except OSError:
+        pass
     try:
         backend = get_backend(backend_name)
         exe = backend.executable() if isinstance(backend, _LocalProcessBackend) else None
@@ -683,10 +744,14 @@ def _worker(task_id: str, jobs_root: Path) -> int:
             raise RuntimeError(f"{backend_name} executable not found")
         meta.update({"state": "running", "started_at": meta.get("started_at") or _now(), "pid": os.getpid()})
         _atomic_json(meta_path, meta)
+        if (jobs_root / f"{task_id}.cancel.json").exists():
+            meta.update({"state": "cancelled", "outcome": "cancelled", "ended_at": _now()})
+            _atomic_json(meta_path, meta)
+            return 0
         if backend_name == "pi_rpc":
-            rc, final_text = _worker_pi(exe, contract, timeout, log_path)
+            rc, _ = _worker_pi(exe, contract, timeout, log_path)
         elif backend_name == "omx":
-            rc, final_text = _worker_omx(exe, contract, timeout, log_path)
+            rc, _ = _worker_omx(exe, contract, timeout, log_path)
         else:
             raise RuntimeError(f"local worker does not support backend {backend_name}")
         meta["returncode"] = rc
@@ -699,8 +764,9 @@ def _worker(task_id: str, jobs_root: Path) -> int:
             meta["state"] = "failed"
             meta["outcome"] = "failed"
             meta["error"] = "runner timed out" if rc == 124 else f"runner exited with code {rc}"
-        if final_text:
-            meta["result_summary"] = _bounded_text(final_text)
+        # Completion evidence is state/exit metadata only. Do not persist the
+        # model's final text in the runner store; contract validation must not
+        # depend on worker self-report or retain prompt-derived output.
         _atomic_json(meta_path, meta)
         return rc
     except Exception as exc:  # noqa: BLE001
@@ -712,12 +778,14 @@ def _worker(task_id: str, jobs_root: Path) -> int:
 def hermes_runner_list(hermes_root: Path | None = None) -> str:
     """List registered runner backends and bounded availability metadata."""
     try:
-        op.OperatorPolicy().require_level("read_only")
+        policy = op.OperatorPolicy()
+        policy.require_level("read_only")
         payload = {
             "success": True,
             "schema_version": SCHEMA_VERSION,
             "backends": list_backends(hermes_root=hermes_root),
         }
+        _audit_runner(tool="hermes_runner_list", policy=policy, dry_run=True, success=True, summary="listed runner backends")
         return json.dumps(payload, ensure_ascii=False, indent=2)
     except PermissionError as exc:
         return json.dumps({"success": False, "code": "RUNNER_POLICY_DENIED", "safe_message": _bounded_text(exc, 300)}, indent=2)
@@ -726,10 +794,12 @@ def hermes_runner_list(hermes_root: Path | None = None) -> str:
 def hermes_runner_status(task_id: str, hermes_root: Path | None = None) -> str:
     """Return bounded observed state for a contract task across runner backends."""
     try:
-        op.OperatorPolicy().require_level("read_only")
+        policy = op.OperatorPolicy()
+        policy.require_level("read_only")
         if not _TASK_ID_RE.fullmatch(task_id or ""):
             raise ValueError("task_id has an invalid format")
         runs = observed_runs(task_id, hermes_root=hermes_root)
+        _audit_runner(tool="hermes_runner_status", policy=policy, dry_run=True, success=True, summary=f"observed {len(runs)} runner record(s)", task_id=task_id)
         return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "task_id": task_id, "runs": runs, "count": len(runs)}, ensure_ascii=False, indent=2)
     except (PermissionError, ValueError) as exc:
         return json.dumps({"success": False, "code": "RUNNER_STATUS_ERROR", "safe_message": _bounded_text(exc, 300)}, indent=2)
@@ -752,13 +822,25 @@ def hermes_runner_cancel(task_id: str, backend: str = "", confirm: bool = False,
         if not selected:
             return json.dumps({"success": False, "code": "RUNNER_BACKEND_REQUIRED", "safe_message": "backend could not be inferred for task"}, indent=2)
         target = get_backend(selected)
+        if isinstance(target, _LocalProcessBackend):
+            meta_path, _, _ = _job_paths(task_id, hermes_root)
+            meta = _load_json(meta_path)
+            if not meta or meta.get("backend") != selected:
+                return json.dumps({"success": False, "code": "RUNNER_JOB_NOT_FOUND", "backend": selected, "task_id": task_id}, indent=2)
+            workspace = meta.get("workspace")
+            if not isinstance(workspace, str) or not workspace:
+                raise PermissionError("runner job has no valid workspace scope")
+            policy.require_workspace_path(workspace)
         if effective:
+            _audit_runner(tool="hermes_runner_cancel", policy=policy, dry_run=True, success=True, changed=False, summary="cancel plan", task_id=task_id, backend=selected)
             return json.dumps({"success": True, "dry_run": True, "changed": False, "backend": selected, "task_id": task_id, "plan": "cancel"}, indent=2)
         if not confirm:
+            _audit_runner(tool="hermes_runner_cancel", policy=policy, dry_run=True, success=False, changed=False, summary="confirmation required", task_id=task_id, backend=selected)
             return json.dumps({"success": False, "code": "CONFIRMATION_REQUIRED", "backend": selected, "safe_message": "runner cancellation requires confirm=true"}, indent=2)
         result = target.cancel(task_id, hermes_root=hermes_root)
         result.setdefault("backend", selected)
         result.setdefault("task_id", task_id)
+        _audit_runner(tool="hermes_runner_cancel", policy=policy, dry_run=False, success=bool(result.get("success")), changed=bool(result.get("changed")), summary="cancelled runner job" if result.get("success") else "runner cancel failed", task_id=task_id, backend=selected)
         return json.dumps(result, ensure_ascii=False, indent=2)
     except (PermissionError, ValueError, LookupError) as exc:
         return json.dumps({"success": False, "code": "RUNNER_CANCEL_ERROR", "safe_message": _bounded_text(exc, 300)}, indent=2)
@@ -770,7 +852,8 @@ def _register_builtins() -> None:
 
 
 _register_builtins()
-load_entrypoint_backends()
+if op.env_truthy(RUNNER_PLUGINS_ENV):
+    load_entrypoint_backends()
 
 
 def _main(argv: list[str]) -> int:

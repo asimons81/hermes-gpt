@@ -169,3 +169,58 @@ def test_canonical_swarm_accepts_per_stage_execution(tmp_path: Path):
     contract = swarm._stage_contract(wf, impl, task_id="runner-stage-001")
     _, parsed, _ = contract_mod._parse_contract(json.dumps(contract))
     assert parsed["execution"]["backend"] == "pi_rpc"
+
+
+def test_read_only_pi_cannot_enable_write_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    root = tmp_path / "hermes"
+    root.mkdir()
+    _enable_workspace(monkeypatch, ws)
+    backend = runners.get_backend("pi_rpc")
+    monkeypatch.setattr(backend, "executable", lambda: "/bin/true")
+    raw = _contract(ws, backend="pi_rpc", options={"tools": "read,bash,edit,write"})
+    raw["authorization"] = {"class": "read_only", "approved": True}
+    payload = json.loads(contract_mod.hermes_contract_dispatch(json.dumps(raw), dry_run=True, hermes_root=root))
+    assert payload["success"] is False
+    assert payload["code"] == "RUNNER_DISPATCH_ERROR"
+    assert "read-only authorization" in payload["safe_message"]
+
+
+def test_read_only_omx_cannot_request_workspace_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    root = tmp_path / "hermes"
+    root.mkdir()
+    _enable_workspace(monkeypatch, ws)
+    backend = runners.get_backend("omx")
+    monkeypatch.setattr(backend, "executable", lambda: "/bin/true")
+    raw = _contract(ws, backend="omx", options={"sandbox": "workspace-write"})
+    raw["authorization"] = {"class": "read_only", "approved": True}
+    payload = json.loads(contract_mod.hermes_contract_dispatch(json.dumps(raw), dry_run=True, hermes_root=root))
+    assert payload["success"] is False
+    assert payload["code"] == "RUNNER_DISPATCH_ERROR"
+    assert "read-only authorization" in payload["safe_message"]
+
+
+def test_runner_cancel_enforces_job_workspace_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    allowed = tmp_path / "allowed"
+    other = tmp_path / "other"
+    root = tmp_path / "hermes"
+    allowed.mkdir()
+    other.mkdir()
+    root.mkdir()
+    _enable_workspace(monkeypatch, allowed)
+    task_id = "runner-cancel-scope"
+    meta_path, _, _ = runners._job_paths(task_id, root)
+    runners._atomic_json(meta_path, {
+        "schema_version": runners.SCHEMA_VERSION,
+        "task_id": task_id,
+        "backend": "pi_rpc",
+        "state": "running",
+        "workspace": str(other),
+        "pid": None,
+    })
+    payload = json.loads(runners.hermes_runner_cancel(task_id, backend="pi_rpc", dry_run=True, hermes_root=root))
+    assert payload["success"] is False
+    assert payload["code"] == "RUNNER_CANCEL_ERROR"
