@@ -778,12 +778,22 @@ def _find_secret_files(workdir: Path) -> list[str]:
     found: list[str] = []
     for root, dirs, files in os.walk(workdir):
         root_path = Path(root)
-        # Skip git internals and caches.
-        dirs[:] = [d for d in dirs if d not in {".git", "__pycache__", ".pytest_cache", "node_modules"}]
+        # Skip git internals, caches, and local virtualenvs (dev artifacts
+        # that are never shipped; third-party packages inside them can contain
+        # secret-like filenames, e.g. keyring/credentials.py).
+        dirs[:] = [d for d in dirs if d not in {".git", "__pycache__", ".pytest_cache", "node_modules", ".venv", "venv", ".tox", ".nox"}]
         for name in files:
             lower = name.lower()
             if name in secret_names or lower.startswith(".env.") or name == ".env":
                 found.append(str(root_path / name))
+                continue
+            # The substring heuristic targets secret-bearing data files
+            # (tokens.json, oauth-store.json, credentials.yaml, ...). Source
+            # modules and markdown docs are legitimate even when their names
+            # contain "oauth"/"token"/"secret" (oauth_auth.py, token_store.py,
+            # docs/oauth.md), so they are exempt from the substring scan —
+            # exact-name checks above still apply to them.
+            if lower.endswith((".py", ".md")):
                 continue
             for sub in secret_substrings:
                 if sub in lower:

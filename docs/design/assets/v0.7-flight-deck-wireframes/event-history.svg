@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0E1630"/>
+      <stop offset="1" stop-color="#131A2E"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="780" fill="#0B1020"/>
+  <rect width="1200" height="780" fill="url(#grid)"/>
+
+  <!-- Top bar -->
+  <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+  <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+  <text x="24" y="44" fill="#8B98B8" font-size="11">event history · unified redacted timeline · hermes_events_*</text>
+  <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+  <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+
+  <!-- Left nav -->
+  <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+  <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+  <text x="16" y="90" fill="#8B98B8" font-size="12">OVERVIEW</text>
+  <text x="16" y="118" fill="#8B98B8" font-size="12">TASK MONITOR</text>
+  <text x="16" y="146" fill="#22D3EE" font-size="12" font-weight="700">▸ EVENT HISTORY</text>
+  <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+  <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+
+  <!-- Filters -->
+  <rect x="204" y="80" width="972" height="116" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="104" fill="#E6EDF7" font-size="13" font-weight="700">Filters</text>
+  <text x="224" y="124" fill="#8B98B8" font-size="11">hermes_events_query(source, subject_id, kind, since, until, limit)</text>
+  <rect x="224" y="140" width="140" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="159" fill="#E6EDF7" font-size="11">source: all ▾</text>
+  <rect x="376" y="140" width="160" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="388" y="159" fill="#E6EDF7" font-size="11">subject_id: —</text>
+  <rect x="548" y="140" width="140" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="560" y="159" fill="#E6EDF7" font-size="11">kind: all ▾</text>
+  <rect x="700" y="140" width="150" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="712" y="159" fill="#E6EDF7" font-size="11">since: 7d ▾</text>
+  <rect x="862" y="140" width="120" height="30" rx="4" fill="#22D3EE" opacity="0.15"/>
+  <text x="874" y="159" fill="#22D3EE" font-size="11" font-weight="700">APPLY</text>
+  <rect x="994" y="140" width="120" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="1006" y="159" fill="#8B98B8" font-size="11">RESET</text>
+  <text x="224" y="186" fill="#8B98B8" font-size="10">retention: 90d window · HERMES_GPT_EVENTS_MAX_AGE_DAYS · allowlist: all sources (env HERMES_GPT_EVENTS_ALLOWED_SOURCES)</text>
+
+  <!-- Timeline -->
+  <rect x="204" y="212" width="972" height="512" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="236" fill="#E6EDF7" font-size="13" font-weight="700">Timeline</text>
+  <text x="224" y="256" fill="#8B98B8" font-size="11">normalized EventRecord view schema · no raw bodies · redacted summaries · refs only</text>
+
+  <line x1="244" y1="280" x2="244" y2="700" stroke="#2A3550" stroke-width="2"/>
+
+  <!-- event 1 -->
+  <circle cx="244" cy="304" r="5" fill="#A78BFA"/>
+  <text x="266" y="300" fill="#E6EDF7" font-size="12" font-weight="700">14:02:11 UTC · swarm · stage_done</text>
+  <text x="266" y="318" fill="#8B98B8" font-size="11">subject swf-8f21 · actor developer · status_before running → status_after awaiting_approval</text>
+  <text x="266" y="334" fill="#8B98B8" font-size="11">summary: release-research stage research/write completed with 14 artifacts</text>
+  <text x="266" y="350" fill="#5B6A8F" font-size="10">refs: [docs/design/…, test run log] · trace_id t-9f2c</text>
+
+  <!-- event 2 -->
+  <circle cx="244" cy="386" r="5" fill="#22D3EE"/>
+  <text x="266" y="382" fill="#E6EDF7" font-size="12" font-weight="700">14:00:47 UTC · codex · job_finished</text>
+  <text x="266" y="400" fill="#8B98B8" font-size="11">subject codex-17a2 · actor codex · exit 0 · duration 11m</text>
+  <text x="266" y="416" fill="#8B98B8" font-size="11">summary: docs diff sweep completed</text>
+  <text x="266" y="432" fill="#5B6A8F" font-size="10">refs: [codex-jobs/17a2/transcript.jsonl (referenced, not copied)]</text>
+
+  <!-- event 3 -->
+  <circle cx="244" cy="468" r="5" fill="#FBBF24"/>
+  <text x="266" y="464" fill="#E6EDF7" font-size="12" font-weight="700">13:58:03 UTC · cron · run_started</text>
+  <text x="266" y="482" fill="#8B98B8" font-size="11">subject nightly-sweep · actor cron · pid 4901</text>
+  <text x="266" y="498" fill="#8B98B8" font-size="11">summary: nightly sweep job started (redacted payload)</text>
+
+  <!-- event 4 -->
+  <circle cx="244" cy="534" r="5" fill="#34D399"/>
+  <text x="266" y="530" fill="#E6EDF7" font-size="12" font-weight="700">13:55:40 UTC · kanban · task_done</text>
+  <text x="266" y="548" fill="#8B98B8" font-size="11">subject t_9a2f · actor developer · status todo → done</text>
+  <text x="266" y="564" fill="#8B98B8" font-size="11">summary: architecture review completed</text>
+
+  <!-- event 5 redacted example -->
+  <circle cx="244" cy="600" r="5" fill="#FB7185"/>
+  <text x="266" y="596" fill="#E6EDF7" font-size="12" font-weight="700">13:52:09 UTC · audit · hermes_swarm_stage_advance</text>
+  <text x="266" y="614" fill="#8B98B8" font-size="11">subject swf-8f21 · actor developer · dry_run=true</text>
+  <text x="266" y="630" fill="#8B98B8" font-size="11">summary: [REDACTED] body suppressed · prompt length 0 · no raw text</text>
+  <text x="266" y="646" fill="#5B6A8F" font-size="10">redaction invariant: raw prompts/transcripts/credentials never appear</text>
+
+  <rect x="224" y="668" width="300" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="689" fill="#8B98B8" font-size="11">← load more (hermes_events_tail)</text>
+  <text x="860" y="680" fill="#8B98B8" font-size="11">50/50 shown · next page →</text>
+
+  <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+  <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="764" fill="#5B6A8F" font-size="10">D4-A read-model aggregator · sources: swarm, contract, cron, codex, kanban, audit · allowlist + retention + redaction</text>
+</svg>

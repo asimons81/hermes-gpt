@@ -719,6 +719,27 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
                 "status": "PASS",
                 "detail": f"audit acceptance by reviewer {reviewer} != assignee",
             }
+    # Evidence 1b (v0.7 S3): a ReviewAcceptanceRecord in the review-evidence
+    # store written via hermes_review_accept. Distinct reviewer re-checked at
+    # validate time (ADR-003): the record's reviewer must differ from the
+    # contract's assigned_agent.
+    try:
+        import operator_review as op_review
+
+        for rec in op_review.read_review_acceptances(hermes_root):
+            if rec.get("contract_sha256") != contract_sha256:
+                continue
+            if rec.get("verdict") != "SATISFIED":
+                continue
+            reviewer = rec.get("reviewer") or ""
+            if reviewer and reviewer != assigned_agent:
+                return {
+                    "kind": "review",
+                    "status": "PASS",
+                    "detail": f"review-evidence acceptance by reviewer {reviewer} != assignee",
+                }
+    except Exception:
+        pass
     # Evidence 2: human approval reference by someone other than the assignee.
     auth = contract.get("authorization") or {}
     approved_by = auth.get("approved_by") or ""

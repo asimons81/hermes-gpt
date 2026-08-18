@@ -3,21 +3,35 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.6.0 - ChatGPT for Hermes Agent](assets/hermes-gpt-v0.6.0-readme-hero.jpg)
+![Hermes GPT v0.7.0 - Flight Deck: Review Evidence, Event History, and Encrypted Tokens](assets/hermes-gpt-v0.7.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
 ## Current status
 
-- **Repository / GitHub release:** v0.6.0
+- **Repository version:** 0.7.0
+- **Latest GitHub release:** v0.7.0
+- **Latest PyPI release:** 0.7.0
 - **Python requirement:** 3.10+
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 
 > [!IMPORTANT]
-> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. At the v0.6.0 GitHub release, PyPI still served v0.5.0. Do not assume a PyPI install contains v0.6 features unless the badge reports v0.6.0 or newer.
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.7 features unless the badge reports v0.7.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.7.0 adds
+
+v0.7.0 "Flight Deck" adds four coordinated capabilities on top of the v0.6 control plane:
+
+1. **Production review evidence** - `hermes_review_accept`, an owner-gated writer with distinct-reviewer enforcement, feeding `hermes_contract_validate`.
+2. **Structured event history** - `hermes_events_query` / `hermes_events_tail`, a read-only redacted timeline over audit/swarm/codex/cron/kanban.
+3. **Durable encrypted token storage** - OAuth credentials survive restarts (AES-256-GCM envelope) with `hermes_oauth_status` / `hermes_oauth_revoke`.
+4. **Restart reconciliation** - `hermes_swarm_reconcile` marks interrupted swarm stages blocked (never auto-advances); stage advance is idempotent.
+
+Plus the MCP compatibility manifest, cross-machine seam interfaces (stretch,
+interfaces only), and a CI hermeticity fix. See the [v0.7.0 release notes](docs/release-notes-v0.7.0.md), the [MCP compatibility manifest](docs/mcp-compatibility.md), and [retention policy](docs/retention-policy.md).
 
 ## What v0.6.0 adds
 
@@ -35,6 +49,8 @@ See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention poli
 | --- | --- |
 | Understand the repository and current docs | [Documentation map](docs/README.md) |
 | Run Hermes GPT locally | [Local quickstart](#local-quickstart) |
+| Authenticate a remote MCP connector | [OAuth and bearer authentication](docs/oauth.md) |
+| Verify the MCP protocol surface | [MCP compatibility manifest](docs/mcp-compatibility.md) |
 | Use Codex as an MCP client | [Codex guide](docs/codex.md) |
 | Use ChatGPT or another trusted client to operate Hermes | [Operator Mode](docs/operator-mode.md) |
 | Let ChatGPT dispatch bounded work to the Codex CLI on Windows | [Windows ChatGPT -> Codex guide](docs/windows-chatgpt-codex.md) |
@@ -61,7 +77,7 @@ python -m pip install .
 hermes-gpt
 ```
 
-The final v0.6.0 wheel and sdist are also attached to the [GitHub v0.6.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.6.0).
+The final v0.6.0 wheel and sdist are also attached to the [GitHub v0.6.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.6.0). The v0.7.0 release notes cover the Flight Deck surfaces (`hermes_review_accept`, `hermes_events_*`, `hermes_oauth_*`, `hermes_swarm_reconcile`); operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
 
 ## Default local MCP surface
 
@@ -126,6 +142,13 @@ http://127.0.0.1:7677/mcp
 ```
 
 Keep the server on loopback. A remote client such as ChatGPT cannot use your machine's `127.0.0.1` directly, so remote access requires a deliberately configured private/authenticated boundary. Do not publish an unauthenticated Operator endpoint to the internet.
+
+Hermes GPT can enforce either a strong static bearer token or a built-in,
+single-confidential-client OAuth authorization-code flow with rotating refresh
+tokens. OAuth credentials are memory-backed and fail closed on missing client
+authentication, unsupported scope/resource, expiry, or replay. See
+[OAuth and bearer authentication](docs/oauth.md) before enabling the `remote`
+profile; authentication does not activate Operator mutation or Owner Mode.
 
 ## Operator Mode
 
@@ -267,6 +290,7 @@ Git checkout updates require a clean checkout on the default branch and use fast
 Current operational documentation:
 
 - [Documentation map and source-of-truth rules](docs/README.md)
+- [OAuth and bearer authentication](docs/oauth.md)
 - [Operator Mode](docs/operator-mode.md)
 - [Codex integration](docs/codex.md)
 - [Windows ChatGPT -> Codex deployment](docs/windows-chatgpt-codex.md)

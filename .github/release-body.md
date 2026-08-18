@@ -1,25 +1,32 @@
-# Hermes GPT v0.6.0
+# Hermes GPT v0.7.0 — Flight Deck
 
-Hermes GPT v0.6.0 adds Mission Control, observed-state Work Contracts, and bounded Swarm Orchestration on top of the existing local-first, dry-run-first safety model.
+Hermes GPT v0.7.0 "Flight Deck" makes durable autonomy legible: every long-running task, event, evidence record, and authority grant is visible, inspectable, and gated — without giving the operator a bypass. The release is additive; no existing tool name, schema, or authority class changes.
 
-## Mission Control (read-only)
+## Production review evidence (`hermes_review_accept`)
 
-The `hermes_mission_*` surface gives a bounded, audited, read-only operational view of the Hermes deployment for trusted MCP clients. It is deny-by-default, never mutates state, and excludes raw messages, prompts, request dumps, transcripts, memory bodies, and secrets.
+Owner-gated write of review-acceptance records with distinct-reviewer enforcement **in code** at write time and re-checked at validate time (`reviewer != assignee`; self-review rejected both ways). Bounded verdict vocabulary (`SATISFIED` / `NOT_SATISFIED`), referenced-not-copied evidence (no raw prompts or transcripts in the store), and a durable append-only store read by `hermes_contract_validate` alongside the v0.6 audit + human-approval paths.
 
-Free-text failure, audit, cron, and delegation fields receive a conservative PII-strip pass (emails, phone-like numbers, `@` usernames, identity labels, and personal-name patterns) before they can reach a client response.
+## Structured event history (`hermes_events_query` / `hermes_events_tail`)
 
-## Work Contracts (fail-closed)
+A unified, queryable, redacted timeline across audit, swarm, codex, cron, and kanban stores. Read-only by construction, with a per-source allowlist (`HERMES_GPT_EVENTS_ALLOWED_SOURCES`), retention window (`HERMES_GPT_EVENTS_MAX_AGE_DAYS`, default 90), and the same Mission Control redaction invariants: no raw messages, memory bodies, transcripts, request dumps, credentials, or profile-secret bodies.
 
-`hermes_contract_*` defines, dispatches, validates, and reports declarative work contracts from observed state rather than worker self-report. Validation rejects false "done" claims (S2). Retry selection is deterministic and forbidden-action audit checks are scoped to the contract's task identity.
+## Durable encrypted token storage + trusted-client OAuth
 
-## Swarm Orchestration (bounded)
+OAuth access/refresh tokens persist through an AES-256-GCM envelope at `<hermes_data>/secrets/hermes_gpt_tokens.json` (0600) with keyring → key file → env key precedence, so server restarts no longer invalidate issued credentials. Added `hermes_oauth_status` (presence/expiry only — no token material on any surface) and `hermes_oauth_revoke` (owner-gated). OAuth is promoted from Unreleased to shipped and documented in `docs/oauth.md`.
 
-`hermes_swarm_*` runs bounded, DAG-validated workflows on top of Work Contracts with capped scheduling, isolated worktree plans, explicit ownership gates, and Codex verdict constraints. Codex is never an implementation owner and receives only bounded verdict material.
+## Restart-safe continuity (`hermes_swarm_reconcile`)
 
-## Retention
+Marks swarm stages stuck in `running` as `blocked` with `reason: interrupted_by_restart` — never auto-advances — and reloads the durable token envelope. `hermes_swarm_stage_advance` is now idempotent for already-validated/done stages. Dry-run by default; apply requires workspace/owner + direct.
 
-Request dumps, Codex transcripts/artifacts, M2 worktrees, and workflow/verdict records have documented retention windows and a maintainer-operated cleanup procedure (see `docs/retention-policy.md`). Codex job artifacts are auto-cleaned after 30 days.
+## MCP compatibility manifest
 
-## Security posture
+`docs/mcp-compatibility.md` pins the minimum supported MCP protocol revision (2024-11-05) through the installed SDK's latest (2025-11-25), the transport matrix (stdio, streamable HTTP, SSE), and trusted-client auth metadata, with compatibility tests against the installed SDK.
 
-Hermes GPT remains a standalone local MCP sidecar. Operator access is opt-in, mutations are dry-run-first and explicitly gated, and the Codex runner uses fixed argv, `shell=False`, bounded timeouts, and approved work directories. Danger-full-access, approval bypasses, and arbitrary commands are unsupported. Public unauthenticated hosting remains unsupported.
+## Also in this release
+
+- Cross-machine seam interfaces (`seams.py`: `DispatchAdapter` / `EvidenceProvider` protocols) validated by a two-process-one-host fake over loopback — interfaces only, no remote implementation shipped.
+- CI hermeticity fix: `_call_skill_manager` no longer fails when the Hermes Agent source tree is absent from `sys.path`; profile-scoping tests skip only when `hermes_constants` is unavailable.
+
+## Verification
+
+Full test suite green: 646 tests collected — 643 passed, 3 skipped — covering MCP compat, recovery, review, events, token store, and seams. CI green on Python 3.10–3.12. See the [v0.7.0 release notes](docs/release-notes-v0.7.0.md) and [retention policy](docs/retention-policy.md).

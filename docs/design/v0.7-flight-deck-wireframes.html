@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flight Deck UI — Wireframes (v0.7 interaction design)</title>
+<style>
+  :root {
+    --bg: #0B1020;
+    --panel: #131A2E;
+    --border: #2A3550;
+    --text: #E6EDF7;
+    --muted: #8B98B8;
+    --dim: #5B6A8F;
+    --cyan: #22D3EE;
+    --emerald: #34D399;
+    --amber: #FBBF24;
+    --rose: #FB7185;
+    --violet: #A78BFA;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding: 32px;
+  }
+  header { max-width: 1240px; margin: 0 auto 8px; }
+  h1 { font-size: 22px; color: var(--cyan); letter-spacing: 2px; margin: 0 0 8px; }
+  p.sub { color: var(--muted); font-size: 12px; margin: 0 0 4px; max-width: 900px; line-height: 1.6; }
+  .meta { color: var(--dim); font-size: 11px; margin-bottom: 32px; }
+  .tokens { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0 32px; }
+  .token {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px; font-size: 11px; color: var(--muted);
+  }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.15); }
+  section { max-width: 1240px; margin: 0 auto 48px; }
+  h2 {
+    font-size: 15px; color: var(--emerald); letter-spacing: 1px;
+    border-bottom: 1px solid var(--border); padding-bottom: 10px; margin: 0 0 6px;
+  }
+  p.caption { color: var(--muted); font-size: 12px; margin: 4px 0 16px; line-height: 1.6; max-width: 900px; }
+  .frame {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    overflow-x: auto;
+  }
+  .frame svg { width: 100%; height: auto; min-width: 900px; display: block; border-radius: 4px; }
+  footer { max-width: 1240px; margin: 48px auto 0; color: var(--dim); font-size: 11px; border-top: 1px solid var(--border); padding-top: 16px; line-height: 1.7; }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FLIGHT DECK UI — WIREFRAMES</h1>
+  <p class="sub">Hermes GPT v0.7 interaction design · control-plane theme (D2-A) · read-only presentation layer over the MCP surface · no new authority · redaction invariants applied.</p>
+  <p class="meta">kanban t_dd366ab6 · media · 2026-08-15 · companion to docs/design/v0.7-flight-deck-interaction-design.md</p>
+  <div class="tokens">
+    <div class="token"><span class="swatch" style="background:#22D3EE"></span>flight / active</div>
+    <div class="token"><span class="swatch" style="background:#34D399"></span>healthy / satisfied</div>
+    <div class="token"><span class="swatch" style="background:#FBBF24"></span>warning / dry-run / blocked</div>
+    <div class="token"><span class="swatch" style="background:#FB7185"></span>denied / error / owner</div>
+    <div class="token"><span class="swatch" style="background:#A78BFA"></span>review / authority</div>
+    <div class="token"><span class="swatch" style="background:#5B6A8F"></span>muted / meta</div>
+  </div>
+</header>
+
+<section id="overview">
+  <h2>01 · DECK OVERVIEW</h2>
+  <p class="caption">System status, active long-running tasks, recent event tail, and least-privilege authority posture in one read-only surface. All data comes from mission_* / events_* / contract / swarm surfaces.</p>
+  <div class="frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+        </pattern>
+        <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#0E1630"/>
+          <stop offset="1" stop-color="#131A2E"/>
+        </linearGradient>
+      </defs>
+    
+      <rect width="1200" height="780" fill="#0B1020"/>
+      <rect width="1200" height="780" fill="url(#grid)"/>
+    
+      <!-- Top bar -->
+      <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+      <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+      <text x="24" y="44" fill="#8B98B8" font-size="11">hermes-gpt v0.7 · control-plane theme · read-only presentation</text>
+      <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+      <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+      <text x="760" y="22" fill="#8B98B8" font-size="12">profile: tony</text>
+      <text x="760" y="40" fill="#8B98B8" font-size="12">client: ChatGPT (MCP)</text>
+    
+      <!-- Left nav -->
+      <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+      <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+      <text x="16" y="90" fill="#22D3EE" font-size="12" font-weight="700">▸ OVERVIEW</text>
+      <text x="16" y="118" fill="#8B98B8" font-size="12">TASKS</text>
+      <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+      <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+      <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+      <line x1="16" y1="222" x2="164" y2="222" stroke="#2A3550"/>
+      <text x="16" y="248" fill="#8B98B8" font-size="11">mission surfaces</text>
+      <text x="16" y="272" fill="#5B6A8F" font-size="11">overview · health</text>
+      <text x="16" y="290" fill="#5B6A8F" font-size="11">profiles · fleet</text>
+      <text x="16" y="308" fill="#5B6A8F" font-size="11">codex · cron</text>
+      <text x="16" y="326" fill="#5B6A8F" font-size="11">delegations</text>
+      <text x="16" y="344" fill="#5B6A8F" font-size="11">failures</text>
+      <text x="16" y="362" fill="#5B6A8F" font-size="11">approvals · vault</text>
+      <text x="16" y="380" fill="#5B6A8F" font-size="11">usage · audit</text>
+    
+      <!-- Hero: health strip -->
+      <rect x="204" y="80" width="972" height="64" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="104" fill="#E6EDF7" font-size="14" font-weight="700">System status</text>
+      <text x="224" y="126" fill="#8B98B8" font-size="11">hermes_mission_health · TTL 5s · allowlist: all</text>
+      <text x="880" y="104" fill="#34D399" font-size="12">health: nominal</text>
+      <text x="880" y="126" fill="#8B98B8" font-size="11">uptime 3d 04h · CI: RED (S0 gate)</text>
+    
+      <!-- Active tasks -->
+      <rect x="204" y="160" width="640" height="300" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="186" fill="#E6EDF7" font-size="13" font-weight="700">Active long-running tasks</text>
+      <text x="224" y="206" fill="#8B98B8" font-size="11">hermes_swarm_workflow_list · hermes_mission_codex · hermes_mission_cron</text>
+    
+      <!-- task row 1 -->
+      <rect x="224" y="224" width="600" height="56" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <circle cx="244" cy="244" r="5" fill="#22D3EE"/>
+      <text x="258" y="240" fill="#E6EDF7" font-size="12">swf-8f21 · release-research · stage: research/write</text>
+      <text x="258" y="258" fill="#8B98B8" font-size="10">owner researcher · parents 2 · status RUNNING</text>
+      <text x="700" y="240" fill="#22D3EE" font-size="11">running 42m</text>
+      <text x="700" y="258" fill="#8B98B8" font-size="10">→ monitor</text>
+    
+      <!-- task row 2 -->
+      <rect x="224" y="288" width="600" height="56" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <circle cx="244" cy="308" r="5" fill="#FBBF24"/>
+      <text x="258" y="304" fill="#E6EDF7" font-size="12">codex-17a2 · docs-diff-sweep</text>
+      <text x="258" y="322" fill="#8B98B8" font-size="10">async job · 30d retention · pid 41122</text>
+      <text x="700" y="304" fill="#FBBF24" font-size="11">blocked</text>
+      <text x="700" y="322" fill="#8B98B8" font-size="10">reason: orphaned pid</text>
+    
+      <!-- task row 3 -->
+      <rect x="224" y="352" width="600" height="56" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <circle cx="244" cy="372" r="5" fill="#A78BFA"/>
+      <text x="258" y="368" fill="#E6EDF7" font-size="12">ctr-3c01 · work-contract/v1 · review pending</text>
+      <text x="258" y="386" fill="#8B98B8" font-size="10">assigned developer · evidence required · fail-closed</text>
+      <text x="700" y="368" fill="#A78BFA" font-size="11">awaiting_approval</text>
+      <text x="700" y="386" fill="#8B98B8" font-size="10">→ review evidence</text>
+    
+      <!-- Recent events -->
+      <rect x="860" y="160" width="316" height="300" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="880" y="186" fill="#E6EDF7" font-size="13" font-weight="700">Recent events</text>
+      <text x="880" y="206" fill="#8B98B8" font-size="11">hermes_events_tail(20)</text>
+      <text x="880" y="232" fill="#5B6A8F" font-size="10">14:02:11 · swarm · stage_done</text>
+      <text x="880" y="248" fill="#8B98B8" font-size="10">swf-8f21 research/write → review</text>
+      <text x="880" y="272" fill="#5B6A8F" font-size="10">14:00:47 · codex · job_finished</text>
+      <text x="880" y="288" fill="#8B98B8" font-size="10">codex-17a2 exit 0 · 14 artifacts</text>
+      <text x="880" y="312" fill="#5B6A8F" font-size="10">13:58:03 · cron · run_started</text>
+      <text x="880" y="328" fill="#8B98B8" font-size="10">job nightly-sweep · pid 4901</text>
+      <text x="880" y="352" fill="#5B6A8F" font-size="10">13:55:40 · kanban · task_done</text>
+      <text x="880" y="368" fill="#8B98B8" font-size="10">t_9a2f · architecture review</text>
+      <text x="880" y="404" fill="#22D3EE" font-size="11">→ open event history</text>
+      <text x="880" y="424" fill="#8B98B8" font-size="10">90d window · allowlist: all</text>
+    
+      <!-- Authority posture -->
+      <rect x="204" y="480" width="972" height="150" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="506" fill="#E6EDF7" font-size="13" font-weight="700">Least-privilege authority posture</text>
+      <text x="224" y="526" fill="#8B98B8" font-size="11">read_only → cron → skills → skills_config → workspace → owner</text>
+    
+      <rect x="224" y="544" width="150" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="240" y="562" fill="#8B98B8" font-size="10">current level</text>
+      <text x="240" y="578" fill="#E6EDF7" font-size="13" font-weight="700">workspace</text>
+    
+      <rect x="388" y="544" width="150" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="404" y="562" fill="#8B98B8" font-size="10">apply mode</text>
+      <text x="404" y="578" fill="#FBBF24" font-size="13" font-weight="700">dry-run</text>
+    
+      <rect x="552" y="544" width="190" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="568" y="562" fill="#8B98B8" font-size="10">owner mode</text>
+      <text x="568" y="578" fill="#8B98B8" font-size="12">not active</text>
+    
+      <rect x="756" y="544" width="200" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="772" y="562" fill="#8B98B8" font-size="10">mutation gates</text>
+      <text x="772" y="578" fill="#E6EDF7" font-size="12">dry-run → confirm</text>
+    
+      <text x="224" y="616" fill="#8B98B8" font-size="11">Every mutating action requires explicit confirm. UI renders surfaces only — no bypass tooling.</text>
+    
+      <!-- Footer -->
+      <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+      <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="764" fill="#5B6A8F" font-size="10">D2-A presentation contract · sources: mission_*, events_*, contract_status, swarm_workflow_status · redacted · read-only</text>
+    </svg>
+  </div>
+</section>
+
+<section id="launch">
+  <h2>02 · LAUNCH FLOW</h2>
+  <p class="caption">Define → validate → dry-run → confirm → dispatch. The only mutation point is the explicit confirm at the gated hermes_* tool. Failure branches never mutate.</p>
+  <div class="frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+        </pattern>
+        <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#0E1630"/>
+          <stop offset="1" stop-color="#131A2E"/>
+        </linearGradient>
+      </defs>
+    
+      <rect width="1200" height="780" fill="#0B1020"/>
+      <rect width="1200" height="780" fill="url(#grid)"/>
+    
+      <!-- Top bar -->
+      <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+      <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+      <text x="24" y="44" fill="#8B98B8" font-size="11">launch flow · define → validate → dry-run → confirm → dispatch</text>
+      <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+      <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+      <text x="760" y="22" fill="#8B98B8" font-size="12">profile: tony</text>
+      <text x="760" y="40" fill="#8B98B8" font-size="12">client: ChatGPT (MCP)</text>
+    
+      <!-- Left nav -->
+      <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+      <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+      <text x="16" y="90" fill="#22D3EE" font-size="12" font-weight="700">▸ LAUNCH</text>
+      <text x="16" y="118" fill="#8B98B8" font-size="12">TASK MONITOR</text>
+      <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+      <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+      <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+    
+      <!-- Step 1: define -->
+      <rect x="204" y="80" width="972" height="150" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="104" fill="#22D3EE" font-size="12" font-weight="700">STEP 1 · DEFINE WORK</text>
+      <text x="224" y="124" fill="#8B98B8" font-size="11">work-contract or swarm workflow JSON — pasted or built from template · hermes_contract_define / hermes_swarm_workflow_validate</text>
+      <rect x="224" y="140" width="932" height="72" rx="4" fill="#0A0F20" stroke="#2A3550"/>
+      <text x="240" y="162" fill="#5B6A8F" font-size="11">{"task_id": "rel-2026-08", "objective": "produce verifiable v0.7 release package",</text>
+      <text x="240" y="180" fill="#5B6A8F" font-size="11"> "scope": ["/home/tony/hermes-gpt"], "forbidden_actions": ["publish", "secret_access"],</text>
+      <text x="240" y="198" fill="#5B6A8F" font-size="11"> "expected_artifacts": ["docs", "tests", "release-notes"], "review_requirements": {...}}</text>
+    
+      <!-- Step 2: validate -->
+      <rect x="204" y="246" width="972" height="80" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="270" fill="#22D3EE" font-size="12" font-weight="700">STEP 2 · VALIDATE</text>
+      <text x="224" y="290" fill="#8B98B8" font-size="11">observed-state fail-closed validation · schema + caps + forbidden actions + review requirements</text>
+      <rect x="224" y="298" width="130" height="24" rx="3" fill="#34D399" opacity="0.15"/>
+      <text x="236" y="314" fill="#34D399" font-size="10" font-weight="700">VALID ✓</text>
+      <text x="370" y="314" fill="#8B98B8" font-size="10">contract_sha256 9f2c…e1a7 pinned at this point</text>
+    
+      <!-- Step 3: dry-run -->
+      <rect x="204" y="342" width="972" height="80" rx="6" fill="#131A2E" stroke="#FBBF24"/>
+      <text x="224" y="366" fill="#FBBF24" font-size="12" font-weight="700">STEP 3 · DRY-RUN DISPATCH</text>
+      <text x="224" y="386" fill="#8B98B8" font-size="11">hermes_contract_dispatch / hermes_swarm_stage_dispatch with dry_run=true — computes plan, writes audit, mutates nothing</text>
+      <rect x="224" y="394" width="220" height="24" rx="3" fill="#FBBF24" opacity="0.15"/>
+      <text x="236" y="410" fill="#FBBF24" font-size="10" font-weight="700">DRY-RUN · NO-OP</text>
+      <text x="460" y="410" fill="#8B98B8" font-size="10">plan: dispatch to developer · 3 stages · est. 4h · audit event written</text>
+    
+      <!-- Step 4: confirm -->
+      <rect x="204" y="438" width="972" height="80" rx="6" fill="#131A2E" stroke="#34D399"/>
+      <text x="224" y="462" fill="#34D399" font-size="12" font-weight="700">STEP 4 · CONFIRM</text>
+      <text x="224" y="482" fill="#8B98B8" font-size="11">explicit confirm=true at the gated tool — the only mutation point; UI has no separate mutate button</text>
+      <rect x="224" y="490" width="150" height="24" rx="3" fill="#34D399" opacity="0.2"/>
+      <text x="236" y="506" fill="#34D399" font-size="10" font-weight="700">CONFIRM →</text>
+      <text x="390" y="506" fill="#8B98B8" font-size="10">requires level ≥ workspace (contract dispatch) · owner for swarm approve</text>
+    
+      <!-- Step 5: dispatched -->
+      <rect x="204" y="534" width="972" height="80" rx="6" fill="#131A2E" stroke="#22D3EE"/>
+      <text x="224" y="558" fill="#22D3EE" font-size="12" font-weight="700">STEP 5 · DISPATCHED &amp; MONITORING</text>
+      <text x="224" y="578" fill="#8B98B8" font-size="11">task created · event written · monitor view opens · restart-safe from this point (S2 reconcile on restart)</text>
+      <rect x="224" y="586" width="180" height="24" rx="3" fill="#22D3EE" opacity="0.15"/>
+      <text x="236" y="602" fill="#22D3EE" font-size="10" font-weight="700">DISPATCHED ✓</text>
+      <text x="420" y="602" fill="#8B98B8" font-size="10">swf-9b31 · stage 1/6 · next event expected in ~2m → monitor</text>
+    
+      <!-- Failure branch -->
+      <rect x="204" y="630" width="972" height="96" rx="6" fill="#131A2E" stroke="#FB7185"/>
+      <text x="224" y="654" fill="#FB7185" font-size="12" font-weight="700">FAILURE BRANCHES</text>
+      <text x="224" y="674" fill="#8B98B8" font-size="11">· validation fail → return to STEP 1 with error list (no dispatch attempted)</text>
+      <text x="224" y="692" fill="#8B98B8" font-size="11">· confirm denied (level too low) → AUTHZ_DENIED envelope + suggested_action shown · nothing mutated</text>
+      <text x="224" y="710" fill="#8B98B8" font-size="11">· restart mid-flight → reconcile marks interrupted stages blocked · operator re-advances explicitly (fail-closed)</text>
+    
+      <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+      <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="764" fill="#5B6A8F" font-size="10">launch = define → validate → dry-run → confirm → dispatch · every step audited · dry-run-first invariant (v0.6 posture)</text>
+    </svg>
+  </div>
+</section>
+
+<section id="monitor">
+  <h2>03 · TASK MONITOR</h2>
+  <p class="caption">Stage ladder for a long-running swarm workflow, production evidence panel, gated actions (dry-run first, confirm required), and related events for the subject.</p>
+  <div class="frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+        </pattern>
+        <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#0E1630"/>
+          <stop offset="1" stop-color="#131A2E"/>
+        </linearGradient>
+      </defs>
+    
+      <rect width="1200" height="780" fill="#0B1020"/>
+      <rect width="1200" height="780" fill="url(#grid)"/>
+    
+      <!-- Top bar -->
+      <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+      <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+      <text x="24" y="44" fill="#8B98B8" font-size="11">task monitor · swarm / contract / codex / cron lifecycle</text>
+      <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+      <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+      <text x="760" y="22" fill="#8B98B8" font-size="12">profile: tony</text>
+      <text x="760" y="40" fill="#8B98B8" font-size="12">client: ChatGPT (MCP)</text>
+    
+      <!-- Left nav -->
+      <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+      <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+      <text x="16" y="90" fill="#8B98B8" font-size="12">OVERVIEW</text>
+      <text x="16" y="118" fill="#22D3EE" font-size="12" font-weight="700">▸ TASK MONITOR</text>
+      <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+      <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+      <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+    
+      <!-- Task header -->
+      <rect x="204" y="80" width="972" height="92" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="104" fill="#E6EDF7" font-size="14" font-weight="700">swf-8f21 · release-research</text>
+      <text x="224" y="126" fill="#8B98B8" font-size="11">hermes.swarm-workflow/v1 · /home/tony/hermes-gpt</text>
+      <rect x="224" y="136" width="60" height="22" rx="3" fill="#22D3EE" opacity="0.15"/>
+      <text x="232" y="151" fill="#22D3EE" font-size="10" font-weight="700">RUNNING</text>
+      <rect x="294" y="136" width="76" height="22" rx="3" fill="#A78BFA" opacity="0.15"/>
+      <text x="302" y="151" fill="#A78BFA" font-size="10">STAGE 3/6</text>
+      <text x="900" y="104" fill="#8B98B8" font-size="11">source</text>
+      <text x="900" y="120" fill="#E6EDF7" font-size="10">hermes_swarm_workflow_status</text>
+      <text x="900" y="138" fill="#8B98B8" font-size="10">refresh · 5s TTL cache</text>
+      <text x="1080" y="104" fill="#22D3EE" font-size="11">→ monitor live</text>
+      <text x="1080" y="122" fill="#22D3EE" font-size="11">→ event history</text>
+    
+      <!-- Stage ladder -->
+      <rect x="204" y="188" width="972" height="180" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="212" fill="#E6EDF7" font-size="13" font-weight="700">Stage ladder</text>
+      <text x="224" y="232" fill="#8B98B8" font-size="11">restart-safe · interrupted stages reconcile to blocked · operator advances explicitly</text>
+    
+      <rect x="224" y="248" width="150" height="44" rx="4" fill="#0F1730" stroke="#34D399"/>
+      <text x="236" y="266" fill="#34D399" font-size="10">1 research</text>
+      <text x="236" y="282" fill="#8B98B8" font-size="10">done · verified</text>
+    
+      <polygon points="380,270 396,258 396,282" fill="#2A3550"/>
+      <rect x="404" y="248" width="150" height="44" rx="4" fill="#0F1730" stroke="#34D399"/>
+      <text x="416" y="266" fill="#34D399" font-size="10">2 write</text>
+      <text x="416" y="282" fill="#8B98B8" font-size="10">done · artifacts</text>
+    
+      <polygon points="560,270 576,258 576,282" fill="#2A3550"/>
+      <rect x="584" y="248" width="170" height="44" rx="4" fill="#0F1730" stroke="#22D3EE"/>
+      <text x="596" y="266" fill="#22D3EE" font-size="10">3 review (current)</text>
+      <text x="596" y="282" fill="#8B98B8" font-size="10">running 42m · evidence</text>
+    
+      <polygon points="760,270 776,258 776,282" fill="#2A3550"/>
+      <rect x="784" y="248" width="150" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="796" y="266" fill="#8B98B8" font-size="10">4 legal</text>
+      <text x="796" y="282" fill="#8B98B8" font-size="10">pending</text>
+    
+      <polygon points="940,270 956,258 956,282" fill="#2A3550"/>
+      <rect x="964" y="248" width="170" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="976" y="266" fill="#8B98B8" font-size="10">5 verify</text>
+      <text x="976" y="282" fill="#8B98B8" font-size="10">pending</text>
+    
+      <text x="224" y="330" fill="#8B98B8" font-size="11">advance requires hermes_swarm_stage_advance · dry-run first · blocked stages never auto-advance (fail-closed)</text>
+    
+      <!-- Right column: evidence + actions -->
+      <rect x="204" y="384" width="640" height="196" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="408" fill="#E6EDF7" font-size="13" font-weight="700">Production evidence</text>
+      <text x="224" y="428" fill="#8B98B8" font-size="11">hermes_contract_status · review evidence · observed state</text>
+      <rect x="224" y="444" width="600" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="462" fill="#E6EDF7" font-size="11">contract ctr-3c01 · sha256 9f2c…e1a7</text>
+      <text x="236" y="478" fill="#8B98B8" font-size="10">objective: produce release package · forbidden: publish, secrets</text>
+      <rect x="224" y="492" width="600" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="510" fill="#E6EDF7" font-size="11">evidence refs</text>
+      <text x="236" y="526" fill="#8B98B8" font-size="10">docs/design/v0.7-flight-deck-architecture.md · test run log · 14 artifacts</text>
+      <text x="224" y="558" fill="#A78BFA" font-size="11">review evidence: pending acceptance → SATISFIED requires hermes_review_accept</text>
+    
+      <!-- Actions panel -->
+      <rect x="860" y="384" width="316" height="196" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="880" y="408" fill="#E6EDF7" font-size="13" font-weight="700">Actions (gated)</text>
+      <text x="880" y="428" fill="#8B98B8" font-size="11">actions call gated hermes_* tools only</text>
+      <rect x="880" y="444" width="276" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="892" y="465" fill="#E6EDF7" font-size="11">advance stage 3 → 4</text>
+      <text x="1120" y="465" fill="#8B98B8" font-size="10">dry-run</text>
+      <rect x="880" y="486" width="276" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="892" y="507" fill="#E6EDF7" font-size="11">reconcile (post-restart)</text>
+      <text x="1120" y="507" fill="#8B98B8" font-size="10">dry-run</text>
+      <rect x="880" y="528" width="276" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="892" y="549" fill="#E6EDF7" font-size="11">review accept evidence</text>
+      <text x="1120" y="549" fill="#A78BFA" font-size="10">owner</text>
+      <text x="880" y="564" fill="#FBBF24" font-size="10">▲ confirm required before any mutation</text>
+    
+      <!-- Event strip -->
+      <rect x="204" y="596" width="972" height="130" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="620" fill="#E6EDF7" font-size="13" font-weight="700">Related events</text>
+      <text x="224" y="640" fill="#8B98B8" font-size="11">hermes_events_query(subject_id=swf-8f21)</text>
+      <text x="224" y="666" fill="#5B6A8F" font-size="10">14:02:11 · stage_done · swf-8f21 research/write</text>
+      <text x="224" y="684" fill="#5B6A8F" font-size="10">14:05:22 · stage_started · swf-8f21 review (actor developer)</text>
+      <text x="224" y="702" fill="#5B6A8F" font-size="10">14:05:23 · audit · hermes_swarm_stage_advance dry-run (no-op)</text>
+    
+      <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+      <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="764" fill="#5B6A8F" font-size="10">sources: swarm_workflow_status, contract_status, events_query · redacted · read-only · restart-safe continuity (S2)</text>
+    </svg>
+  </div>
+</section>
+
+<section id="events">
+  <h2>04 · EVENT HISTORY</h2>
+  <p class="caption">Unified, redacted timeline from the hermes_events_* read-model. Filters, retention window, allowlist, and explicit redaction markers — no raw bodies ever rendered.</p>
+  <div class="frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+        </pattern>
+        <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#0E1630"/>
+          <stop offset="1" stop-color="#131A2E"/>
+        </linearGradient>
+      </defs>
+    
+      <rect width="1200" height="780" fill="#0B1020"/>
+      <rect width="1200" height="780" fill="url(#grid)"/>
+    
+      <!-- Top bar -->
+      <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+      <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+      <text x="24" y="44" fill="#8B98B8" font-size="11">event history · unified redacted timeline · hermes_events_*</text>
+      <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+      <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+    
+      <!-- Left nav -->
+      <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+      <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+      <text x="16" y="90" fill="#8B98B8" font-size="12">OVERVIEW</text>
+      <text x="16" y="118" fill="#8B98B8" font-size="12">TASK MONITOR</text>
+      <text x="16" y="146" fill="#22D3EE" font-size="12" font-weight="700">▸ EVENT HISTORY</text>
+      <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+      <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+    
+      <!-- Filters -->
+      <rect x="204" y="80" width="972" height="116" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="104" fill="#E6EDF7" font-size="13" font-weight="700">Filters</text>
+      <text x="224" y="124" fill="#8B98B8" font-size="11">hermes_events_query(source, subject_id, kind, since, until, limit)</text>
+      <rect x="224" y="140" width="140" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="159" fill="#E6EDF7" font-size="11">source: all ▾</text>
+      <rect x="376" y="140" width="160" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="388" y="159" fill="#E6EDF7" font-size="11">subject_id: —</text>
+      <rect x="548" y="140" width="140" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="560" y="159" fill="#E6EDF7" font-size="11">kind: all ▾</text>
+      <rect x="700" y="140" width="150" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="712" y="159" fill="#E6EDF7" font-size="11">since: 7d ▾</text>
+      <rect x="862" y="140" width="120" height="30" rx="4" fill="#22D3EE" opacity="0.15"/>
+      <text x="874" y="159" fill="#22D3EE" font-size="11" font-weight="700">APPLY</text>
+      <rect x="994" y="140" width="120" height="30" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="1006" y="159" fill="#8B98B8" font-size="11">RESET</text>
+      <text x="224" y="186" fill="#8B98B8" font-size="10">retention: 90d window · HERMES_GPT_EVENTS_MAX_AGE_DAYS · allowlist: all sources (env HERMES_GPT_EVENTS_ALLOWED_SOURCES)</text>
+    
+      <!-- Timeline -->
+      <rect x="204" y="212" width="972" height="512" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="236" fill="#E6EDF7" font-size="13" font-weight="700">Timeline</text>
+      <text x="224" y="256" fill="#8B98B8" font-size="11">normalized EventRecord view schema · no raw bodies · redacted summaries · refs only</text>
+    
+      <line x1="244" y1="280" x2="244" y2="700" stroke="#2A3550" stroke-width="2"/>
+    
+      <!-- event 1 -->
+      <circle cx="244" cy="304" r="5" fill="#A78BFA"/>
+      <text x="266" y="300" fill="#E6EDF7" font-size="12" font-weight="700">14:02:11 UTC · swarm · stage_done</text>
+      <text x="266" y="318" fill="#8B98B8" font-size="11">subject swf-8f21 · actor developer · status_before running → status_after awaiting_approval</text>
+      <text x="266" y="334" fill="#8B98B8" font-size="11">summary: release-research stage research/write completed with 14 artifacts</text>
+      <text x="266" y="350" fill="#5B6A8F" font-size="10">refs: [docs/design/…, test run log] · trace_id t-9f2c</text>
+    
+      <!-- event 2 -->
+      <circle cx="244" cy="386" r="5" fill="#22D3EE"/>
+      <text x="266" y="382" fill="#E6EDF7" font-size="12" font-weight="700">14:00:47 UTC · codex · job_finished</text>
+      <text x="266" y="400" fill="#8B98B8" font-size="11">subject codex-17a2 · actor codex · exit 0 · duration 11m</text>
+      <text x="266" y="416" fill="#8B98B8" font-size="11">summary: docs diff sweep completed</text>
+      <text x="266" y="432" fill="#5B6A8F" font-size="10">refs: [codex-jobs/17a2/transcript.jsonl (referenced, not copied)]</text>
+    
+      <!-- event 3 -->
+      <circle cx="244" cy="468" r="5" fill="#FBBF24"/>
+      <text x="266" y="464" fill="#E6EDF7" font-size="12" font-weight="700">13:58:03 UTC · cron · run_started</text>
+      <text x="266" y="482" fill="#8B98B8" font-size="11">subject nightly-sweep · actor cron · pid 4901</text>
+      <text x="266" y="498" fill="#8B98B8" font-size="11">summary: nightly sweep job started (redacted payload)</text>
+    
+      <!-- event 4 -->
+      <circle cx="244" cy="534" r="5" fill="#34D399"/>
+      <text x="266" y="530" fill="#E6EDF7" font-size="12" font-weight="700">13:55:40 UTC · kanban · task_done</text>
+      <text x="266" y="548" fill="#8B98B8" font-size="11">subject t_9a2f · actor developer · status todo → done</text>
+      <text x="266" y="564" fill="#8B98B8" font-size="11">summary: architecture review completed</text>
+    
+      <!-- event 5 redacted example -->
+      <circle cx="244" cy="600" r="5" fill="#FB7185"/>
+      <text x="266" y="596" fill="#E6EDF7" font-size="12" font-weight="700">13:52:09 UTC · audit · hermes_swarm_stage_advance</text>
+      <text x="266" y="614" fill="#8B98B8" font-size="11">subject swf-8f21 · actor developer · dry_run=true</text>
+      <text x="266" y="630" fill="#8B98B8" font-size="11">summary: [REDACTED] body suppressed · prompt length 0 · no raw text</text>
+      <text x="266" y="646" fill="#5B6A8F" font-size="10">redaction invariant: raw prompts/transcripts/credentials never appear</text>
+    
+      <rect x="224" y="668" width="300" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="689" fill="#8B98B8" font-size="11">← load more (hermes_events_tail)</text>
+      <text x="860" y="680" fill="#8B98B8" font-size="11">50/50 shown · next page →</text>
+    
+      <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+      <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="764" fill="#5B6A8F" font-size="10">D4-A read-model aggregator · sources: swarm, contract, cron, codex, kanban, audit · allowlist + retention + redaction</text>
+    </svg>
+  </div>
+</section>
+
+<section id="review">
+  <h2>05 · EVIDENCE REVIEW</h2>
+  <p class="caption">Owner-gated review acceptance: inspect observed evidence, run hermes_review_accept dry-run, confirm, then re-validate the contract to SATISFIED. Distinct reviewer enforced.</p>
+  <div class="frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+        </pattern>
+        <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#0E1630"/>
+          <stop offset="1" stop-color="#131A2E"/>
+        </linearGradient>
+      </defs>
+    
+      <rect width="1200" height="780" fill="#0B1020"/>
+      <rect width="1200" height="780" fill="url(#grid)"/>
+    
+      <!-- Top bar -->
+      <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+      <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+      <text x="24" y="44" fill="#8B98B8" font-size="11">evidence review · production review evidence · hermes_review_accept</text>
+      <text x="960" y="22" fill="#A78BFA" font-size="12">◆ owner required</text>
+      <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+    
+      <!-- Left nav -->
+      <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+      <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+      <text x="16" y="90" fill="#8B98B8" font-size="12">OVERVIEW</text>
+      <text x="16" y="118" fill="#8B98B8" font-size="12">TASK MONITOR</text>
+      <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+      <text x="16" y="174" fill="#22D3EE" font-size="12" font-weight="700">▸ EVIDENCE REVIEW</text>
+      <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+    
+      <!-- Contract under review -->
+      <rect x="204" y="80" width="972" height="120" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="104" fill="#E6EDF7" font-size="14" font-weight="700">ctr-3c01 · work-contract/v1 · awaiting review</text>
+      <text x="224" y="126" fill="#8B98B8" font-size="11">task_id rel-2026-08 · objective: produce verifiable v0.7 release package · scope: /home/tony/hermes-gpt</text>
+      <text x="224" y="144" fill="#8B98B8" font-size="11">forbidden_actions: publish, secret access · expected_artifacts: docs, tests, release notes</text>
+      <rect x="224" y="156" width="110" height="24" rx="3" fill="#A78BFA" opacity="0.15"/>
+      <text x="234" y="172" fill="#A78BFA" font-size="10" font-weight="700">NOT_SATISFIED</text>
+      <text x="356" y="172" fill="#8B98B8" font-size="10">no acceptance record yet · fail-closed validator</text>
+      <text x="900" y="104" fill="#8B98B8" font-size="11">source: hermes_contract_status</text>
+      <text x="900" y="122" fill="#8B98B8" font-size="11">validator: observed-state</text>
+    
+      <!-- Evidence check -->
+      <rect x="204" y="216" width="640" height="308" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="240" fill="#E6EDF7" font-size="13" font-weight="700">Observed evidence</text>
+      <text x="224" y="260" fill="#8B98B8" font-size="11">evidence referenced, never copied · no raw prompts/transcripts</text>
+    
+      <rect x="224" y="276" width="600" height="34" rx="4" fill="#0F1730" stroke="#34D399"/>
+      <text x="236" y="297" fill="#34D399" font-size="11">✔ expected_artifacts present</text>
+      <text x="700" y="297" fill="#8B98B8" font-size="10">14 files · hashes match</text>
+    
+      <rect x="224" y="318" width="600" height="34" rx="4" fill="#0F1730" stroke="#34D399"/>
+      <text x="236" y="339" fill="#34D399" font-size="11">✔ contract_sha256 pinned</text>
+      <text x="700" y="339" fill="#8B98B8" font-size="10">9f2c…e1a7</text>
+    
+      <rect x="224" y="360" width="600" height="34" rx="4" fill="#0F1730" stroke="#FBBF24"/>
+      <text x="236" y="381" fill="#FBBF24" font-size="11">○ review evidence missing</text>
+      <text x="700" y="381" fill="#8B98B8" font-size="10">record absent</text>
+    
+      <rect x="224" y="402" width="600" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="423" fill="#8B98B8" font-size="11">· forbidden actions audit</text>
+      <text x="700" y="423" fill="#8B98B8" font-size="10">no violations found</text>
+    
+      <text x="224" y="470" fill="#8B98B8" font-size="11">hermes_contract_validate re-runs after acceptance → flips to SATISFIED</text>
+    
+      <!-- Review accept panel -->
+      <rect x="860" y="216" width="316" height="308" rx="6" fill="#131A2E" stroke="#A78BFA"/>
+      <text x="880" y="240" fill="#E6EDF7" font-size="13" font-weight="700">Review acceptance</text>
+      <text x="880" y="260" fill="#8B98B8" font-size="11">hermes_review_accept · owner + direct + confirm</text>
+    
+      <text x="880" y="290" fill="#8B98B8" font-size="11">reviewer (distinct)</text>
+      <rect x="880" y="300" width="276" height="32" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="892" y="321" fill="#E6EDF7" font-size="11">default (≠ assignee developer)</text>
+    
+      <text x="880" y="350" fill="#8B98B8" font-size="11">verdict</text>
+      <rect x="880" y="360" width="276" height="32" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="892" y="381" fill="#E6EDF7" font-size="11">SATISFIED ▾</text>
+    
+      <text x="880" y="410" fill="#8B98B8" font-size="11">evidence refs (required)</text>
+      <rect x="880" y="420" width="276" height="32" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="892" y="441" fill="#E6EDF7" font-size="11">14 artifact paths + test log</text>
+    
+      <rect x="880" y="468" width="276" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="892" y="490" fill="#FBBF24" font-size="11">DRY-RUN first ▾</text>
+      <text x="880" y="508" fill="#FB7185" font-size="10">self-review rejected · reviewer ≠ assignee enforced</text>
+    
+      <!-- Help/flow -->
+      <rect x="204" y="540" width="972" height="184" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="564" fill="#E6EDF7" font-size="13" font-weight="700">Review flow (interaction spec)</text>
+      <text x="224" y="588" fill="#8B98B8" font-size="11">1 → 2 → 3 → 4 (owner confirm) → hermes_contract_validate</text>
+      <rect x="224" y="604" width="170" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="622" fill="#8B98B8" font-size="10">1 inspect evidence</text>
+      <text x="236" y="638" fill="#5B6A8F" font-size="10">read-only surfaces</text>
+      <polygon points="400,626 416,614 416,638" fill="#2A3550"/>
+      <rect x="424" y="604" width="170" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="436" y="622" fill="#8B98B8" font-size="10">2 dry-run accept</text>
+      <text x="436" y="638" fill="#5B6A8F" font-size="10">no mutation</text>
+      <polygon points="600,626 616,614 616,638" fill="#2A3550"/>
+      <rect x="624" y="604" width="170" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="636" y="622" fill="#8B98B8" font-size="10">3 confirm</text>
+      <text x="636" y="638" fill="#5B6A8F" font-size="10">owner ack required</text>
+      <polygon points="800,626 816,614 816,638" fill="#2A3550"/>
+      <rect x="824" y="604" width="180" height="44" rx="4" fill="#0F1730" stroke="#A78BFA"/>
+      <text x="836" y="622" fill="#A78BFA" font-size="10">4 record written</text>
+      <text x="836" y="638" fill="#5B6A8F" font-size="10">audited · JSONL append</text>
+      <text x="224" y="676" fill="#8B98B8" font-size="11">acceptance record: record_id, contract_sha256, reviewer (distinct), verdict, evidence_refs, created_at — never raw prompts.</text>
+      <text x="224" y="696" fill="#8B98B8" font-size="11">retention aligns with contract records · legal review of 30d window (open question).</text>
+    
+      <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+      <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="764" fill="#5B6A8F" font-size="10">D3-A owner-gated writer · sources: contract_status, events, review-evidence store · UI calls gated hermes_review_accept only</text>
+    </svg>
+  </div>
+</section>
+
+<section id="authority">
+  <h2>06 · AUTHORITY PANEL</h2>
+  <p class="caption">Explainable least-privilege authority: current level, apply mode, level ladder, per-surface gates, allowlist semantics, and the presentation-only UI boundary.</p>
+  <div class="frame">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+        </pattern>
+        <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#0E1630"/>
+          <stop offset="1" stop-color="#131A2E"/>
+        </linearGradient>
+      </defs>
+    
+      <rect width="1200" height="780" fill="#0B1020"/>
+      <rect width="1200" height="780" fill="url(#grid)"/>
+    
+      <!-- Top bar -->
+      <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+      <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+      <text x="24" y="44" fill="#8B98B8" font-size="11">authority · explainable least-privilege · level/gate model</text>
+      <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+      <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+    
+      <!-- Left nav -->
+      <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+      <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+      <text x="16" y="90" fill="#8B98B8" font-size="12">OVERVIEW</text>
+      <text x="16" y="118" fill="#8B98B8" font-size="12">TASK MONITOR</text>
+      <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+      <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+      <text x="16" y="202" fill="#22D3EE" font-size="12" font-weight="700">▸ AUTHORITY</text>
+    
+      <!-- Current posture -->
+      <rect x="204" y="80" width="972" height="140" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="104" fill="#E6EDF7" font-size="13" font-weight="700">Current authority posture</text>
+      <text x="224" y="124" fill="#8B98B8" font-size="11">operator_policy · no parallel bypasses · every mutation lands in an existing authority class</text>
+    
+      <rect x="224" y="140" width="150" height="40" rx="4" fill="#0F1730" stroke="#34D399"/>
+      <text x="240" y="158" fill="#8B98B8" font-size="10">level</text>
+      <text x="240" y="174" fill="#E6EDF7" font-size="13" font-weight="700">workspace</text>
+      <rect x="388" y="140" width="150" height="40" rx="4" fill="#0F1730" stroke="#FBBF24"/>
+      <text x="404" y="158" fill="#8B98B8" font-size="10">apply mode</text>
+      <text x="404" y="174" fill="#FBBF24" font-size="13" font-weight="700">dry-run</text>
+      <rect x="552" y="140" width="190" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="568" y="158" fill="#8B98B8" font-size="10">owner mode</text>
+      <text x="568" y="174" fill="#8B98B8" font-size="12">not active</text>
+      <rect x="756" y="140" width="200" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="772" y="158" fill="#8B98B8" font-size="10">audit</text>
+      <text x="772" y="174" fill="#E6EDF7" font-size="12">append-only JSONL</text>
+      <text x="1000" y="164" fill="#22D3EE" font-size="11">→ change</text>
+    
+      <!-- Ladder -->
+      <rect x="204" y="236" width="640" height="220" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="260" fill="#E6EDF7" font-size="13" font-weight="700">Level ladder</text>
+      <text x="224" y="280" fill="#8B98B8" font-size="11">least → most privileged · dry-run default at every level</text>
+    
+      <rect x="224" y="296" width="120" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="318" fill="#8B98B8" font-size="11">read_only</text>
+      <polygon points="350,314 362,304 362,324" fill="#2A3550"/>
+      <rect x="368" y="296" width="100" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="380" y="318" fill="#8B98B8" font-size="11">cron</text>
+      <polygon points="474,314 486,304 486,324" fill="#2A3550"/>
+      <rect x="492" y="296" width="110" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="504" y="318" fill="#8B98B8" font-size="11">skills</text>
+      <polygon points="608,314 620,304 620,324" fill="#2A3550"/>
+      <rect x="626" y="296" width="150" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="638" y="318" fill="#8B98B8" font-size="11">skills_config</text>
+    
+      <rect x="224" y="344" width="150" height="44" rx="4" fill="#0F1730" stroke="#22D3EE"/>
+      <text x="236" y="362" fill="#22D3EE" font-size="11" font-weight="700">workspace ◀</text>
+      <text x="236" y="378" fill="#8B98B8" font-size="10">current</text>
+      <rect x="388" y="344" width="120" height="44" rx="4" fill="#0F1730" stroke="#FB7185"/>
+      <text x="400" y="362" fill="#FB7185" font-size="11">owner</text>
+      <text x="400" y="378" fill="#8B98B8" font-size="10">break-glass</text>
+    
+      <text x="224" y="424" fill="#8B98B8" font-size="11">owner requires HERMES_GPT_OWNER_ACTIVE + owner_ack; does not bypass secret-path protections.</text>
+      <text x="224" y="442" fill="#8B98B8" font-size="11">G6 new surface gates: review_accept → owner · events → read_only</text>
+      <text x="224" y="458" fill="#8B98B8" font-size="11">oauth_status → read_only · oauth_revoke → owner (legal) · swarm_reconcile → ws/owner</text>
+    
+      <!-- Tool authority table -->
+      <rect x="860" y="236" width="316" height="220" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="880" y="260" fill="#E6EDF7" font-size="13" font-weight="700">New surface gates</text>
+      <text x="880" y="280" fill="#8B98B8" font-size="11">per-tool authority docstrings</text>
+      <text x="880" y="306" fill="#E6EDF7" font-size="11">hermes_review_accept</text>
+      <text x="1120" y="306" fill="#FB7185" font-size="10">owner</text>
+      <text x="880" y="330" fill="#E6EDF7" font-size="11">hermes_events_query</text>
+      <text x="1120" y="330" fill="#34D399" font-size="10">read_only</text>
+      <text x="880" y="354" fill="#E6EDF7" font-size="11">hermes_events_tail</text>
+      <text x="1120" y="354" fill="#34D399" font-size="10">read_only</text>
+      <text x="880" y="378" fill="#E6EDF7" font-size="11">hermes_oauth_status</text>
+      <text x="1120" y="378" fill="#34D399" font-size="10">read_only</text>
+      <text x="880" y="402" fill="#E6EDF7" font-size="11">hermes_oauth_revoke</text>
+      <text x="1120" y="402" fill="#FBBF24" font-size="10">owner*</text>
+      <text x="880" y="426" fill="#E6EDF7" font-size="11">hermes_swarm_reconcile</text>
+      <text x="1120" y="426" fill="#FBBF24" font-size="10">ws/owner</text>
+      <text x="880" y="446" fill="#5B6A8F" font-size="10">* pending legal sign-off</text>
+    
+      <!-- Explainability -->
+      <rect x="204" y="472" width="972" height="180" rx="6" fill="#131A2E" stroke="#2A3550"/>
+      <text x="224" y="496" fill="#E6EDF7" font-size="13" font-weight="700">Explainability &amp; control</text>
+      <text x="224" y="516" fill="#8B98B8" font-size="11">every tool exposes: required level, apply gate, dry-run default, audit wiring, allowed env semantics</text>
+    
+      <rect x="224" y="532" width="600" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="550" fill="#E6EDF7" font-size="11">allowlist semantics: unset = all · list = only listed · empty = none</text>
+      <text x="236" y="566" fill="#8B98B8" font-size="10">HERMES_GPT_MISSION_ALLOWED_SURFACES · HERMES_GPT_EVENTS_ALLOWED_SOURCES</text>
+    
+      <rect x="224" y="584" width="600" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="236" y="602" fill="#E6EDF7" font-size="11">control is explicit, not automatic</text>
+      <text x="236" y="618" fill="#8B98B8" font-size="10">changes land through config/env tools at their level gates — the UI surfaces state, never bypasses</text>
+    
+      <rect x="860" y="532" width="296" height="96" rx="4" fill="#0F1730" stroke="#2A3550"/>
+      <text x="880" y="556" fill="#E6EDF7" font-size="11">⚠ UI boundary</text>
+      <text x="880" y="574" fill="#8B98B8" font-size="10">presentation only. no direct store</text>
+      <text x="880" y="590" fill="#8B98B8" font-size="10">reads. no mutation buttons that</text>
+      <text x="880" y="606" fill="#8B98B8" font-size="10">bypass hermes_* tools (D2-A).</text>
+    
+      <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+      <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+      <text x="24" y="764" fill="#5B6A8F" font-size="10">G6 explainable authority · S6 surface manifest · sources: policy status, mission overview, oauth_status, config/env</text>
+    </svg>
+  </div>
+</section>
+
+
+<footer>
+  Produced by media (kanban t_dd366ab6) for the v0.7.0 Flight Deck release program · 2026-08-15 ·<br>
+  Wireframe SVGs: docs/design/assets/v0.7-flight-deck-wireframes/ · Interaction design: docs/design/v0.7-flight-deck-interaction-design.md<br>
+  Constraints: D2-A presentation contract (architecture §9.2) · read-only · redacted · no new authority · dry-run-first.
+</footer>
+
+</body>
+</html>

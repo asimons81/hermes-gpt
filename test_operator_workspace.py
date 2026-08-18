@@ -295,6 +295,41 @@ def test_gateway_status_with_state_file(tmp_path, clean_env, audit_override):
     assert adapters["discord"]["connected"] is False
 
 
+def test_gateway_status_supports_current_platform_state_schema(tmp_path, clean_env, audit_override):
+    (tmp_path / "gateway_state.json").write_text(
+        json.dumps(
+            {
+                "platforms": {
+                    "telegram": {
+                        "state": "connected",
+                        "needs_attention": False,
+                        "updated_at": "2026-08-15T05:56:27+00:00",
+                    },
+                    "discord": {
+                        "state": "retrying",
+                        "needs_attention": True,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = ows.hermes_gateway_status(profile="default", hermes_root=tmp_path)
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    adapters = {a["name"]: a for a in parsed["adapters"]}
+    assert adapters["telegram"] == {
+        "name": "telegram",
+        "connected": True,
+        "state": "connected",
+        "needs_attention": False,
+        "updated_at": "2026-08-15T05:56:27+00:00",
+    }
+    assert adapters["discord"]["connected"] is False
+    assert adapters["discord"]["state"] == "retrying"
+    assert adapters["discord"]["needs_attention"] is True
+
+
 def test_gateway_restart_dry_run_returns_plan(tmp_path, clean_env, audit_override, monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
@@ -352,6 +387,55 @@ def test_owner_run_command_direct_runs(workspace_tree, clean_env, audit_override
     parsed = json.loads(out)
     assert parsed["success"] is True
     assert captured["argv"] == ["echo", "hello"]
+
+
+def test_owner_run_command_defers_exact_self_restart(workspace_tree, clean_env, audit_override, monkeypatch):
+    _enable_owner(monkeypatch)
+    captured = {}
+
+    def fake_runner(argv, timeout=120, workdir=None):
+        captured["argv"] = argv
+        return (0, "Running timer as unit: run-test.timer", "")
+
+    out = ows.hermes_owner_run_command(
+        command="systemctl --user restart hermes-gpt-server.service",
+        dry_run=False,
+        runner=fake_runner,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["deferred_self_restart"] is True
+    assert parsed["argv"] == [
+        "systemctl", "--user", "restart", "hermes-gpt-server.service"
+    ]
+    assert captured["argv"][:4] == [
+        "systemd-run", "--user", "--on-active=3s", "--collect"
+    ]
+    assert captured["argv"][-4:] == [
+        "systemctl", "--user", "restart", "hermes-gpt-server.service"
+    ]
+
+
+def test_owner_run_command_does_not_defer_other_systemctl_commands(
+    workspace_tree, clean_env, audit_override, monkeypatch
+):
+    _enable_owner(monkeypatch)
+    captured = {}
+
+    def fake_runner(argv, timeout=120, workdir=None):
+        captured["argv"] = argv
+        return (0, "active", "")
+
+    parsed = json.loads(ows.hermes_owner_run_command(
+        command="systemctl --user is-active hermes-gpt-server.service",
+        dry_run=False,
+        runner=fake_runner,
+    ))
+    assert parsed["success"] is True
+    assert parsed["deferred_self_restart"] is False
+    assert captured["argv"] == [
+        "systemctl", "--user", "is-active", "hermes-gpt-server.service"
+    ]
 
 
 def test_owner_run_command_windows_quoted_argument(monkeypatch, clean_env, audit_override):

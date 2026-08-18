@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0E1630"/>
+      <stop offset="1" stop-color="#131A2E"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="780" fill="#0B1020"/>
+  <rect width="1200" height="780" fill="url(#grid)"/>
+
+  <!-- Top bar -->
+  <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+  <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+  <text x="24" y="44" fill="#8B98B8" font-size="11">authority · explainable least-privilege · level/gate model</text>
+  <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+  <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+
+  <!-- Left nav -->
+  <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+  <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+  <text x="16" y="90" fill="#8B98B8" font-size="12">OVERVIEW</text>
+  <text x="16" y="118" fill="#8B98B8" font-size="12">TASK MONITOR</text>
+  <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+  <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+  <text x="16" y="202" fill="#22D3EE" font-size="12" font-weight="700">▸ AUTHORITY</text>
+
+  <!-- Current posture -->
+  <rect x="204" y="80" width="972" height="140" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="104" fill="#E6EDF7" font-size="13" font-weight="700">Current authority posture</text>
+  <text x="224" y="124" fill="#8B98B8" font-size="11">operator_policy · no parallel bypasses · every mutation lands in an existing authority class</text>
+
+  <rect x="224" y="140" width="150" height="40" rx="4" fill="#0F1730" stroke="#34D399"/>
+  <text x="240" y="158" fill="#8B98B8" font-size="10">level</text>
+  <text x="240" y="174" fill="#E6EDF7" font-size="13" font-weight="700">workspace</text>
+  <rect x="388" y="140" width="150" height="40" rx="4" fill="#0F1730" stroke="#FBBF24"/>
+  <text x="404" y="158" fill="#8B98B8" font-size="10">apply mode</text>
+  <text x="404" y="174" fill="#FBBF24" font-size="13" font-weight="700">dry-run</text>
+  <rect x="552" y="140" width="190" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="568" y="158" fill="#8B98B8" font-size="10">owner mode</text>
+  <text x="568" y="174" fill="#8B98B8" font-size="12">not active</text>
+  <rect x="756" y="140" width="200" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="772" y="158" fill="#8B98B8" font-size="10">audit</text>
+  <text x="772" y="174" fill="#E6EDF7" font-size="12">append-only JSONL</text>
+  <text x="1000" y="164" fill="#22D3EE" font-size="11">→ change</text>
+
+  <!-- Ladder -->
+  <rect x="204" y="236" width="640" height="220" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="260" fill="#E6EDF7" font-size="13" font-weight="700">Level ladder</text>
+  <text x="224" y="280" fill="#8B98B8" font-size="11">least → most privileged · dry-run default at every level</text>
+
+  <rect x="224" y="296" width="120" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="318" fill="#8B98B8" font-size="11">read_only</text>
+  <polygon points="350,314 362,304 362,324" fill="#2A3550"/>
+  <rect x="368" y="296" width="100" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="380" y="318" fill="#8B98B8" font-size="11">cron</text>
+  <polygon points="474,314 486,304 486,324" fill="#2A3550"/>
+  <rect x="492" y="296" width="110" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="504" y="318" fill="#8B98B8" font-size="11">skills</text>
+  <polygon points="608,314 620,304 620,324" fill="#2A3550"/>
+  <rect x="626" y="296" width="150" height="36" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="638" y="318" fill="#8B98B8" font-size="11">skills_config</text>
+
+  <rect x="224" y="344" width="150" height="44" rx="4" fill="#0F1730" stroke="#22D3EE"/>
+  <text x="236" y="362" fill="#22D3EE" font-size="11" font-weight="700">workspace ◀</text>
+  <text x="236" y="378" fill="#8B98B8" font-size="10">current</text>
+  <rect x="388" y="344" width="120" height="44" rx="4" fill="#0F1730" stroke="#FB7185"/>
+  <text x="400" y="362" fill="#FB7185" font-size="11">owner</text>
+  <text x="400" y="378" fill="#8B98B8" font-size="10">break-glass</text>
+
+  <text x="224" y="424" fill="#8B98B8" font-size="11">owner requires HERMES_GPT_OWNER_ACTIVE + owner_ack; does not bypass secret-path protections.</text>
+  <text x="224" y="442" fill="#8B98B8" font-size="11">G6 new surface gates: review_accept → owner · events → read_only</text>
+  <text x="224" y="458" fill="#8B98B8" font-size="11">oauth_status → read_only · oauth_revoke → owner (legal) · swarm_reconcile → ws/owner</text>
+
+  <!-- Tool authority table -->
+  <rect x="860" y="236" width="316" height="220" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="880" y="260" fill="#E6EDF7" font-size="13" font-weight="700">New surface gates</text>
+  <text x="880" y="280" fill="#8B98B8" font-size="11">per-tool authority docstrings</text>
+  <text x="880" y="306" fill="#E6EDF7" font-size="11">hermes_review_accept</text>
+  <text x="1120" y="306" fill="#FB7185" font-size="10">owner</text>
+  <text x="880" y="330" fill="#E6EDF7" font-size="11">hermes_events_query</text>
+  <text x="1120" y="330" fill="#34D399" font-size="10">read_only</text>
+  <text x="880" y="354" fill="#E6EDF7" font-size="11">hermes_events_tail</text>
+  <text x="1120" y="354" fill="#34D399" font-size="10">read_only</text>
+  <text x="880" y="378" fill="#E6EDF7" font-size="11">hermes_oauth_status</text>
+  <text x="1120" y="378" fill="#34D399" font-size="10">read_only</text>
+  <text x="880" y="402" fill="#E6EDF7" font-size="11">hermes_oauth_revoke</text>
+  <text x="1120" y="402" fill="#FBBF24" font-size="10">owner*</text>
+  <text x="880" y="426" fill="#E6EDF7" font-size="11">hermes_swarm_reconcile</text>
+  <text x="1120" y="426" fill="#FBBF24" font-size="10">ws/owner</text>
+  <text x="880" y="446" fill="#5B6A8F" font-size="10">* pending legal sign-off</text>
+
+  <!-- Explainability -->
+  <rect x="204" y="472" width="972" height="180" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="496" fill="#E6EDF7" font-size="13" font-weight="700">Explainability &amp; control</text>
+  <text x="224" y="516" fill="#8B98B8" font-size="11">every tool exposes: required level, apply gate, dry-run default, audit wiring, allowed env semantics</text>
+
+  <rect x="224" y="532" width="600" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="550" fill="#E6EDF7" font-size="11">allowlist semantics: unset = all · list = only listed · empty = none</text>
+  <text x="236" y="566" fill="#8B98B8" font-size="10">HERMES_GPT_MISSION_ALLOWED_SURFACES · HERMES_GPT_EVENTS_ALLOWED_SOURCES</text>
+
+  <rect x="224" y="584" width="600" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="602" fill="#E6EDF7" font-size="11">control is explicit, not automatic</text>
+  <text x="236" y="618" fill="#8B98B8" font-size="10">changes land through config/env tools at their level gates — the UI surfaces state, never bypasses</text>
+
+  <rect x="860" y="532" width="296" height="96" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="880" y="556" fill="#E6EDF7" font-size="11">⚠ UI boundary</text>
+  <text x="880" y="574" fill="#8B98B8" font-size="10">presentation only. no direct store</text>
+  <text x="880" y="590" fill="#8B98B8" font-size="10">reads. no mutation buttons that</text>
+  <text x="880" y="606" fill="#8B98B8" font-size="10">bypass hermes_* tools (D2-A).</text>
+
+  <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+  <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="764" fill="#5B6A8F" font-size="10">G6 explainable authority · S6 surface manifest · sources: policy status, mission overview, oauth_status, config/env</text>
+</svg>

@@ -78,6 +78,34 @@ def test_authority_manifest_accepts_human_readable_card_identities(tmp_path):
     assert peers["nous-girl"].expected_card_identity == "Nous Girl GPU Compute"
 
 
+def test_authority_manifest_accepts_gaming_4090_peer(tmp_path):
+    """gaming-4090 is a supported fleet peer (2-node fleet, corrected 2026-08-15)."""
+    path = tmp_path / "fleet-authority.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "peers": [
+            {
+                "name": "gaming-4090",
+                "expected_host_role": "gpu-compute-subordinate",
+                "expected_card_identity": "TONY-GAMING-TOP",
+                "allowed_profiles": ["default"],
+                "max_authorization": "read_only",
+                "allow_public_actions": False,
+            },
+        ],
+    }), encoding="utf-8")
+    peers = fleet._load_authority(path)
+    assert peers["gaming-4090"].expected_card_identity == "TONY-GAMING-TOP"
+    assert peers["gaming-4090"].allowed_profiles == ("default",)
+    # profile ceiling enforced: unknown profile for this peer is rejected
+    bad = json.loads(path.read_text())
+    bad["peers"][0]["allowed_profiles"] = ["default", "rza"]
+    path.write_text(json.dumps(bad), encoding="utf-8")
+    import pytest
+    with pytest.raises(PermissionError):
+        fleet._load_authority(path)
+
+
 def enable_workspace(monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
@@ -555,3 +583,20 @@ def test_authority_drift_is_bounded_and_never_returns_card_raw_fields(monkeypatc
     assert out["valid"] is False
     assert out["findings"] == [{"agent": "nous-girl", "code": "IDENTITY_MISMATCH", "severity": "error"}]
     assert "url" not in json.dumps(out) and "token" not in json.dumps(out)
+
+
+def test_authority_drift_skips_role_check_when_card_attests_no_role(monkeypatch, tmp_path):
+    """Real Hermes cards (v0.19/v0.20) carry no host_role/role field. A card
+    that attests no role must not trip HOST_ROLE_MISMATCH; a card that does
+    attest a role is still enforced."""
+    enable_read_only(monkeypatch)
+    calls = []
+    runner = runner_with({
+        (HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), ""),
+        # rza card attests nothing about role -> no finding despite manifest role
+        (HERMES, "a2a", "doctor", "rza", "--timeout", "10", "--json"): (0, json.dumps({"name": "Wu-Tang RZA Router"}), ""),
+        # nous-girl attests a WRONG role -> still enforced
+        (HERMES, "a2a", "doctor", "nous-girl", "--timeout", "10", "--json"): (0, json.dumps({"name": "Nous Girl GPU Compute", "role": "fleet_commander"}), ""),
+    }, calls)
+    out = json.loads(fleet.hermes_fleet_authority_drift(runner=runner, hermes_bin=HERMES, authority_manifest=authority_manifest(tmp_path)))
+    assert out["findings"] == [{"agent": "nous-girl", "code": "HOST_ROLE_MISMATCH", "severity": "error"}]

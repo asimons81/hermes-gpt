@@ -8,6 +8,7 @@ from typing import Any, Callable
 from mcp.server.fastmcp import FastMCP
 
 from codex_core import CodexToolCore, codex_toolset
+from versioning import VERSION
 
 
 NOAUTH_META = {"securitySchemes": [{"type": "noauth"}]}
@@ -35,6 +36,12 @@ def build_codex_server(core: CodexToolCore, *, host: str = "127.0.0.1", port: in
         stateless_http=http,
         json_response=http,
     )
+    # Advertise the hermes-gpt app version in the initialize handshake so a
+    # client can detect a stale process exposing an old schema. mcp 1.28.x has
+    # no public FastMCP version hook; the low-level Server falls back to the
+    # SDK version when self.version is unset, so set it on the private instance
+    # (same documented seam as server.build_server()).
+    server._mcp_server.version = VERSION
 
     def hermes_status() -> dict[str, Any]:
         """Check the local Hermes GPT and Hermes Agent gateway state."""

@@ -299,16 +299,29 @@ def hermes_cron_run(
     profile: str = "default",
     job_id: str = "",
     dry_run: bool = True,
+    timeout: int = 1800,
     hermes_root: Path | None = None,
     runner=None,
 ) -> str:
-    """Run a cron job immediately. Requires level >= cron."""
+    """Run a cron job immediately. Requires level >= cron.
+
+    ``timeout`` is the maximum time Hermes GPT will wait for the underlying
+    synchronous ``hermes cron run`` process. Real agent cron jobs commonly run
+    longer than two minutes, so the operator default is 30 minutes rather than
+    the generic 120-second subprocess budget.
+    """
     try:
         policy = op.OperatorPolicy()
         policy.require_level("cron")
         policy.require_profile(profile, hermes_root)
         if not job_id:
             raise ValueError("job_id is required.")
+        try:
+            timeout = int(timeout)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("timeout must be an integer number of seconds.") from exc
+        if timeout < 30 or timeout > 7200:
+            raise ValueError("timeout must be between 30 and 7200 seconds.")
 
         profile_home = op.resolve_profile_home(profile, hermes_root)
         jobs = _read_jobs(profile_home)
@@ -328,6 +341,7 @@ def hermes_cron_run(
                 "profile": profile,
                 "job_id": str(job.get("id")),
                 "job_name": str(job.get("name")),
+                "timeout": timeout,
             }
             op.audit_record(
                 tool="hermes_cron_run",
@@ -346,8 +360,15 @@ def hermes_cron_run(
             )
 
         policy.require_mutation(dry_run)
-        run_fn = runner or op.run_argv
-        rc, out, err = run_fn(argv, timeout=120, workdir=None)
+        if runner is None:
+            rc, out, err = op.run_argv(
+                argv,
+                timeout=timeout,
+                workdir=None,
+                timeout_cap=7200,
+            )
+        else:
+            rc, out, err = runner(argv, timeout=timeout, workdir=None)
         redacted_out = op.redact_output(out)
         redacted_err = op.redact_output(err)
 

@@ -16,20 +16,25 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.6.0**.
+Repository version: **0.7.0** (local checkout, not yet released).
 
-The final GitHub release is `v0.6.0`. PyPI is an independent distribution channel and can lag the repository release. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set.
+The latest published releases are GitHub `v0.6.0` and PyPI `0.6.0`. PyPI is an independent distribution channel and can lag the repository release. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set.
 
 ## Current operational docs
 
 | Document | Authority | Use it for |
 | --- | --- | --- |
 | [`../README.md`](../README.md) | current | project overview, current release, quickstart, safety invariants, entry-point selection |
-| [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration |
+| [`oauth.md`](oauth.md) | current | static bearer and confidential-client OAuth configuration, token lifecycle, refresh rotation, and remote authentication limits |
+| [`mcp-compatibility.md`](mcp-compatibility.md) | current | pinned MCP protocol revisions, transport matrix, trusted-client auth metadata |
+| [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration, Flight Deck v0.7 surfaces |
 | [`codex.md`](codex.md) | current | Codex-as-MCP-client setup and delegated Codex CLI jobs |
 | [`windows-chatgpt-codex.md`](windows-chatgpt-codex.md) | current | Windows ChatGPT -> Hermes GPT -> Codex CLI deployment |
 | [`updating.md`](updating.md) | current | check-first Git and PyPI update behavior |
 | [`retention-policy.md`](retention-policy.md) | current | local diagnostic artifact retention and cleanup |
+| [`ui-security-boundary.md`](ui-security-boundary.md) | current | conversational UI browser security boundary and opt-in UI mount |
+| [`flight-deck-coverage.md`](flight-deck-coverage.md) | current | Flight Deck browser coverage and mutation safety decisions |
+| [`release-notes-v0.7.0.md`](release-notes-v0.7.0.md) | current release record | shipped v0.7 behavior and gates |
 | [`release-notes-v0.6.0.md`](release-notes-v0.6.0.md) | current release record | shipped v0.6 behavior and known limitations |
 | [`../RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) | maintainer | release verification and publication gates |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | historical/current | concise version history |
@@ -89,8 +94,8 @@ These are version records, not current setup instructions:
 
 The following directories contain valuable provenance, but they are not operational source-of-truth documents:
 
-- `design/` - v0.6 technical design documents written before or during implementation.
-- `releases/` - release brief, integrated plan, risk reviews, counsel packet, and surface manifest created during pre-release work.
+- `design/` - technical design documents written before or during implementation. v0.6 designs are historical; v0.7 Flight Deck architecture and ADRs are current design artifacts for the v0.7 release cycle.
+- `releases/` - release brief, integrated plan, risk reviews, counsel packet, and surface manifest created during pre-release work. v0.6 artifacts are historical; v0.7 Flight Deck research package, risk register, and implementation plan are current release-program artifacts.
 
 Some of these files intentionally preserve phrases such as "candidate", "gate", or "before release" because they record the state at the time they were written. Agents must not treat those historical status statements as the current release state.
 

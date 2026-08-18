@@ -1366,10 +1366,26 @@ def hermes_swarm_stage_advance(
         _audit_call(tool=tool, workflow_id=workflow_id, stage_id=stage_id, dry_run=True, success=False, changed=False, summary="advance stage not found")
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
-    if st.get("status") == STAGE_STATUS_DONE:
-        payload = _swarm_error(code="STAGE_ALREADY_DONE", safe_message=f"stage {stage_id!r} is already done.",
-                               suggested_action="Advance the next ready stage.", trace_id=tid)
-        _audit_call(tool=tool, workflow_id=workflow_id, stage_id=stage_id, dry_run=True, success=False, changed=False, summary="stage already done")
+    if st.get("status") in (STAGE_STATUS_DONE, STAGE_STATUS_VALIDATED):
+        # Idempotent re-advance (ADR-007): a stage already validated or done
+        # returns its current state as a no-op instead of erroring. Restart
+        # recovery and retries can therefore safely re-issue an advance.
+        payload = {
+            "success": True,
+            "changed": False,
+            "idempotent": True,
+            "schema_version": SCHEMA_VERSION,
+            "tool": tool,
+            "surface": "swarm_stage_advance",
+            "workflow_id": workflow_id,
+            "stage_id": stage_id,
+            "stage_status": st.get("status"),
+            "verdict": st.get("verdict") or ("SATISFIED" if st.get("status") == STAGE_STATUS_DONE else ""),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "trace_id": tid,
+        }
+        _audit_call(tool=tool, workflow_id=workflow_id, stage_id=stage_id, dry_run=False, success=True, changed=False,
+                    owner=st.get("owner", ""), verdict=payload["verdict"], summary=f"stage {stage_id} already {st.get('status')}; no-op")
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     workflow = {

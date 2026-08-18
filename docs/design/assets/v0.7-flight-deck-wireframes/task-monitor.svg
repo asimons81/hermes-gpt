@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" font-family="'JetBrains Mono','IBM Plex Mono',ui-monospace,monospace">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1B2440" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="topbar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0E1630"/>
+      <stop offset="1" stop-color="#131A2E"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="780" fill="#0B1020"/>
+  <rect width="1200" height="780" fill="url(#grid)"/>
+
+  <!-- Top bar -->
+  <rect x="0" y="0" width="1200" height="56" fill="url(#topbar)"/>
+  <rect x="0" y="56" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="24" fill="#22D3EE" font-size="17" font-weight="700" letter-spacing="2">FLIGHT DECK</text>
+  <text x="24" y="44" fill="#8B98B8" font-size="11">task monitor · swarm / contract / codex / cron lifecycle</text>
+  <text x="960" y="22" fill="#34D399" font-size="12">● level: workspace</text>
+  <text x="960" y="40" fill="#FBBF24" font-size="12">○ apply: dry-run default</text>
+  <text x="760" y="22" fill="#8B98B8" font-size="12">profile: tony</text>
+  <text x="760" y="40" fill="#8B98B8" font-size="12">client: ChatGPT (MCP)</text>
+
+  <!-- Left nav -->
+  <rect x="0" y="57" width="180" height="723" fill="#0D1428"/>
+  <rect x="0" y="57" width="180" height="723" fill="none" stroke="#2A3550"/>
+  <text x="16" y="90" fill="#8B98B8" font-size="12">OVERVIEW</text>
+  <text x="16" y="118" fill="#22D3EE" font-size="12" font-weight="700">▸ TASK MONITOR</text>
+  <text x="16" y="146" fill="#8B98B8" font-size="12">EVENT HISTORY</text>
+  <text x="16" y="174" fill="#8B98B8" font-size="12">EVIDENCE REVIEW</text>
+  <text x="16" y="202" fill="#8B98B8" font-size="12">AUTHORITY</text>
+
+  <!-- Task header -->
+  <rect x="204" y="80" width="972" height="92" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="104" fill="#E6EDF7" font-size="14" font-weight="700">swf-8f21 · release-research</text>
+  <text x="224" y="126" fill="#8B98B8" font-size="11">hermes.swarm-workflow/v1 · /home/tony/hermes-gpt</text>
+  <rect x="224" y="136" width="60" height="22" rx="3" fill="#22D3EE" opacity="0.15"/>
+  <text x="232" y="151" fill="#22D3EE" font-size="10" font-weight="700">RUNNING</text>
+  <rect x="294" y="136" width="76" height="22" rx="3" fill="#A78BFA" opacity="0.15"/>
+  <text x="302" y="151" fill="#A78BFA" font-size="10">STAGE 3/6</text>
+  <text x="900" y="104" fill="#8B98B8" font-size="11">source</text>
+  <text x="900" y="120" fill="#E6EDF7" font-size="10">hermes_swarm_workflow_status</text>
+  <text x="900" y="138" fill="#8B98B8" font-size="10">refresh · 5s TTL cache</text>
+  <text x="1080" y="104" fill="#22D3EE" font-size="11">→ monitor live</text>
+  <text x="1080" y="122" fill="#22D3EE" font-size="11">→ event history</text>
+
+  <!-- Stage ladder -->
+  <rect x="204" y="188" width="972" height="180" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="212" fill="#E6EDF7" font-size="13" font-weight="700">Stage ladder</text>
+  <text x="224" y="232" fill="#8B98B8" font-size="11">restart-safe · interrupted stages reconcile to blocked · operator advances explicitly</text>
+
+  <rect x="224" y="248" width="150" height="44" rx="4" fill="#0F1730" stroke="#34D399"/>
+  <text x="236" y="266" fill="#34D399" font-size="10">1 research</text>
+  <text x="236" y="282" fill="#8B98B8" font-size="10">done · verified</text>
+
+  <polygon points="380,270 396,258 396,282" fill="#2A3550"/>
+  <rect x="404" y="248" width="150" height="44" rx="4" fill="#0F1730" stroke="#34D399"/>
+  <text x="416" y="266" fill="#34D399" font-size="10">2 write</text>
+  <text x="416" y="282" fill="#8B98B8" font-size="10">done · artifacts</text>
+
+  <polygon points="560,270 576,258 576,282" fill="#2A3550"/>
+  <rect x="584" y="248" width="170" height="44" rx="4" fill="#0F1730" stroke="#22D3EE"/>
+  <text x="596" y="266" fill="#22D3EE" font-size="10">3 review (current)</text>
+  <text x="596" y="282" fill="#8B98B8" font-size="10">running 42m · evidence</text>
+
+  <polygon points="760,270 776,258 776,282" fill="#2A3550"/>
+  <rect x="784" y="248" width="150" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="796" y="266" fill="#8B98B8" font-size="10">4 legal</text>
+  <text x="796" y="282" fill="#8B98B8" font-size="10">pending</text>
+
+  <polygon points="940,270 956,258 956,282" fill="#2A3550"/>
+  <rect x="964" y="248" width="170" height="44" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="976" y="266" fill="#8B98B8" font-size="10">5 verify</text>
+  <text x="976" y="282" fill="#8B98B8" font-size="10">pending</text>
+
+  <text x="224" y="330" fill="#8B98B8" font-size="11">advance requires hermes_swarm_stage_advance · dry-run first · blocked stages never auto-advance (fail-closed)</text>
+
+  <!-- Right column: evidence + actions -->
+  <rect x="204" y="384" width="640" height="196" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="408" fill="#E6EDF7" font-size="13" font-weight="700">Production evidence</text>
+  <text x="224" y="428" fill="#8B98B8" font-size="11">hermes_contract_status · review evidence · observed state</text>
+  <rect x="224" y="444" width="600" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="462" fill="#E6EDF7" font-size="11">contract ctr-3c01 · sha256 9f2c…e1a7</text>
+  <text x="236" y="478" fill="#8B98B8" font-size="10">objective: produce release package · forbidden: publish, secrets</text>
+  <rect x="224" y="492" width="600" height="40" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="236" y="510" fill="#E6EDF7" font-size="11">evidence refs</text>
+  <text x="236" y="526" fill="#8B98B8" font-size="10">docs/design/v0.7-flight-deck-architecture.md · test run log · 14 artifacts</text>
+  <text x="224" y="558" fill="#A78BFA" font-size="11">review evidence: pending acceptance → SATISFIED requires hermes_review_accept</text>
+
+  <!-- Actions panel -->
+  <rect x="860" y="384" width="316" height="196" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="880" y="408" fill="#E6EDF7" font-size="13" font-weight="700">Actions (gated)</text>
+  <text x="880" y="428" fill="#8B98B8" font-size="11">actions call gated hermes_* tools only</text>
+  <rect x="880" y="444" width="276" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="892" y="465" fill="#E6EDF7" font-size="11">advance stage 3 → 4</text>
+  <text x="1120" y="465" fill="#8B98B8" font-size="10">dry-run</text>
+  <rect x="880" y="486" width="276" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="892" y="507" fill="#E6EDF7" font-size="11">reconcile (post-restart)</text>
+  <text x="1120" y="507" fill="#8B98B8" font-size="10">dry-run</text>
+  <rect x="880" y="528" width="276" height="34" rx="4" fill="#0F1730" stroke="#2A3550"/>
+  <text x="892" y="549" fill="#E6EDF7" font-size="11">review accept evidence</text>
+  <text x="1120" y="549" fill="#A78BFA" font-size="10">owner</text>
+  <text x="880" y="564" fill="#FBBF24" font-size="10">▲ confirm required before any mutation</text>
+
+  <!-- Event strip -->
+  <rect x="204" y="596" width="972" height="130" rx="6" fill="#131A2E" stroke="#2A3550"/>
+  <text x="224" y="620" fill="#E6EDF7" font-size="13" font-weight="700">Related events</text>
+  <text x="224" y="640" fill="#8B98B8" font-size="11">hermes_events_query(subject_id=swf-8f21)</text>
+  <text x="224" y="666" fill="#5B6A8F" font-size="10">14:02:11 · stage_done · swf-8f21 research/write</text>
+  <text x="224" y="684" fill="#5B6A8F" font-size="10">14:05:22 · stage_started · swf-8f21 review (actor developer)</text>
+  <text x="224" y="702" fill="#5B6A8F" font-size="10">14:05:23 · audit · hermes_swarm_stage_advance dry-run (no-op)</text>
+
+  <rect x="0" y="740" width="1200" height="40" fill="#0D1428"/>
+  <rect x="0" y="740" width="1200" height="1" fill="#2A3550"/>
+  <text x="24" y="764" fill="#5B6A8F" font-size="10">sources: swarm_workflow_status, contract_status, events_query · redacted · read-only · restart-safe continuity (S2)</text>
+</svg>

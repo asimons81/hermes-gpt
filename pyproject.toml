@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-gpt"
-version = "0.6.0"
+version = "0.7.0"
 description = "Local-dev MCP sidecar for exposing selected Hermes Agent capabilities."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,6 +16,7 @@ dependencies = [
   "mcp[cli]>=1.0,<2",
   "packaging>=23",
   "uvicorn",
+  "cryptography>=42",
   "tomli; python_version < '3.11'",
 ]
 
@@ -25,6 +26,7 @@ dev = [
   "build",
   "twine",
   "pyyaml",
+  "keyring",
 ]
 
 [project.scripts]
@@ -34,6 +36,7 @@ hermes-gpt = "server:main"
 include-package-data = true
 py-modules = [
   "server",
+  "oauth_auth",
   "operator_policy",
   "operator_cron",
   "operator_skills",
@@ -45,13 +48,24 @@ py-modules = [
   "operator_session",
   "operator_mission",
   "operator_contract",
+  "operator_review",
+  "operator_events",
+  "operator_oauth",
+  "token_store",
   "operator_swarm",
   "operator_swarm_workflows",
+  "operator_recovery",
   "codex_core",
   "codex_mcp",
   "codex_config",
+  "seams",
   "updater",
   "versioning",
+  "hermes_state",
+  "ui_api",
+  "ui_security",
+  "ui_chat",
+  "ui_ops",
 ]
 
 [tool.setuptools.data-files]
@@ -62,7 +76,9 @@ py-modules = [
 ]
 "share/hermes-gpt/docs" = [
   "docs/README.md",
+  "docs/oauth.md",
   "docs/operator-mode.md",
+  "docs/mcp-compatibility.md",
   "docs/release-notes-v0.2.0.md",
   "docs/release-notes-v0.3.0.md",
   "docs/release-notes-v0.4.0.md",
@@ -74,8 +90,11 @@ py-modules = [
   "docs/release-notes-v0.5.0b2.md",
   "docs/release-notes-v0.5.0.md",
   "docs/release-notes-v0.6.0.md",
+  "docs/release-notes-v0.7.0.md",
   "docs/retention-policy.md",
   "docs/windows-chatgpt-codex.md",
+  "docs/ui-security-boundary.md",
+  "docs/flight-deck-coverage.md",
 ]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",

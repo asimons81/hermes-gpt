@@ -192,24 +192,43 @@ def _read_ticker_heartbeat(profile_home: Path) -> float | None:
 
 
 def _gateway_adapters_summary(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return sanitized adapter/platform summary.
+    """Return sanitized adapter/platform summary across gateway-state schemas.
 
-    Supports both formats:
+    Hermes has emitted two platform-state shapes over time:
 
-    Legacy:
-    {
-      "telegram": {"connected": true}
-    }
+    Legacy::
 
-    Newer:
-    {
-      "platforms": {
-        "telegram": {"connected": true}
-      }
-    }
+        {"telegram": {"connected": true}}
 
-    No tokens, URLs, or secret-like values are surfaced.
+    Current::
+
+        {"platforms": {"telegram": {"state": "connected", ...}}}
+
+    Prefer an explicit legacy ``connected`` boolean when present; otherwise
+    derive connectivity from the current ``state`` field.  Only safe status
+    metadata is surfaced.  Tokens, URLs, and secret-like values are never
+    copied into the result.
     """
+
+    def _sanitize(name: str, entry: dict[str, Any]) -> dict[str, Any]:
+        if "connected" in entry:
+            connected = bool(entry.get("connected"))
+        else:
+            connected = str(entry.get("state") or "").strip().lower() == "connected"
+
+        result: dict[str, Any] = {
+            "name": name,
+            "connected": connected,
+        }
+        platform_state = entry.get("state")
+        if isinstance(platform_state, str) and platform_state.strip():
+            result["state"] = platform_state.strip()
+        if isinstance(entry.get("needs_attention"), bool):
+            result["needs_attention"] = entry["needs_attention"]
+        if isinstance(entry.get("updated_at"), str) and entry["updated_at"].strip():
+            result["updated_at"] = entry["updated_at"].strip()
+        return result
+
     adapters: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -217,12 +236,7 @@ def _gateway_adapters_summary(state: dict[str, Any]) -> list[dict[str, Any]]:
     for key in legacy_keys:
         entry = state.get(key)
         if isinstance(entry, dict):
-            adapters.append(
-                {
-                    "name": key,
-                    "connected": bool(entry.get("connected", False)),
-                }
-            )
+            adapters.append(_sanitize(key, entry))
             seen.add(key)
 
     platforms = state.get("platforms")
@@ -232,12 +246,7 @@ def _gateway_adapters_summary(state: dict[str, Any]) -> list[dict[str, Any]]:
             if name in seen:
                 continue
             if isinstance(entry, dict):
-                adapters.append(
-                    {
-                        "name": name,
-                        "connected": bool(entry.get("connected", False)),
-                    }
-                )
+                adapters.append(_sanitize(name, entry))
                 seen.add(name)
 
     return adapters
@@ -905,6 +914,33 @@ def _command_touches_secrets(command: str) -> bool:
     return any(n in lower for n in needles)
 
 
+def _deferred_self_restart_argv(argv: list[str]) -> list[str] | None:
+    """Return a delayed systemd command for an exact Hermes GPT self-restart.
+
+    Running ``systemctl --user restart hermes-gpt-server.service`` synchronously
+    from the server kills the process that is waiting on ``systemctl``. The
+    operator then records rc=-15 even though systemd successfully restarts the
+    service. Schedule only this exact self-restart a few seconds later so the
+    MCP response and audit record can complete first.
+    """
+    if os.name == "nt" or len(argv) != 4:
+        return None
+    if Path(argv[0]).name != "systemctl":
+        return None
+    if argv[1:] != ["--user", "restart", "hermes-gpt-server.service"]:
+        return None
+    return [
+        "systemd-run",
+        "--user",
+        "--on-active=3s",
+        "--collect",
+        "systemctl",
+        "--user",
+        "restart",
+        "hermes-gpt-server.service",
+    ]
+
+
 def hermes_owner_run_command(
     command: str,
     timeout: int = 120,
@@ -938,10 +974,15 @@ def hermes_owner_run_command(
         if not argv:
             raise ValueError("Empty command after parse.")
 
+        deferred_restart_argv = _deferred_self_restart_argv(argv)
+        effective_argv = deferred_restart_argv or argv
+
         if policy.effective_dry_run(dry_run):
             plan = {
                 "would_run": True,
-                "argv": argv,
+                "argv": effective_argv,
+                "requested_argv": argv if deferred_restart_argv else None,
+                "deferred_self_restart": bool(deferred_restart_argv),
                 "shell": False,
                 "workdir": workdir,
                 "timeout": max(1, min(int(timeout), 600)),
@@ -961,13 +1002,15 @@ def hermes_owner_run_command(
 
         policy.require_mutation(dry_run)
         run_fn = runner or op.run_argv
-        rc, out, err = run_fn(argv, timeout=timeout, workdir=workdir)
+        rc, out, err = run_fn(effective_argv, timeout=timeout, workdir=workdir)
         result = {
             "success": rc == 0,
             "dry_run": False,
             "owner_mode": True,
             "returncode": rc,
             "argv": argv,
+            "executed_argv": effective_argv if deferred_restart_argv else argv,
+            "deferred_self_restart": bool(deferred_restart_argv),
             "stdout": op.redact_output(out),
             "stderr": op.redact_output(err),
         }
@@ -978,9 +1021,17 @@ def hermes_owner_run_command(
             dry_run=False,
             success=rc == 0,
             changed=True,
-            summary=f"rc={rc} argv={argv}",
+            summary=(
+                f"rc={rc} argv={argv} deferred_self_restart=True"
+                if deferred_restart_argv
+                else f"rc={rc} argv={argv}"
+            ),
             error=op.redact_output(err) if rc != 0 else "",
-            extra={"workdir": workdir or ""},
+            extra={
+                "workdir": workdir or "",
+                "executed_argv": effective_argv,
+                "deferred_self_restart": bool(deferred_restart_argv),
+            },
         )
         return json.dumps(result, indent=2)
     except Exception as exc:

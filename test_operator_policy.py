@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -495,6 +496,35 @@ def test_run_argv_runs_without_shell(tmp_path):
     assert "hello" in out
 
 
+def test_run_argv_allows_explicit_higher_timeout_cap(monkeypatch):
+    import subprocess
+
+    captured = {}
+
+    class FakeProcess:
+        pid = 12345
+        returncode = 0
+
+        def communicate(self, *, timeout=None):
+            captured["timeout"] = timeout
+            return ("ok", "")
+
+    def fake_popen(*_args, **kwargs):
+        captured["start_new_session"] = kwargs.get("start_new_session")
+        return FakeProcess()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    rc, out, err = op.run_argv(
+        ["example"], timeout=1800, timeout_cap=7200
+    )
+    assert rc == 0
+    assert out == "ok"
+    assert err == ""
+    assert captured["timeout"] == 1800
+    if os.name == "posix":
+        assert captured["start_new_session"] is True
+
+
 def test_run_argv_refuses_empty_argv():
     with pytest.raises(ValueError):
         op.run_argv([], timeout=5)
@@ -504,3 +534,33 @@ def test_run_argv_handles_missing_executable():
     rc, out, err = op.run_argv(["this-binary-does-not-exist-xyz"], timeout=5)
     assert rc == 127
     assert err  # non-empty error
+
+
+def test_run_argv_timeout_kills_descendant_process_group(tmp_path):
+    if os.name != "posix":
+        pytest.skip("process-group timeout cleanup is POSIX-specific")
+
+    pid_file = tmp_path / "child.pid"
+    parent_script = (
+        "import pathlib, subprocess, sys, time; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text(str(child.pid)); "
+        "time.sleep(60)"
+    )
+
+    rc, out, err = op.run_argv(
+        [sys.executable, "-c", parent_script, str(pid_file)],
+        timeout=1,
+        workdir=str(tmp_path),
+    )
+
+    assert rc == 124
+    assert "timed out after 1s" in err
+    assert pid_file.exists()
+
+    child_pid = int(pid_file.read_text())
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and Path(f"/proc/{child_pid}").exists():
+        time.sleep(0.05)
+
+    assert not Path(f"/proc/{child_pid}").exists()

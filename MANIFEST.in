@@ -6,6 +6,8 @@ include CHANGELOG.md
 include docs/README.md
 include docs/codex.md
 include docs/operator-mode.md
+include docs/mcp-compatibility.md
+include docs/oauth.md
 include docs/release-notes-v0.2.0.md
 include docs/release-notes-v0.3.0.md
 include docs/release-notes-v0.4.0.md
@@ -13,9 +15,12 @@ include docs/release-notes-v0.5.0b1.md
 include docs/release-notes-v0.5.0b2.md
 include docs/release-notes-v0.5.0.md
 include docs/release-notes-v0.6.0.md
+include docs/release-notes-v0.7.0.md
 include docs/retention-policy.md
 include docs/updating.md
 include docs/windows-chatgpt-codex.md
+include docs/ui-security-boundary.md
+include docs/flight-deck-coverage.md
 recursive-include examples *.ps1
 prune docs/design
 prune docs/releases

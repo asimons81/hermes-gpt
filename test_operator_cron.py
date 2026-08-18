@@ -271,6 +271,7 @@ def test_cron_run_direct_mode_invokes_runner(hermes_root, clean_env, audit_overr
 
     def fake_runner(argv, timeout=120, workdir=None):
         captured["argv"] = argv
+        captured["timeout"] = timeout
         return (0, "ok", "")
 
     out = oc.hermes_cron_run(
@@ -282,6 +283,63 @@ def test_cron_run_direct_mode_invokes_runner(hermes_root, clean_env, audit_overr
     assert parsed["dry_run"] is False
     assert parsed["returncode"] == 0
     assert captured["argv"] == ["hermes", "cron", "run", "abc123"]
+    assert captured["timeout"] == 1800
+
+
+def test_cron_run_default_runner_raises_only_cron_timeout_cap(
+    hermes_root, clean_env, audit_override, monkeypatch
+):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    _write_jobs(hermes_root, [_make_job()])
+    captured = {}
+
+    def fake_run_argv(argv, *, timeout=120, workdir=None, timeout_cap=600, **_kwargs):
+        captured["timeout"] = timeout
+        captured["timeout_cap"] = timeout_cap
+        return (0, "ok", "")
+
+    monkeypatch.setattr(oc.op, "run_argv", fake_run_argv)
+    parsed = json.loads(oc.hermes_cron_run(
+        profile="default", job_id="abc123", dry_run=False,
+        hermes_root=hermes_root,
+    ))
+    assert parsed["success"] is True
+    assert captured["timeout"] == 1800
+    assert captured["timeout_cap"] == 7200
+
+
+def test_cron_run_honors_custom_timeout(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    _write_jobs(hermes_root, [_make_job()])
+    captured = {}
+
+    def fake_runner(argv, timeout=120, workdir=None):
+        captured["timeout"] = timeout
+        return (0, "ok", "")
+
+    parsed = json.loads(oc.hermes_cron_run(
+        profile="default", job_id="abc123", dry_run=False, timeout=3600,
+        hermes_root=hermes_root, runner=fake_runner,
+    ))
+    assert parsed["success"] is True
+    assert captured["timeout"] == 3600
+
+
+def test_cron_run_rejects_out_of_range_timeout(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    _write_jobs(hermes_root, [_make_job()])
+
+    parsed = json.loads(oc.hermes_cron_run(
+        profile="default", job_id="abc123", dry_run=True, timeout=10,
+        hermes_root=hermes_root,
+    ))
+    assert parsed["success"] is False
+    assert "between 30 and 7200 seconds" in parsed["error"]
 
 
 def test_cron_run_direct_with_named_profile_uses_p_flag(hermes_root, clean_env, audit_override, monkeypatch):

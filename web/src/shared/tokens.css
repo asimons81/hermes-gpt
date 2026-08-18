@@ -1,0 +1,93 @@
+/**
+ * Design tokens — neutral defaults (t_7266e74c / architecture.md §4).
+ *
+ * This is the ONLY shared visual file. Values here are deliberately neutral:
+ * the media lane (t_d2d86b5a) owns the final token values and lands them in
+ * this module; feature cards must consume these tokens rather than inventing
+ * their own. Do not add feature-specific colors to this file.
+ */
+
+:root {
+  /* Color — neutral default palette (media lane overrides later). */
+  --hg-color-bg: #ffffff;
+  --hg-color-bg-subtle: #f6f7f8;
+  --hg-color-bg-raised: #ffffff;
+  --hg-color-surface: #f0f1f3;
+  --hg-color-surface-hover: #e6e8eb;
+  --hg-color-border: #d5d8dc;
+  --hg-color-border-strong: #b8bdc4;
+  --hg-color-text: #1a1d21;
+  --hg-color-text-secondary: #5c636a;
+  --hg-color-text-muted: #8a919a;
+  --hg-color-text-on-accent: #ffffff;
+
+  --hg-color-accent: #2f6fed;
+  --hg-color-accent-hover: #2559c9;
+  --hg-color-accent-subtle: #e8effd;
+
+  --hg-color-success: #1a7f37;
+  --hg-color-success-subtle: #e6f4ea;
+  --hg-color-warning: #9a6700;
+  --hg-color-warning-subtle: #fff8c5;
+  --hg-color-danger: #cf222e;
+  --hg-color-danger-subtle: #ffebe9;
+  --hg-color-neutral-subtle: #f0f1f3;
+
+  /* Spacing scale */
+  --hg-space-1: 4px;
+  --hg-space-2: 8px;
+  --hg-space-3: 12px;
+  --hg-space-4: 16px;
+  --hg-space-5: 24px;
+  --hg-space-6: 32px;
+  --hg-space-8: 48px;
+
+  /* Radii */
+  --hg-radius-sm: 6px;
+  --hg-radius-md: 10px;
+  --hg-radius-lg: 14px;
+  --hg-radius-pill: 999px;
+
+  /* Typography */
+  --hg-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --hg-font-family-mono: ui-monospace, SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --hg-font-size-xs: 12px;
+  --hg-font-size-sm: 13px;
+  --hg-font-size-md: 15px;
+  --hg-font-size-lg: 17px;
+  --hg-font-size-xl: 20px;
+  --hg-font-size-2xl: 26px;
+  --hg-line-height-tight: 1.25;
+  --hg-line-height-normal: 1.5;
+
+  /* Shadows */
+  --hg-shadow-sm: 0 1px 2px rgba(16, 20, 24, 0.08);
+  --hg-shadow-md: 0 4px 12px rgba(16, 20, 24, 0.12);
+  --hg-shadow-lg: 0 12px 32px rgba(16, 20, 24, 0.16);
+
+  /* Z-index scale */
+  --hg-z-base: 0;
+  --hg-z-sticky: 100;
+  --hg-z-overlay: 200;
+  --hg-z-modal: 300;
+  --hg-z-toast: 400;
+
+  /* Motion */
+  --hg-duration-fast: 120ms;
+  --hg-duration-normal: 200ms;
+  --hg-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --hg-sidebar-width: 280px;
+  --hg-header-height: 56px;
+  --hg-content-max-width: 880px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --hg-duration-fast: 0ms;
+    --hg-duration-normal: 0ms;
+  }
+}

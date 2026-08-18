@@ -288,6 +288,33 @@ def test_release_doctor_blocks_on_secret_file(tmp_path, monkeypatch):
     assert any(".env" in issue for issue in parsed["blocking_issues"])
 
 
+def test_release_doctor_blocks_on_secret_like_data_file(tmp_path, monkeypatch):
+    """A secret-bearing data file (tokens.json) is still blocked."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tokens.json").write_text("{}", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(f'version = "{od.VERSION}"\n', encoding="utf-8")
+    out = od.hermes_release_doctor(workdir=str(repo), full_tests=False)
+    parsed = json.loads(out)
+    assert parsed["status"] == "BLOCKED"
+    assert any("tokens.json" in issue for issue in parsed["blocking_issues"])
+
+
+def test_release_doctor_allows_source_modules_with_secret_like_names(tmp_path, monkeypatch):
+    """oauth_auth.py / token_store.py are source modules, not secret artifacts."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "oauth_auth.py").write_text("def f(): pass\n", encoding="utf-8")
+    (repo / "token_store.py").write_text("def f(): pass\n", encoding="utf-8")
+    (repo / "docs").mkdir(parents=True)
+    (repo / "docs" / "oauth.md").write_text("# OAuth\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(f'version = "{od.VERSION}"\n', encoding="utf-8")
+    out = od.hermes_release_doctor(workdir=str(repo), full_tests=False)
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert not any("oauth" in issue.lower() or "token" in issue.lower() for issue in parsed["blocking_issues"])
+
+
 def test_release_doctor_warns_on_dirty_tree(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

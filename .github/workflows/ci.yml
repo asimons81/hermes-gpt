@@ -20,7 +20,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest
-      - run: python -m py_compile server.py codex_core.py codex_mcp.py codex_config.py operator_codex.py updater.py
+      - run: python -m py_compile server.py codex_core.py codex_mcp.py codex_config.py operator_codex.py updater.py operator_recovery.py operator_review.py operator_events.py operator_oauth.py token_store.py seams.py
 
   build:
     needs: test

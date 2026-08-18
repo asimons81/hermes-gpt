@@ -1,6 +1,6 @@
 # Operator Mode for Hermes GPT
 
-Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.6.0 behavior.
+Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.7.0 behavior.
 
 For documentation authority and historical-artifact rules, see [docs/README.md](README.md).
 
@@ -200,6 +200,10 @@ Retry selection is deterministic. Forbidden-action audit evidence is scoped to t
 ### Review limitation in v0.6.0
 
 v0.6.0 has no production review-accept writer. If a contract requires review, the necessary evidence must already exist through an authorized external reviewer/audit path or human approval reference. If it does not exist, validation returns `NOT_SATISFIED`.
+
+**v0.7 closes this gap**: `hermes_review_accept` (owner-gated, distinct
+reviewer enforced) writes review-acceptance records that the validator reads
+as evidence. See [Flight Deck (v0.7)](#flight-deck-v07).
 
 Required test checks execute only through the workspace test allowlist and inherit the workspace/direct policy gates.
 
@@ -439,4 +443,5 @@ $env:HERMES_GPT_OWNER_ACK="I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
 - [Windows ChatGPT -> Codex](windows-chatgpt-codex.md)
 - [Updating](updating.md)
 - [Retention policy](retention-policy.md)
+- [v0.7.0 release notes](release-notes-v0.7.0.md)
 - [v0.6.0 release notes](release-notes-v0.6.0.md)

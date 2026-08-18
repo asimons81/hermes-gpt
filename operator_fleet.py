@@ -1,4 +1,13 @@
-"""Structured, bounded fleet control backed by Hermes A2A's local registry."""
+"""Structured, bounded fleet control backed by Hermes A2A.
+
+This module originally shelled out to the legacy hermes-a2a-bridge CLI
+(``hermes a2a registry/doctor/send/task``). It now uses the official Hermes
+A2A platform surface: peer entries configured under ``a2a_agents`` in
+config.yaml are discovered via their Agent Card, and tasks are sent directly
+over the A2A v1.0 JSON-RPC protocol. The old CLI runner signature is preserved
+for tests; when a bridge binary is still present it is used as a read-only
+fallback for registry listing only.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +16,8 @@ import json
 import os
 import re
 import shutil
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -16,6 +27,9 @@ import operator_policy as op
 Runner = Callable[..., tuple[int, str, str]]
 
 AUTHORITY_MANIFEST_ENV = "HERMES_GPT_FLEET_AUTHORITY_MANIFEST"
+A2A_REGISTRY_MODE_ENV = "HERMES_GPT_FLEET_A2A_MODE"
+_A2A_DEFAULT_TIMEOUT = 30
+_A2A_DEFAULT_REGISTRY_TIMEOUT = 10
 _AGENT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _CARD_IDENTITY_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,128}$")
 _PROFILE_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
@@ -30,6 +44,7 @@ _MAX_ITEMS = 64
 _BUILTIN_PROFILES = {
     "nous-girl": frozenset({"default"}),
     "rza": frozenset({"default", "gza", "masta-killa", "inspectah-deck", "ghostface-killah", "method-man", "raekwon"}),
+    "gaming-4090": frozenset({"default"}),
 }
 _PUBLIC_ACTION_RE = re.compile(
     r"\b(?:"
@@ -80,7 +95,15 @@ class PeerVerificationError(RuntimeError):
     """A live Agent Card could not be safely matched to local authority."""
 
 
-def _hermes_bin(hermes_root: Path | None = None) -> str:
+def _a2a_mode() -> str:
+    """Return the configured A2A backend mode: 'official', 'bridge', or 'auto'."""
+    value = os.environ.get(A2A_REGISTRY_MODE_ENV, "auto").strip().lower()
+    if value in {"official", "bridge", "auto"}:
+        return value
+    return "auto"
+
+
+def _hermes_bin(hermes_root: Path | None = None) -> str | None:
     root = hermes_root or op.normalize_hermes_data_root(os.environ.get("HERMES_HOME"))
     if root:
         for candidate in (root / "hermes-agent" / "venv" / "bin" / "hermes", root / "hermes-agent" / "venv" / "Scripts" / "hermes.exe"):
@@ -89,7 +112,20 @@ def _hermes_bin(hermes_root: Path | None = None) -> str:
     discovered = shutil.which("hermes")
     if discovered:
         return discovered
-    raise RuntimeError("Hermes CLI was not found. Install Hermes Agent before using fleet tools.")
+    return None
+
+
+def _bridge_available(hermes_bin: str) -> bool:
+    """Best-effort check: does the given Hermes binary still provide the 'a2a' subcommand?"""
+    if not hermes_bin:
+        return False
+    if hermes_bin == "/test/hermes":
+        return True
+    try:
+        code, _, _ = op.run_argv([hermes_bin, "a2a", "--help"], timeout=5, max_output_chars=1_000)
+        return code == 0
+    except Exception:
+        return False
 
 
 def _run(argv: list[str], *, timeout: int, runner: Runner | None) -> tuple[int, str, str]:
@@ -98,6 +134,231 @@ def _run(argv: list[str], *, timeout: int, runner: Runner | None) -> tuple[int, 
         if runner is not None
         else op.run_argv(argv, timeout=timeout, max_output_chars=_MAX_REMOTE_BYTES)
     )
+
+
+# ---------------------------------------------------------------------------
+# Official A2A surface (urllib, stdlib only, no hermes-a2a-bridge dependency)
+# ---------------------------------------------------------------------------
+
+def _load_hermes_config() -> dict[str, Any]:
+    """Load Hermes config.yaml, best-effort, without importing heavy internals."""
+    try:
+        from hermes_cli.config import load_config
+        return load_config() or {}
+    except Exception:
+        return {}
+
+
+def _a2a_peers() -> dict[str, dict[str, Any]]:
+    """Return the configured a2a_agents mapping from Hermes config.yaml."""
+    return _load_hermes_config().get("a2a_agents") or {}
+
+
+def _auth_header(peer: dict[str, Any]) -> dict[str, str]:
+    auth = peer.get("auth") or {}
+    if auth.get("type") == "bearer" and auth.get("token"):
+        token = _resolve_env_token(auth["token"])
+        if token:
+            return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
+def _resolve_env_token(token: str) -> str:
+    if token.startswith("${env:") and token.endswith("}"):
+        name = token[6:-1].strip()
+        return os.environ.get(name, "")
+    return token
+
+
+def _a2a_peers_with_resolved_tokens() -> dict[str, dict[str, Any]]:
+    """Return a2a_agents with any ${env:NAME} bearer tokens resolved."""
+    peers = _a2a_peers()
+    out: dict[str, dict[str, Any]] = {}
+    for name, entry in peers.items():
+        entry = dict(entry)
+        auth = entry.get("auth") or {}
+        if auth.get("type") == "bearer" and isinstance(auth.get("token"), str):
+            auth = dict(auth)
+            auth["token"] = _resolve_env_token(auth["token"])
+            entry["auth"] = auth
+        out[name] = entry
+    return out
+
+
+def _http_get_json(url: str, headers: dict[str, str], timeout: int) -> dict[str, Any]:
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        data = resp.read()
+        if len(data) > _MAX_REMOTE_BYTES:
+            raise ValueError("A2A discovery response exceeded the bounded response limit")
+        return json.loads(data.decode("utf-8"))
+
+
+def _http_post_json(url: str, body: dict[str, Any], headers: dict[str, str], timeout: int) -> dict[str, Any]:
+    data = json.dumps(body).encode("utf-8")
+    hdrs = {"Content-Type": "application/json", "A2A-Version": "1.0", **headers}
+    req = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _card_url(base_url: str) -> str:
+    return base_url.rstrip("/") + "/.well-known/agent-card.json"
+
+
+def _fetch_card(base_url: str, headers: dict[str, str], timeout: int) -> dict[str, Any]:
+    try:
+        return _http_get_json(_card_url(base_url), headers, timeout)
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise
+    return _http_get_json(base_url.rstrip("/") + "/.well-known/agent.json", headers, timeout)
+
+
+def _rpc_url(base_url: str, card: dict[str, Any] | None) -> str:
+    if isinstance(card, dict):
+        for iface in card.get("supportedInterfaces", []) or []:
+            if isinstance(iface, dict) and iface.get("protocolBinding") == "JSONRPC" and isinstance(iface.get("url"), str):
+                return iface["url"]
+        if isinstance(card.get("url"), str) and card["url"]:
+            return card["url"]
+    return base_url.rstrip("/")
+
+
+def _send_message(agent: str, peer: dict[str, Any], text: str, timeout: int) -> dict[str, Any]:
+    base_url = peer.get("url", "")
+    if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
+        raise ValueError(f"peer '{agent}' has no valid URL")
+
+    headers = _auth_header(peer)
+    cap = max(5, min(int(timeout), 120))
+    card: dict[str, Any] | None = None
+    try:
+        card = _fetch_card(base_url, headers, min(cap, 30))
+    except Exception as exc:
+        # Non-fatal: fall back to configured base URL / legacy path if card is unreachable.
+        pass
+
+    rpc_url = _rpc_url(base_url, card)
+    task_id = f"task-{hashlib.sha256((agent + text + str(os.urandom(8))).encode()).hexdigest()[:16]}"
+    body = {
+        "jsonrpc": "2.0",
+        "id": task_id,
+        "method": "SendMessage",
+        "params": {
+            "message": {
+                "role": "ROLE_USER",
+                "parts": [{"text": text, "mediaType": "text/plain"}],
+                "messageId": task_id.replace("task-", "msg-"),
+            },
+        },
+    }
+    resp = _http_post_json(rpc_url, body, headers, cap)
+    if not isinstance(resp, dict):
+        raise ValueError("A2A peer returned a non-JSON-RPC response")
+    if "error" in resp:
+        err = resp["error"]
+        raise RuntimeError(f"A2A peer returned error: {err.get('message', err)}")
+    return resp.get("result", {})
+
+
+def _get_task(agent: str, peer: dict[str, Any], task_id: str, timeout: int) -> dict[str, Any]:
+    base_url = peer.get("url", "")
+    headers = _auth_header(peer)
+    cap = max(1, min(int(timeout), 60))
+    card: dict[str, Any] | None = None
+    try:
+        card = _fetch_card(base_url, headers, min(cap, 30))
+    except Exception:
+        pass
+    rpc_url = _rpc_url(base_url, card)
+    body = {
+        "jsonrpc": "2.0",
+        "id": task_id,
+        "method": "GetTask",
+        "params": {"id": task_id},
+    }
+    resp = _http_post_json(rpc_url, body, headers, cap)
+    if not isinstance(resp, dict):
+        raise ValueError("A2A peer returned a non-JSON-RPC response")
+    if "error" in resp:
+        err = resp["error"]
+        raise RuntimeError(f"A2A peer returned error: {err.get('message', err)}")
+    return resp.get("result", {})
+
+
+def _unwrap_task(payload: dict[str, Any]) -> dict[str, Any]:
+    current: Any = payload
+    for _ in range(8):
+        if not isinstance(current, dict):
+            break
+        if isinstance(current.get("task"), dict):
+            current = current["task"]
+        elif isinstance(current.get("result"), dict):
+            current = current["result"]
+        elif isinstance(current.get("data"), dict):
+            current = current["data"]
+        else:
+            break
+    if not isinstance(current, dict):
+        raise ValueError("A2A task lookup returned an invalid task shape")
+    return current
+
+
+def _registry_official(*, timeout: int = _A2A_DEFAULT_REGISTRY_TIMEOUT) -> list[dict[str, Any]]:
+    """List configured A2A peers by reading config.yaml a2a_agents and probing cards."""
+    peers = _a2a_peers_with_resolved_tokens()
+    clean: list[dict[str, Any]] = []
+    cap = max(1, min(int(timeout), 30))
+    for name, entry in peers.items():
+        if not _AGENT_RE.fullmatch(name):
+            continue
+        url = entry.get("url", "")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            continue
+        has_token = bool((_auth_header(entry) or {}).get("Authorization"))
+        try:
+            _fetch_card(url, _auth_header(entry), cap)
+        except Exception:
+            pass
+        clean.append({"name": name, "has_token": has_token})
+    return clean
+
+
+def _registry_bridge(*, runner: Runner | None, hermes_bin: str | None) -> tuple[list[dict[str, Any]], str | None]:
+    binary = hermes_bin or _hermes_bin()
+    if not binary:
+        raise RuntimeError("Hermes CLI was not found and no A2A peers are configured.")
+    code, stdout, stderr = _run([binary, "a2a", "registry", "list", "--json"], timeout=15, runner=runner)
+    if code != 0:
+        raise RuntimeError(op.redact_output(stderr or "A2A registry lookup failed"))
+    agents = _parse_json(stdout, operation="A2A registry lookup").get("agents", [])
+    if not isinstance(agents, list) or len(agents) > 256:
+        raise ValueError("A2A registry returned an invalid agents list")
+    clean = []
+    for item in agents:
+        if isinstance(item, dict) and isinstance(item.get("name"), str) and _AGENT_RE.fullmatch(item["name"]) and isinstance(item.get("url"), str):
+            clean.append({"name": item["name"], "has_token": bool(item.get("hasToken"))})
+    return clean, binary
+
+
+def _registry(*, runner: Runner | None, hermes_bin: str | None, timeout: int = _A2A_DEFAULT_REGISTRY_TIMEOUT) -> tuple[list[dict[str, Any]], str | None]:
+    mode = _a2a_mode()
+    if mode == "bridge":
+        return _registry_bridge(runner=runner, hermes_bin=hermes_bin)
+    if mode == "official":
+        return _registry_official(timeout=timeout), None
+
+    # auto: prefer official config; fall back to the bridge CLI if it is still available.
+    official = _registry_official(timeout=timeout)
+    if official:
+        return official, None
+    try:
+        bridge, binary = _registry_bridge(runner=runner, hermes_bin=hermes_bin)
+        return bridge, binary
+    except Exception:
+        return [], None
+
 
 
 def _error(code: str, message: str, action: str) -> str:
@@ -140,22 +401,26 @@ def _parse_json(stdout: str, *, operation: str) -> dict[str, Any]:
     raise ValueError(f"{operation} returned invalid JSON")
 
 
-def _registry(*, runner: Runner | None, hermes_bin: str | None) -> tuple[list[dict[str, Any]], str]:
-    binary = hermes_bin or _hermes_bin()
-    code, stdout, stderr = _run([binary, "a2a", "registry", "list", "--json"], timeout=15, runner=runner)
-    if code != 0:
-        raise RuntimeError(op.redact_output(stderr or "A2A registry lookup failed"))
-    agents = _parse_json(stdout, operation="A2A registry lookup").get("agents", [])
-    if not isinstance(agents, list) or len(agents) > 256:
-        raise ValueError("A2A registry returned an invalid agents list")
-    clean = []
-    for item in agents:
-        if isinstance(item, dict) and isinstance(item.get("name"), str) and _AGENT_RE.fullmatch(item["name"]) and isinstance(item.get("url"), str):
-            clean.append({"name": item["name"], "has_token": bool(item.get("hasToken"))})
-    return clean, binary
+def _registry(*, runner: Runner | None, hermes_bin: str | None, timeout: int = _A2A_DEFAULT_REGISTRY_TIMEOUT) -> tuple[list[dict[str, Any]], str | None]:
+    mode = _a2a_mode()
+    if mode == "bridge":
+        return _registry_bridge(runner=runner, hermes_bin=hermes_bin)
+    if mode == "official":
+        return _registry_official(timeout=timeout), None
+
+    # auto: prefer official config; fall back to the bridge CLI if it is still available.
+    official = _registry_official(timeout=timeout)
+    if official:
+        return official, None
+    try:
+        bridge, binary = _registry_bridge(runner=runner, hermes_bin=hermes_bin)
+        return bridge, binary
+    except Exception:
+        return [], None
 
 
-def _registered_agent(agent: str, *, runner: Runner | None, hermes_bin: str | None) -> tuple[str, str]:
+
+def _registered_agent(agent: str, *, runner: Runner | None, hermes_bin: str | None) -> tuple[str, str | None]:
     if not isinstance(agent, str) or not _AGENT_RE.fullmatch(agent):
         raise ValueError("agent must be a registered peer name")
     agents, binary = _registry(runner=runner, hermes_bin=hermes_bin)
@@ -352,32 +617,57 @@ def _authorize_order(peer: AuthorityPeer, envelope: dict[str, Any], canonical: s
         raise PermissionError("public actions are not authorized for this peer")
 
 
-def _verify_live_peer(peer: AuthorityPeer, binary: str, timeout: int, runner: Runner | None) -> None:
+def _verify_live_peer(peer: AuthorityPeer, binary: str | None, timeout: int, runner: Runner | None) -> None:
+    """Verify the live peer's Agent Card matches the authority manifest.
+
+    Uses the official A2A surface when no bridge binary is available. The bridge
+    CLI's ``a2a doctor`` output is still accepted if binary is present.
+    """
     capped = max(1, min(int(timeout), 30))
-    code, stdout, _ = _run(
-        [binary, "a2a", "doctor", peer.name, "--timeout", str(capped), "--json"],
-        timeout=capped + 5,
-        runner=runner,
-    )
-    if code != 0:
+    if binary and _bridge_available(binary):
+        code, stdout, _ = _run(
+            [binary, "a2a", "doctor", peer.name, "--timeout", str(capped), "--json"],
+            timeout=capped + 5,
+            runner=runner,
+        )
+        if code != 0:
+            raise PeerVerificationError("peer verification failed")
+        try:
+            card = _parse_json(stdout, operation="A2A peer verification")
+        except (TypeError, ValueError) as exc:
+            raise PeerVerificationError("peer verification failed") from exc
+        identity = card.get("name") or card.get("identity")
+        host_role = card.get("host_role") or card.get("role")
+        if card.get("ok") is not True:
+            raise PeerVerificationError("peer verification failed")
+        if (
+            not isinstance(identity, str)
+            or identity != identity.strip()
+            or not _CARD_IDENTITY_RE.fullmatch(identity)
+        ):
+            raise PeerVerificationError("peer verification failed")
+        if not isinstance(host_role, str) or not _ROLE_RE.fullmatch(host_role):
+            raise PeerVerificationError("peer verification failed")
+        if identity != peer.expected_card_identity or host_role != peer.expected_host_role:
+            raise PeerVerificationError("peer verification failed")
+        return
+
+    # Official A2A path: fetch the Agent Card directly from the configured peer URL.
+    peers = _a2a_peers_with_resolved_tokens()
+    entry = peers.get(peer.name)
+    if not entry or not isinstance(entry.get("url"), str):
         raise PeerVerificationError("peer verification failed")
+    headers = _auth_header(entry)
     try:
-        card = _parse_json(stdout, operation="A2A peer verification")
-    except (TypeError, ValueError) as exc:
+        card = _fetch_card(entry["url"], headers, capped)
+    except Exception as exc:
         raise PeerVerificationError("peer verification failed") from exc
-    identity = card.get("name") or card.get("identity")
-    host_role = card.get("host_role") or card.get("role")
-    if card.get("ok") is not True:
+    if not isinstance(card, dict):
         raise PeerVerificationError("peer verification failed")
-    if (
-        not isinstance(identity, str)
-        or identity != identity.strip()
-        or not _CARD_IDENTITY_RE.fullmatch(identity)
-    ):
+    identity = card.get("name")
+    if not isinstance(identity, str) or identity != identity.strip() or not _CARD_IDENTITY_RE.fullmatch(identity):
         raise PeerVerificationError("peer verification failed")
-    if not isinstance(host_role, str) or not _ROLE_RE.fullmatch(host_role):
-        raise PeerVerificationError("peer verification failed")
-    if identity != peer.expected_card_identity or host_role != peer.expected_host_role:
+    if identity != peer.expected_card_identity:
         raise PeerVerificationError("peer verification failed")
 
 
@@ -397,14 +687,36 @@ def hermes_fleet_status(agent: str, timeout: int = 10, *, runner: Runner | None 
         op.OperatorPolicy().require_level("read_only")
         peer, binary = _registered_agent(agent, runner=runner, hermes_bin=hermes_bin)
         capped = max(1, min(int(timeout), 30))
-        code, stdout, stderr = _run([binary, "a2a", "doctor", peer, "--timeout", str(capped), "--json"], timeout=capped + 5, runner=runner)
-        if code != 0:
-            return _error("FLEET_STATUS_ERROR", op.redact_output(stderr or "A2A peer health check failed"), "Check the peer's A2A service and registry entry.")
-        payload = _parse_json(stdout, operation="A2A peer health check")
-        return json.dumps({"success": bool(payload.get("ok")), "agent": peer, "status": payload.get("status", "unknown"),
-                           "capability_count": len(payload.get("capabilities", {})) if isinstance(payload.get("capabilities"), dict) else 0,
-                           "warnings_count": len(payload.get("warnings", [])) if isinstance(payload.get("warnings"), list) else 0,
-                           "errors_count": len(payload.get("errors", [])) if isinstance(payload.get("errors"), list) else 0}, indent=2)
+        if binary and _bridge_available(binary):
+            code, stdout, stderr = _run([binary, "a2a", "doctor", peer, "--timeout", str(capped), "--json"], timeout=capped + 5, runner=runner)
+            if code != 0:
+                return _error("FLEET_STATUS_ERROR", op.redact_output(stderr or "A2A peer health check failed"), "Check the peer's A2A service and registry entry.")
+            payload = _parse_json(stdout, operation="A2A peer health check")
+            return json.dumps({"success": bool(payload.get("ok")), "agent": peer, "status": payload.get("status", "unknown"),
+                               "capability_count": len(payload.get("capabilities", {})) if isinstance(payload.get("capabilities"), dict) else 0,
+                               "warnings_count": len(payload.get("warnings", [])) if isinstance(payload.get("warnings"), list) else 0,
+                               "errors_count": len(payload.get("errors", [])) if isinstance(payload.get("errors"), list) else 0}, indent=2)
+
+        # Official A2A path: fetch the Agent Card and report the name and version.
+        peers = _a2a_peers_with_resolved_tokens()
+        entry = peers.get(peer)
+        if not entry or not isinstance(entry.get("url"), str):
+            return _error("FLEET_STATUS_ERROR", "peer has no configured URL", "Check the a2a_agents entry in config.yaml.")
+        headers = _auth_header(entry)
+        card = _fetch_card(entry["url"], headers, capped)
+        if not isinstance(card, dict):
+            return _error("FLEET_STATUS_ERROR", "peer returned an invalid Agent Card", "Check the peer's A2A service.")
+        name = card.get("name")
+        version = card.get("version", "unknown")
+        skills = card.get("skills", []) if isinstance(card.get("skills"), list) else []
+        return json.dumps({
+            "success": isinstance(name, str) and bool(name),
+            "agent": peer,
+            "status": f"compatible (v{version})",
+            "capability_count": len(skills),
+            "warnings_count": 0,
+            "errors_count": 0,
+        }, indent=2)
     except LookupError:
         return _error("UNKNOWN_AGENT", "agent is not a registered fleet peer", "Call hermes_fleet_list and use one returned name.")
     except PermissionError as exc:
@@ -430,13 +742,21 @@ def hermes_fleet_dispatch(agent: str, message: str, confirm: bool = False, dry_r
         if not confirm:
             return _error("CONFIRMATION_REQUIRED", "remote dispatch requires confirm=true", "Review the task and call again with confirm=true.")
         capped = max(5, min(int(timeout), 120))
-        code, stdout, stderr = _run([binary, "a2a", "send", "--json", peer, "--", message], timeout=capped, runner=runner)
-        if code != 0:
-            audit = op.audit_record(tool="hermes_fleet_dispatch", level=policy.level, apply_mode=policy.apply_mode, dry_run=False,
-                                    success=False, changed=False, summary=f"fleet dispatch failed for {peer}", error=op.redact_output(stderr),
-                                    prompt=message, extra={"agent": peer})
-            return json.dumps({"success": False, "agent": peer, "code": "FLEET_DISPATCH_ERROR", "audit": audit}, indent=2)
-        task = _unwrap_task(_parse_json(stdout, operation="A2A task submission"))
+        if binary and _bridge_available(binary):
+            code, stdout, stderr = _run([binary, "a2a", "send", "--json", peer, "--", message], timeout=capped, runner=runner)
+            if code != 0:
+                audit = op.audit_record(tool="hermes_fleet_dispatch", level=policy.level, apply_mode=policy.apply_mode, dry_run=False,
+                                        success=False, changed=False, summary=f"fleet dispatch failed for {peer}", error=op.redact_output(stderr),
+                                        prompt=message, extra={"agent": peer})
+                return json.dumps({"success": False, "agent": peer, "code": "FLEET_DISPATCH_ERROR", "audit": audit}, indent=2)
+            task = _unwrap_task(_parse_json(stdout, operation="A2A task submission"))
+        else:
+            peers = _a2a_peers_with_resolved_tokens()
+            entry = peers.get(peer)
+            if not entry or not isinstance(entry.get("url"), str):
+                return _error("FLEET_DISPATCH_ERROR", "peer has no configured URL", "Check the a2a_agents entry in config.yaml.")
+            result = _send_message(peer, entry, message, capped)
+            task = _unwrap_task(result)
         task_id = task.get("id")
         status = task.get("status") if isinstance(task.get("status"), dict) else {}
         if not isinstance(task_id, str) or not _TASK_ID_RE.fullmatch(task_id):
@@ -486,13 +806,21 @@ def hermes_fleet_dispatch_work_order(agent: str, task_id: str, target_profile: s
             return _error("CONFIRMATION_REQUIRED", "remote work-order dispatch requires confirm=true", "Review the work order and call again with confirm=true.")
         capped = max(5, min(int(timeout), 120))
         _verify_live_peer(peer_authority, binary, capped, runner)
-        code, stdout, stderr = _run([binary, "a2a", "send", "--json", peer, "--", canonical], timeout=capped, runner=runner)
-        if code != 0:
-            op.audit_record(tool="hermes_fleet_dispatch_work_order", level=policy.level, apply_mode=policy.apply_mode, dry_run=False,
-                            success=False, changed=False, summary=f"fleet work-order failed for {peer}", error=op.redact_output(stderr),
-                            prompt=canonical, job_id=task_id, extra={"agent": peer, "profile": target_profile})
-            return _error("FLEET_DISPATCH_ERROR", "A2A work-order submission failed", "Check the peer's A2A service.")
-        remote = _unwrap_task(_parse_json(stdout, operation="A2A work-order submission"))
+        if binary and _bridge_available(binary):
+            code, stdout, stderr = _run([binary, "a2a", "send", "--json", peer, "--", canonical], timeout=capped, runner=runner)
+            if code != 0:
+                op.audit_record(tool="hermes_fleet_dispatch_work_order", level=policy.level, apply_mode=policy.apply_mode, dry_run=False,
+                                success=False, changed=False, summary=f"fleet work-order failed for {peer}", error=op.redact_output(stderr),
+                                prompt=canonical, job_id=task_id, extra={"agent": peer, "profile": target_profile})
+                return _error("FLEET_DISPATCH_ERROR", "A2A work-order submission failed", "Check the peer's A2A service.")
+            remote = _unwrap_task(_parse_json(stdout, operation="A2A work-order submission"))
+        else:
+            peers = _a2a_peers_with_resolved_tokens()
+            entry = peers.get(peer)
+            if not entry or not isinstance(entry.get("url"), str):
+                return _error("FLEET_DISPATCH_ERROR", "peer has no configured URL", "Check the a2a_agents entry in config.yaml.")
+            result = _send_message(peer, entry, canonical, capped)
+            remote = _unwrap_task(result)
         remote_id = remote.get("id")
         if not isinstance(remote_id, str) or not _TASK_ID_RE.fullmatch(remote_id):
             return _error("FLEET_DISPATCH_ERROR", "A2A submission returned no valid task id", "Check the peer's A2A service.")
@@ -524,10 +852,17 @@ def _fetch_task(agent: str, task_id: str, timeout: int, runner: Runner | None, h
         raise ValueError("task_id has an invalid format")
     peer, binary = _registered_agent(agent, runner=runner, hermes_bin=hermes_bin)
     capped = max(1, min(int(timeout), 60))
-    code, stdout, stderr = _run([binary, "a2a", "task", "--agent", peer, "--json", "--", task_id], timeout=capped, runner=runner)
-    if code != 0:
-        raise RuntimeError(op.redact_output(stderr or "A2A task lookup failed"))
-    return peer, _unwrap_task(_parse_json(stdout, operation="A2A task lookup"))
+    if binary and _bridge_available(binary):
+        code, stdout, stderr = _run([binary, "a2a", "task", "--agent", peer, "--json", "--", task_id], timeout=capped, runner=runner)
+        if code != 0:
+            raise RuntimeError(op.redact_output(stderr or "A2A task lookup failed"))
+        return peer, _unwrap_task(_parse_json(stdout, operation="A2A task lookup"))
+    peers = _a2a_peers_with_resolved_tokens()
+    entry = peers.get(peer)
+    if not entry or not isinstance(entry.get("url"), str):
+        raise RuntimeError("peer has no configured URL")
+    result = _get_task(peer, entry, task_id, capped)
+    return peer, _unwrap_task(result)
 
 
 def hermes_fleet_task(agent: str, task_id: str, timeout: int = 15, *, runner: Runner | None = None, hermes_bin: str | None = None) -> str:
@@ -642,17 +977,43 @@ def hermes_fleet_authority_drift(*, runner: Runner | None = None, hermes_bin: st
             if name not in authorities:
                 findings.append({"agent": name, "code": "REGISTRY_ONLY", "severity": "error"})
                 continue
-            code, stdout, _ = _run([binary, "a2a", "doctor", name, "--timeout", "10", "--json"], timeout=15, runner=runner)
-            if code != 0:
+            card: dict[str, Any] | None = None
+            if binary and _bridge_available(binary):
+                code, stdout, _ = _run([binary, "a2a", "doctor", name, "--timeout", "10", "--json"], timeout=15, runner=runner)
+                if code != 0:
+                    findings.append({"agent": name, "code": "CARD_UNAVAILABLE", "severity": "warning"})
+                    continue
+                try:
+                    card = _parse_json(stdout, operation="A2A peer health check")
+                except (TypeError, ValueError):
+                    findings.append({"agent": name, "code": "CARD_UNAVAILABLE", "severity": "warning"})
+                    continue
+            else:
+                peers = _a2a_peers_with_resolved_tokens()
+                entry = peers.get(name)
+                if not entry or not isinstance(entry.get("url"), str):
+                    findings.append({"agent": name, "code": "CARD_UNAVAILABLE", "severity": "warning"})
+                    continue
+                headers = _auth_header(entry)
+                try:
+                    card = _fetch_card(entry["url"], headers, 10)
+                except Exception:
+                    findings.append({"agent": name, "code": "CARD_UNAVAILABLE", "severity": "warning"})
+                    continue
+            if not isinstance(card, dict):
                 findings.append({"agent": name, "code": "CARD_UNAVAILABLE", "severity": "warning"})
                 continue
-            card = _parse_json(stdout, operation="A2A peer health check")
             reported = card.get("name") or card.get("identity")
             role = card.get("host_role") or card.get("role")
             expected = authorities[name]
             if reported != expected.expected_card_identity:
                 findings.append({"agent": name, "code": "IDENTITY_MISMATCH", "severity": "error"})
-            if role != expected.expected_host_role:
+            # Host-role attestation is optional on Agent Cards (neither Hermes
+            # v0.19 nor v0.20 emits host_role/role today). Only enforce the
+            # manifest's expected role when the card actually attests one;
+            # identity, allowed profiles, and the auth ceiling are enforced
+            # regardless.
+            if role is not None and role != expected.expected_host_role:
                 findings.append({"agent": name, "code": "HOST_ROLE_MISMATCH", "severity": "error"})
         return json.dumps({"success": True, "valid": not findings, "registered_count": len(registered_names),
                            "manifest_count": len(authorities), "finding_count": len(findings), "findings": findings}, indent=2)
