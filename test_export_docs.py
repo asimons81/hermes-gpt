@@ -16,24 +16,32 @@ def _read(path: Path) -> str:
 
 
 def test_binary_export_is_documented_with_security_boundaries() -> None:
-    readme = _read(ROOT / "README.md")
-    operator = _read(ROOT / "docs" / "operator-mode.md")
+    guide = _read(ROOT / "docs" / "file-export.md")
     compatibility = _read(ROOT / "docs" / "mcp-compatibility.md")
+    docs_map = _read(ROOT / "docs" / "README.md")
 
-    for text in (readme, operator):
-        assert "hermes_export_file" in text
-        assert "HERMES_GPT_OPERATOR_ALLOWED_PATHS" in text
-        assert "HERMES_GPT_EXPORT_MAX_BYTES" in text
-        assert "HERMES_GPT_EXPORT_ALLOWED_EXTENSIONS" in text
+    for marker in (
+        "hermes_export_file",
+        "HERMES_GPT_OPERATOR_ALLOWED_PATHS",
+        "HERMES_GPT_EXPORT_MAX_BYTES",
+        "HERMES_GPT_EXPORT_ALLOWED_EXTENSIONS",
+        "16 MiB",
+        "Owner Mode",
+        "client",
+    ):
+        assert marker in guide
 
     assert "EmbeddedResource(BlobResourceContents)" in compatibility
     assert "client" in compatibility.lower()
     assert "base64" in compatibility.lower()
+    assert "file-export.md" in docs_map
 
 
-def test_binary_export_module_ships_in_package() -> None:
+def test_binary_export_module_and_guide_ship_in_package() -> None:
     data = tomllib.loads(_read(ROOT / "pyproject.toml"))
-    assert "operator_export" in data["tool"]["setuptools"]["py-modules"]
+    setuptools = data["tool"]["setuptools"]
+    assert "operator_export" in setuptools["py-modules"]
+    assert "docs/file-export.md" in setuptools["data-files"]["share/hermes-gpt/docs"]
 
 
 def test_binary_export_ci_has_focused_regressions() -> None:
