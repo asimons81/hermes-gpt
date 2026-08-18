@@ -1,0 +1,116 @@
+name: Issue 14 docs and CI finalizer
+
+on:
+  push:
+    branches:
+      - feat/binary-file-export
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/binary-file-export
+          fetch-depth: 0
+
+      - name: Apply exact guarded documentation and CI patches
+        shell: python
+        run: |
+          from pathlib import Path
+
+          patches = {
+              "README.md": [
+                  (
+                      "| `workspace` | scoped workspace writes/tests, gateway restart, Codex jobs, contract/swarm dispatch |",
+                      "| `workspace` | scoped workspace reads/writes/tests, bounded binary export, gateway restart, Codex jobs, contract/swarm dispatch |",
+                  ),
+                  (
+                      "See [docs/operator-mode.md](docs/operator-mode.md) for the complete policy model and exact gates.\n",
+                      "`hermes_export_file(path)` is a workspace-authorized, read-only transfer surface for existing local binary files. It requires a non-empty `HERMES_GPT_OPERATOR_ALLOWED_PATHS`, preserves the denied-secret-path policy, defaults to a 4 MiB cap (16 MiB hard ceiling), and returns bytes only as an MCP embedded blob. `HERMES_GPT_EXPORT_ALLOWED_EXTENSIONS` can optionally narrow allowed suffixes. Whether a client renders that embedded resource as a downloadable attachment is client-controlled.\n\nSee [docs/operator-mode.md](docs/operator-mode.md) for the complete policy model and exact gates.\n",
+                  ),
+              ],
+              "docs/operator-mode.md": [
+                  (
+                      "| `workspace` | scoped workspace read/write/test, gateway restart, Codex jobs, contract/swarm dispatch |",
+                      "| `workspace` | scoped workspace read/write/test, bounded binary export, gateway restart, Codex jobs, contract/swarm dispatch |",
+                  ),
+                  (
+                      "## Work Contracts\n",
+                      "## Binary file export (`hermes_export_file`)\n\n"
+                      "`hermes_export_file(path)` transfers one existing local file as an MCP-native embedded binary resource. It is read-only, but deliberately requires **workspace** authority because raw-byte transfer can exfiltrate data even when it does not mutate the host.\n\n"
+                      "Required gates:\n\n"
+                      "- `HERMES_GPT_OPERATOR_ENABLED=1`;\n"
+                      "- `HERMES_GPT_OPERATOR_LEVEL=workspace` (or owner);\n"
+                      "- a non-empty `HERMES_GPT_OPERATOR_ALLOWED_PATHS`;\n"
+                      "- the resolved file must remain under one of those roots;\n"
+                      "- the normal denied secret/credential/vault/token path policy still applies and Owner Mode does not bypass it.\n\n"
+                      "The default maximum is 4 MiB. `HERMES_GPT_EXPORT_MAX_BYTES` may lower or raise that limit up to a hard 16 MiB ceiling. `HERMES_GPT_EXPORT_ALLOWED_EXTENSIONS` is optional; when set, it is a comma-separated suffix allowlist such as `.pdf,.xlsx,.png`. An empty configured allowlist fails closed.\n\n"
+                      "A successful call returns safe metadata (`filename`, MIME type, byte size, SHA-256, opaque `hermes-export://` URI) plus `EmbeddedResource(BlobResourceContents)`. The absolute local path and base64 payload are not copied into text or structured metadata. Every success/refusal is audited without raw file bytes.\n\n"
+                      "The MCP protocol leaves embedded-resource rendering to the client. Hermes GPT therefore guarantees an MCP-native binary result, **not** that every client will expose a save/download button. Clients that do not support binary embedded resources must fail or degrade on their side; Hermes GPT never falls back to base64-spamming the conversation.\n\n"
+                      "## Work Contracts\n",
+                  ),
+              ],
+              "docs/mcp-compatibility.md": [
+                  (
+                      "## Version advertisement\n",
+                      "## Binary embedded tool results\n\n"
+                      "`hermes_export_file` returns a direct MCP `CallToolResult` containing safe structured metadata and `EmbeddedResource(BlobResourceContents)` for the authorized file bytes. This uses the normal `tools/call` response content union; it is not a new server transport and does not require a separate resource-read endpoint.\n\n"
+                      "The MCP specification explicitly leaves rendering of embedded resources to the client. Hermes GPT guarantees the protocol-native blob representation and does not claim that ChatGPT, Codex, or any other client will always render it as a downloadable attachment. No text/base64 fallback is emitted.\n\n"
+                      "## Version advertisement\n",
+                  ),
+              ],
+              "CHANGELOG.md": [
+                  (
+                      "Flight Deck: durable, interactive, verifiable autonomy.\n\n",
+                      "Flight Deck: durable, interactive, verifiable autonomy.\n\n"
+                      "- Added `hermes_export_file`, a workspace-authorized read-only binary transfer tool that returns MCP `EmbeddedResource(BlobResourceContents)` with mandatory allowed-path confinement, denied-secret-path enforcement, a 4 MiB default / 16 MiB hard size ceiling, optional extension allowlisting, safe audit metadata, and no base64 text fallback. Client attachment rendering remains client-controlled.\n",
+                  ),
+              ],
+              ".github/workflows/ci.yml": [
+                  (
+                      "          operator_workspace.py\n          updater.py\n",
+                      "          operator_workspace.py\n          operator_export.py\n          updater.py\n",
+                  ),
+                  (
+                      "      - name: Run runner regression tests\n        run: python -m pytest -q test_operator_runners.py\n",
+                      "      - name: Run runner regression tests\n        run: python -m pytest -q test_operator_runners.py\n      - name: Run binary export regression tests\n        run: python -m pytest -q test_operator_export.py test_server_export.py\n",
+                  ),
+                  (
+                      "      - run: python -m ruff check operator_runners.py test_operator_runners.py\n",
+                      "      - run: >-\n          python -m ruff check\n          operator_runners.py test_operator_runners.py\n          operator_export.py test_operator_export.py test_server_export.py\n",
+                  ),
+              ],
+          }
+
+          for filename, replacements in patches.items():
+              path = Path(filename)
+              text = path.read_text(encoding="utf-8")
+              for old, new in replacements:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(
+                          f"guard failed for {filename}: expected exactly one marker, got {count}: {old[:100]!r}"
+                      )
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding="utf-8")
+
+      - name: Verify patched files
+        run: |
+          python -m py_compile operator_export.py server.py
+          git diff --check
+          grep -n "hermes_export_file" README.md docs/operator-mode.md docs/mcp-compatibility.md CHANGELOG.md
+          grep -n "operator_export.py" .github/workflows/ci.yml
+
+      - name: Commit guarded finalization and remove one-shot workflow
+        run: |
+          rm .github/workflows/issue14-finalize-docs-ci.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md docs/operator-mode.md docs/mcp-compatibility.md CHANGELOG.md .github/workflows/ci.yml .github/workflows/issue14-finalize-docs-ci.yml
+          git commit -m "docs: define binary export security and protocol contract"
+          git push origin HEAD:feat/binary-file-export
