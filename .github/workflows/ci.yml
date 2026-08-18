@@ -19,11 +19,50 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest
-      - run: python -m py_compile server.py codex_core.py codex_mcp.py codex_config.py operator_codex.py updater.py operator_recovery.py operator_review.py operator_events.py operator_oauth.py token_store.py seams.py
+      - name: Run non-UI test suite
+        run: >-
+          python -m pytest -q
+          --ignore=test_ui_chat.py
+          --ignore=test_ui_security.py
+          --ignore=test_ui_static_assets.py
+      - name: Run runner regression tests
+        run: python -m pytest -q test_operator_runners.py
+      - name: Compile operator modules
+        run: >-
+          python -m py_compile
+          server.py
+          codex_core.py
+          codex_mcp.py
+          codex_config.py
+          operator_codex.py
+          operator_contract.py
+          operator_fleet.py
+          operator_runners.py
+          operator_swarm.py
+          operator_swarm_workflows.py
+          operator_workspace.py
+          updater.py
+          operator_recovery.py
+          operator_review.py
+          operator_events.py
+          operator_oauth.py
+          token_store.py
+          seams.py
+      - name: Check whitespace
+        run: git diff --check
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m ruff check operator_runners.py test_operator_runners.py
 
   build:
-    needs: test
+    needs: [test, lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
