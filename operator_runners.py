@@ -246,11 +246,18 @@ def load_entrypoint_backends() -> list[str]:
     except Exception as exc:
         logger.debug("runner entry-point discovery failed", exc_info=exc)
         return loaded
+    builtin_names = {"fleet", "pi_rpc", "omx", "codex"}
     for ep in selected:
         try:
             candidate = ep.load()
-            backend = candidate() if callable(candidate) and not hasattr(candidate, "name") else candidate
-            register_backend(backend, replace=True)
+            if isinstance(candidate, type) or (callable(candidate) and not hasattr(candidate, "dispatch")):
+                backend = candidate()
+            else:
+                backend = candidate
+            name = str(getattr(backend, "name", "") or "").strip().lower()
+            if name in builtin_names:
+                raise ValueError(f"external runner may not shadow built-in backend {name!r}")
+            register_backend(backend, replace=False)
             loaded.append(str(getattr(backend, "name", ep.name)))
         except Exception as exc:
             logger.debug("runner entry point %s failed to load", getattr(ep, "name", "unknown"), exc_info=exc)
@@ -309,6 +316,19 @@ def dispatch_contract(
             **kwargs,
         )
     except Exception as exc:  # noqa: BLE001
+        if backend_name == "fleet" and not isinstance(contract.get("execution"), dict):
+            # Legacy contract-dispatch compatibility applies only to contracts
+            # that omit the execution selector and therefore use the historical
+            # implicit fleet path. An explicit execution.backend="fleet" is a
+            # runner selection and uses the runner error contract below.
+            return {
+                "success": False,
+                "ok": False,
+                "code": "CONTRACT_DISPATCH_ERROR",
+                "safe_message": _bounded_text(exc, 300),
+                "suggested_action": "Check fleet authority manifest, registry, and peer service.",
+                "backend": backend_name,
+            }
         return {
             "success": False,
             "ok": False,
@@ -449,15 +469,41 @@ class _LocalProcessBackend:
             "error": "",
         }
         _atomic_json(meta_path, meta)
-        proc = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--worker", task_id, "--root", str(_root(hermes_root))],
-            cwd=str(workspace),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True,
-        )
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "--worker", task_id, "--root", str(_root(hermes_root))],
+                cwd=str(workspace),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                close_fds=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Spawn failed after the request/meta envelopes were written.
+            # Delete the request envelope so the raw objective/prompt cannot
+            # remain on disk, and leave only bounded failed metadata. Catch
+            # broadly because wrappers/test doubles can fail before a child
+            # process exists with exceptions other than OSError.
+            for path in (request_path, request_path.with_suffix(request_path.suffix + ".tmp")):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+            meta.update({
+                "state": "failed",
+                "outcome": "failed",
+                "ended_at": _now(),
+                "error": _bounded_text(f"runner spawn failed: {exc}", 300),
+            })
+            _atomic_json(meta_path, meta)
+            return {
+                "success": False,
+                "code": "RUNNER_SPAWN_FAILED",
+                "backend": self.name,
+                "task_id": task_id,
+                "safe_message": _bounded_text(exc, 300),
+            }
         # The worker owns durable state transitions. Avoid a parent-side write
         # after spawn: a fast worker could otherwise complete and then be
         # overwritten back to "running" by the parent.
@@ -586,7 +632,9 @@ class CodexBackend:
     def observed_runs(self, task_id: str, *, hermes_root: Path | None = None) -> list[dict[str, Any]]:
         # Codex jobs use their own opaque job ids, so contract linkage is only
         # available when the operator metadata recorded task_id (newer stores).
-        root = (hermes_root or Path.home() / ".hermes") / "codex-jobs"
+        import operator_codex as op_codex
+
+        root = op_codex._root(hermes_root)
         if not root.is_dir():
             return []
         out: list[dict[str, Any]] = []
@@ -737,6 +785,36 @@ def _worker(task_id: str, jobs_root: Path) -> int:
         request_path.unlink()
     except OSError:
         pass
+    def _terminalize(meta: dict[str, Any], *, state: str, rc: int | None = None, error: str = "") -> None:
+        """Persist a terminal state, resolving to ``cancelled`` if a cancel
+        marker exists (cancellation wins over later completed/failed). Clean
+        the marker once the job is safely terminal."""
+        cancelled = (jobs_root / f"{task_id}.cancel.json").exists()
+        if cancelled:
+            meta.update({"state": "cancelled", "outcome": "cancelled", "error": ""})
+        else:
+            meta.update({"state": state, "outcome": state})
+            if error:
+                meta["error"] = error
+        if rc is not None:
+            meta["returncode"] = rc
+        meta["ended_at"] = _now()
+        _atomic_json(meta_path, meta)
+        # Close the check/write race with hermes_runner_cancel: cancellation
+        # writes the marker before publishing cancelled metadata. If that marker
+        # appeared after our first check but before/just after the terminal
+        # write, cancellation still wins and no later worker write follows.
+        cancel_path = jobs_root / f"{task_id}.cancel.json"
+        if not cancelled and cancel_path.exists():
+            cancelled = True
+            meta.update({"state": "cancelled", "outcome": "cancelled", "error": "", "ended_at": _now()})
+            _atomic_json(meta_path, meta)
+        if cancelled:
+            try:
+                cancel_path.unlink()
+            except OSError:
+                pass
+
     try:
         backend = get_backend(backend_name)
         exe = backend.executable() if isinstance(backend, _LocalProcessBackend) else None
@@ -745,8 +823,7 @@ def _worker(task_id: str, jobs_root: Path) -> int:
         meta.update({"state": "running", "started_at": meta.get("started_at") or _now(), "pid": os.getpid()})
         _atomic_json(meta_path, meta)
         if (jobs_root / f"{task_id}.cancel.json").exists():
-            meta.update({"state": "cancelled", "outcome": "cancelled", "ended_at": _now()})
-            _atomic_json(meta_path, meta)
+            _terminalize(meta, state="cancelled")
             return 0
         if backend_name == "pi_rpc":
             rc, _ = _worker_pi(exe, contract, timeout, log_path)
@@ -755,23 +832,16 @@ def _worker(task_id: str, jobs_root: Path) -> int:
         else:
             raise RuntimeError(f"local worker does not support backend {backend_name}")
         meta["returncode"] = rc
-        meta["ended_at"] = _now()
         if rc == 0:
-            meta["state"] = "completed"
-            meta["outcome"] = "completed"
-            meta["error"] = ""
+            _terminalize(meta, state="completed", rc=rc)
         else:
-            meta["state"] = "failed"
-            meta["outcome"] = "failed"
-            meta["error"] = "runner timed out" if rc == 124 else f"runner exited with code {rc}"
+            _terminalize(meta, state="failed", rc=rc, error="runner timed out" if rc == 124 else f"runner exited with code {rc}")
         # Completion evidence is state/exit metadata only. Do not persist the
         # model's final text in the runner store; contract validation must not
         # depend on worker self-report or retain prompt-derived output.
-        _atomic_json(meta_path, meta)
         return rc
     except Exception as exc:  # noqa: BLE001
-        meta.update({"state": "failed", "outcome": "failed", "ended_at": _now(), "error": _bounded_text(exc, 500)})
-        _atomic_json(meta_path, meta)
+        _terminalize(meta, state="failed", error=_bounded_text(exc, 500))
         return 1
 
 
