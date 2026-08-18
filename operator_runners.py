@@ -116,24 +116,49 @@ def _popen_process_group(argv: list[str], **kwargs: Any) -> subprocess.Popen[str
     return subprocess.Popen(argv, **kwargs)
 
 
-def _terminate_process_tree(proc: subprocess.Popen[Any], *, timeout: float = 5.0) -> None:
-    """Terminate the child process tree created by _popen_process_group.
+def _windows_taskkill(pid: int, *, timeout: float) -> bool:
+    """Terminate a Windows process tree, returning whether taskkill succeeded."""
+    try:
+        completed = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
 
-    POSIX uses the child session/process group. Windows does not expose a true
-    process-tree kill through the Python standard library, so production Windows
-    cleanup uses taskkill /T /F for descendants and falls back to direct-child
-    terminate/kill if taskkill is unavailable.
+
+def _terminate_process_tree(proc: subprocess.Popen[Any] | int, *, timeout: float = 5.0) -> None:
+    """Terminate a process tree created by _popen_process_group.
+
+    Live Popen handles support bounded waits and escalation. Explicit runner
+    cancellation only has the durable worker PID, so an integer PID follows the
+    same platform dispatch without assuming this process owns a wait handle.
+
+    POSIX uses the child session/process group. Windows uses taskkill /T /F for
+    descendants and falls back to direct-process termination when taskkill is
+    unavailable, times out, or reports failure.
     """
-    if proc.poll() is not None:
+    detached = isinstance(proc, int)
+    pid = proc if detached else proc.pid
+    if pid <= 1 or (not detached and proc.poll() is not None):
         return
     if os.name == "nt":
-        try:
-            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout, check=False)
-        except (OSError, subprocess.TimeoutExpired):
+        tree_terminated = _windows_taskkill(pid, timeout=timeout)
+        if not tree_terminated:
             try:
-                proc.terminate()
-            except OSError:
+                if detached:
+                    # On Windows, os.kill(..., SIGTERM) uses TerminateProcess.
+                    os.kill(pid, signal.SIGTERM)
+                else:
+                    proc.terminate()
+            except (ProcessLookupError, PermissionError, OSError):
                 pass
+        if detached:
+            return
         try:
             proc.wait(timeout=timeout)
             return
@@ -148,16 +173,18 @@ def _terminate_process_tree(proc: subprocess.Popen[Any], *, timeout: float = 5.0
             pass
         return
     try:
-        os.killpg(proc.pid, signal.SIGTERM)
+        os.killpg(pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         pass
+    if detached:
+        return
     try:
         proc.wait(timeout=timeout)
         return
     except subprocess.TimeoutExpired:
         pass
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
+        os.killpg(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
         pass
     try:
@@ -166,7 +193,7 @@ def _terminate_process_tree(proc: subprocess.Popen[Any], *, timeout: float = 5.0
         pass
 
 
-def _terminate_process_group(proc: subprocess.Popen[Any], *, timeout: float = 5.0) -> None:
+def _terminate_process_group(proc: subprocess.Popen[Any] | int, *, timeout: float = 5.0) -> None:
     """Backward-compatible alias for the process-tree terminator."""
     _terminate_process_tree(proc, timeout=timeout)
 
@@ -754,10 +781,7 @@ class _LocalProcessBackend:
         _atomic_json(_cancel_path(task_id, hermes_root), {"task_id": task_id, "requested_at": _now()})
         pid = meta.get("pid")
         if isinstance(pid, int) and pid > 1:
-            try:
-                os.killpg(pid, signal.SIGTERM)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
+            _terminate_process_tree(pid)
         meta["state"] = "cancelled"
         meta["outcome"] = "cancelled"
         meta["ended_at"] = _now()

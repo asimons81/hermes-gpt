@@ -549,3 +549,8 @@ files immediately after loading them, and runner listing/status performs TTL
 cleanup of stale envelopes left by a process that died before loading its
 request. Durable runner metadata intentionally remains bounded state/exit data,
 not prompt text or model output.
+
+Local runner timeout and explicit-cancellation cleanup share one platform-aware
+path. POSIX signals the runner process group. Windows uses `taskkill /T /F` for
+the process tree and falls back to direct process termination if `taskkill` is
+unavailable, times out, or reports failure.

@@ -346,6 +346,99 @@ def test_runner_cancel_enforces_job_workspace_scope(tmp_path: Path, monkeypatch:
     assert payload["code"] == "RUNNER_CANCEL_ERROR"
 
 
+def test_runner_cancel_routes_pid_to_tree_cleanup_and_terminalizes_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "ws"
+    root = tmp_path / "hermes"
+    ws.mkdir()
+    root.mkdir()
+    _enable_workspace(monkeypatch, ws)
+    task_id = "runner-cancel-tree"
+    meta_path, _, _ = runners._job_paths(task_id, root)
+    runners._atomic_json(meta_path, {
+        "schema_version": runners.SCHEMA_VERSION,
+        "task_id": task_id,
+        "backend": "pi_rpc",
+        "state": "running",
+        "outcome": "running",
+        "workspace": str(ws),
+        "pid": 4242,
+        "ended_at": None,
+    })
+    terminated = []
+    monkeypatch.setattr(
+        runners,
+        "_terminate_process_tree",
+        lambda target, timeout=5.0: terminated.append((target, timeout)),
+    )
+
+    payload = json.loads(
+        runners.hermes_runner_cancel(
+            task_id,
+            backend="pi_rpc",
+            confirm=True,
+            dry_run=False,
+            hermes_root=root,
+        )
+    )
+
+    assert payload["success"] is True
+    assert payload["state"] == "cancelled"
+    assert terminated == [(4242, 5.0)]
+    stored = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert stored["state"] == "cancelled"
+    assert stored["outcome"] == "cancelled"
+    assert stored["ended_at"]
+
+
+def test_windows_backend_cancel_uses_taskkill_tree_and_marks_cancelled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    task_id = "runner-cancel-windows"
+    meta_path = tmp_path / "job.json"
+    request_path = tmp_path / "request.json"
+    log_path = tmp_path / "events.jsonl"
+    cancel_path = tmp_path / "cancel.json"
+    runners._atomic_json(meta_path, {
+        "schema_version": runners.SCHEMA_VERSION,
+        "task_id": task_id,
+        "backend": "pi_rpc",
+        "state": "running",
+        "outcome": "running",
+        "workspace": str(tmp_path),
+        "pid": 4343,
+        "ended_at": None,
+    })
+    taskkill_calls = []
+
+    def _run(argv, **kwargs):
+        taskkill_calls.append(argv)
+        return runners.subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(
+        runners,
+        "_job_paths",
+        lambda task_id, hermes_root=None: (meta_path, request_path, log_path),
+    )
+    monkeypatch.setattr(
+        runners,
+        "_cancel_path",
+        lambda task_id, hermes_root=None: cancel_path,
+    )
+    monkeypatch.setattr(runners.os, "name", "nt")
+    monkeypatch.setattr(runners.subprocess, "run", _run)
+
+    result = runners.PiRpcBackend().cancel(task_id, hermes_root=tmp_path)
+
+    assert result["success"] is True
+    assert result["state"] == "cancelled"
+    assert taskkill_calls == [["taskkill", "/PID", "4343", "/T", "/F"]]
+    stored = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert stored["state"] == "cancelled"
+    assert stored["outcome"] == "cancelled"
+    assert stored["ended_at"]
+
+
 # ---------------------------------------------------------------------------
 # PR #18 correctness regression tests
 # ---------------------------------------------------------------------------
@@ -680,11 +773,35 @@ def test_windows_process_tree_cleanup_uses_taskkill(monkeypatch: pytest.MonkeyPa
 
     def _run(argv, **kwargs):
         calls.append(argv)
+        return runners.subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(runners.os, "name", "nt")
     monkeypatch.setattr(runners.subprocess, "run", _run)
     runners._terminate_process_tree(_Proc(), timeout=1)
     assert ["taskkill", "/PID", "4242", "/T", "/F"] in calls
+    assert ["terminate"] not in calls
+    assert ["kill"] not in calls
+
+
+@pytest.mark.parametrize("failure", ["missing", "nonzero"])
+def test_windows_detached_pid_cleanup_falls_back_when_taskkill_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+):
+    direct_kills = []
+
+    def _run(argv, **kwargs):
+        if failure == "missing":
+            raise FileNotFoundError("taskkill unavailable")
+        return runners.subprocess.CompletedProcess(argv, 1)
+
+    monkeypatch.setattr(runners.os, "name", "nt")
+    monkeypatch.setattr(runners.subprocess, "run", _run)
+    monkeypatch.setattr(runners.os, "kill", lambda pid, sig: direct_kills.append((pid, sig)))
+
+    runners._terminate_process_tree(5252, timeout=1)
+
+    assert direct_kills == [(5252, runners.signal.SIGTERM)]
 
 
 def test_posix_process_tree_cleanup_uses_process_group(monkeypatch: pytest.MonkeyPatch):
