@@ -1,0 +1,68 @@
+name: Refresh PR12 against current master
+
+on:
+  push:
+    branches:
+      - repair/pr8-current-master
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge current master into PR12 repair branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master
+
+          if git merge-base --is-ancestor origin/master HEAD; then
+            echo "Current master is already in this branch history."
+            exit 0
+          fi
+
+          # Preserve the repaired contribution in overlapping hunks while taking
+          # every non-conflicting change from current master. Any unresolved
+          # structural conflict fails closed instead of guessing.
+          if ! git merge --no-ff --no-commit -X ours origin/master; then
+            echo "Unresolved conflicts remain:"
+            git diff --name-only --diff-filter=U
+            git merge --abort
+            exit 1
+          fi
+
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "Conflict markers remain after merge strategy."
+            git diff --name-only --diff-filter=U
+            git merge --abort
+            exit 1
+          fi
+
+          # The refreshed contribution should differ from master only in the
+          # original PR surface plus this temporary repair workflow.
+          allowed='^(CHANGELOG.md|README.md|RELEASE_CHECKLIST.md|docs/codex.md|docs/operator-mode.md|docs/session-control.md|docs/session-history.md|operator_codex.py|operator_policy.py|operator_session.py|pyproject.toml|server.py|site/index.html|test_operator_codex.py|test_operator_session.py|test_server.py|\.github/workflows/pr12-refresh.yml)$'
+          unexpected="$(git diff --name-only origin/master -- | grep -Ev "$allowed" || true)"
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected files differ from master:"
+            printf '%s\n' "$unexpected"
+            git merge --abort
+            exit 1
+          fi
+
+          # Basic structural guards before pushing the merge. Full CI runs on
+          # the pushed merge commit.
+          grep -q 'import operator_session as op_session' server.py
+          grep -q '"operator_session"' pyproject.toml
+          grep -q 'HERMES_GPT_ENABLE_SESSION_CONTROL' README.md
+          grep -q 'execution_mode="nolo"' docs/codex.md
+          grep -q 'hermes_session_export' server.py
+
+          git add -A
+          git commit -m "merge: refresh PR #12 against current master"
+          git push origin HEAD:repair/pr8-current-master
