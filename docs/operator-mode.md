@@ -241,6 +241,72 @@ Failed validation can return a stage for one bounded rework retry. A second fail
 
 Codex may provide a bounded review verdict, but Codex is never an implementation owner. Final workflow approval is human and Owner-gated.
 
+## Flight Deck (v0.7)
+
+Flight Deck adds four coordinated v0.7 capabilities on top of the v0.6
+control plane: production review evidence, structured event history, durable
+encrypted token storage, and restart reconciliation. All new surfaces are
+additive; no existing tool name, schema, or authority class changes.
+
+### Review evidence (`hermes_review_accept`)
+
+| Tool | Authority | Purpose |
+| --- | --- | --- |
+| `hermes_review_accept(contract_sha256, task_id, assignee, reviewer, verdict, evidence_refs, approval_reference, dry_run, confirm)` | **owner** + direct + confirm | Write a review-acceptance record for a Work Contract. Distinct reviewer is enforced at write time (`reviewer != assignee`); verdicts are bounded to `SATISFIED` / `NOT_SATISFIED`; evidence is referenced, never copied. |
+
+The Work Contract validator reads the review-evidence store as an additional
+evidence source while keeping the v0.6 audit + human-approval paths. A
+`SATISFIED` acceptance by a reviewer distinct from the assignee satisfies the
+review check; a self-review record never does.
+
+### Structured event history (`hermes_events_*`)
+
+| Tool | Authority | Purpose |
+| --- | --- | --- |
+| `hermes_events_query(source, subject_id, kind, since, until, limit)` | read_only + allowlist | Query the normalized, redacted event timeline (audit / swarm / codex / cron / kanban). |
+| `hermes_events_tail(limit)` | read_only + allowlist | Recent events across all allowed sources. |
+
+The event surface is a derived read-model over existing durable stores; it
+never writes. Allowlist: `HERMES_GPT_EVENTS_ALLOWED_SOURCES` (unset = all
+read-only sources; list = only listed; empty = none). Retention:
+`HERMES_GPT_EVENTS_MAX_AGE_DAYS` (default 90). Redaction invariants match
+Mission Control; prompts appear only as length/sha when present in the source.
+
+### Durable token storage (`hermes_oauth_*`)
+
+| Tool | Authority | Purpose |
+| --- | --- | --- |
+| `hermes_oauth_status()` | read_only | Durable token store presence/expiry only; never exposes token material. |
+| `hermes_oauth_revoke(confirm, dry_run, rotate_key)` | **owner** + direct + confirm (pending legal scope decision) | Delete the encrypted token envelope; optionally rotate the master key. |
+
+OAuth access/refresh tokens are persisted through `token_store` (AES-256-GCM
+envelope at `<hermes_data>/secrets/hermes_gpt_tokens.json`, 0600; keyring →
+key file → env key precedence) so a server restart does not invalidate
+credentials. No token material is ever written to the audit log or any MCP
+response. The `secrets/` directory is a denied path for all tools.
+
+### Restart reconciliation (`hermes_swarm_reconcile`)
+
+| Tool | Authority | Purpose |
+| --- | --- | --- |
+| `hermes_swarm_reconcile(apply)` | workspace/owner + direct (dry-run first) | Mark swarm stages stuck in `running` as `blocked` with `reason: interrupted_by_restart`; reload the durable token envelope; report a bounded summary. |
+
+Reconciliation is fail-closed: it never auto-advances or auto-dispatches
+work. The operator explicitly re-advances through the existing gated
+`hermes_swarm_stage_advance`, which is idempotent for already-validated or
+done stages (a re-advance returns current state as a no-op).
+
+### v0.7 surface manifest
+
+| Tool | Authority class | Gates | Audit | Allowlist |
+| --- | --- | --- | --- | --- |
+| `hermes_review_accept` | owner | direct + confirm | every call | n/a |
+| `hermes_events_query` | read_only | allowlist | every call | `HERMES_GPT_EVENTS_ALLOWED_SOURCES` |
+| `hermes_events_tail` | read_only | allowlist | every call | `HERMES_GPT_EVENTS_ALLOWED_SOURCES` |
+| `hermes_oauth_status` | read_only | none | every call | n/a |
+| `hermes_oauth_revoke` | owner | direct + confirm (pending legal) | every call | n/a |
+| `hermes_swarm_reconcile` | workspace/owner | dry-run-first + apply | every call | n/a |
+
 ## Session history and session control
 
 These surfaces are independent from the Operator level hierarchy and remain hidden unless their explicit legacy gates are enabled.

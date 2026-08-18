@@ -412,11 +412,31 @@ python server.py</code></pre>
         <div class="release-item">
           <div class="release-meta">
             <span class="rel-version">Unreleased</span>
-            <span class="rel-date">2026-08-10</span>
+            <span class="rel-date">2026-08-17</span>
           </div>
           <div class="release-content">
             <h4>Bounded Session History and Control</h4>
             <p>Added native Codex parity for the four gated, read-only session-history tools previously available only to ChatGPT: list, search, safe message reads, and in-memory JSON/Markdown export. Separately gated asynchronous session continue/send jobs remain bounded and fail closed.</p>
+          </div>
+        </div>
+        <div class="release-item">
+          <div class="release-meta">
+            <span class="rel-version">v0.7.0</span>
+            <span class="rel-date">2026-08-15</span>
+          </div>
+          <div class="release-content">
+            <h4>Flight Deck: Review Evidence, Event History & Durable Tokens</h4>
+            <p>Added the production review-accept writer <code>hermes_review_accept</code> (owner-gated, distinct-reviewer enforced, referenced-not-copied evidence) that feeds <code>hermes_contract_validate</code>; the read-only redacted <code>hermes_events_query</code> / <code>hermes_events_tail</code> timeline across audit, swarm, codex, cron, and kanban stores; durable AES-256-GCM encrypted OAuth token storage that survives restarts (<code>hermes_oauth_status</code> / <code>hermes_oauth_revoke</code>); and restart-safe <code>hermes_swarm_reconcile</code> that marks interrupted stages blocked and never auto-advances. Plus the MCP compatibility manifest and a CI hermeticity fix.</p>
+          </div>
+        </div>
+        <div class="release-item">
+          <div class="release-meta">
+            <span class="rel-version">v0.6.0</span>
+            <span class="rel-date">2026-08-14</span>
+          </div>
+          <div class="release-content">
+            <h4>Mission Control, Work Contracts & Swarms</h4>
+            <p>Added <code>hermes_mission_*</code> read-only Mission Control (deny-by-default, audited, PII-stripped fleet view), fail-closed <code>hermes_contract_*</code> Work Contracts that validate completion from observed state rather than worker self-report, and bounded <code>hermes_swarm_*</code> DAG-validated orchestration with capped scheduling and explicit ownership gates. Codex is never an implementation owner and receives only bounded verdict material. Documented retention windows and auto-cleanup for Codex job artifacts.</p>
           </div>
         </div>
         <div class="release-item">
