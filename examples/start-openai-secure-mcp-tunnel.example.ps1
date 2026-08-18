@@ -77,10 +77,21 @@ function Stop-OwnedProcess {
 
     try {
         $Process.Refresh()
-        if (-not $Process.HasExited) {
-            Stop-Process -Id $Process.Id -ErrorAction Stop
-            Wait-Process -Id $Process.Id -Timeout 10 -ErrorAction SilentlyContinue
+        if ($Process.HasExited) {
+            return
         }
+
+        Stop-Process -Id $Process.Id -ErrorAction Stop
+        $deadline = (Get-Date).AddSeconds(10)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 100
+            $Process.Refresh()
+            if ($Process.HasExited) {
+                return
+            }
+        }
+
+        Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
     }
     catch {
         Write-Warning "Could not stop owned PID $($Process.Id): $($_.Exception.Message)"
