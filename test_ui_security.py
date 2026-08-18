@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import re
 import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -41,6 +40,8 @@ def ui_root(tmp_path: Path, monkeypatch):
     """
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.delenv(oauth_auth.OAUTH_ENABLE_ENV, raising=False)
+    monkeypatch.delenv(oauth_auth.AUTH_TOKEN_ENV, raising=False)
     op.set_audit_log_override(tmp_path / "audit.jsonl")
     op_mission._cache_clear()
     root = tmp_path / ".hermes"
@@ -405,11 +406,10 @@ def test_property_all_api_get_routes_redacted(ui_root, monkeypatch):
     def walk(route_list):
         for route in route_list:
             path = getattr(route, "path", "")
-            if path.startswith("/api/"):
-                if getattr(route, "methods", None) and "GET" in route.methods:
-                    resp = client.get(path)
-                    if resp.status_code == 200:
-                        assert_no_forbidden(resp.text)
+            if path.startswith("/api/") and getattr(route, "methods", None) and "GET" in route.methods:
+                resp = client.get(path)
+                if resp.status_code == 200:
+                    assert_no_forbidden(resp.text)
             mount = getattr(route, "app", None)
             mount_routes = getattr(mount, "routes", None) if mount is not None else None
             if mount_routes:

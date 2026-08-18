@@ -40,6 +40,10 @@ Flight Deck: durable, interactive, verifiable autonomy.
 - Fixed CI hermeticity: `_call_skill_manager` no longer fails when the Hermes
   Agent source tree is absent (optional-import degradation); profile-scoping
   tests skip only when `hermes_constants` is unavailable.
+- Fixed explicit local-runner cancellation on Windows by routing durable worker
+  PIDs through the same platform-aware process-tree cleanup used by timeout
+  paths. A direct-process fallback now covers missing, timed-out, or failing
+  `taskkill` invocations.
 
 - Added explicit per-job Codex `execution_mode` with `normal` default and opt-in `nolo`. NOLO now uses Codex 0.147.0's `-a never` approval policy while retaining the requested read-only/workspace-write sandbox, Hermes approved-workspace, direct-mode, confirmation, audit, timeout, and redaction controls. The write gate is required only for `workspace-write`; NOLO expires with the job and does not create persistent global approval-bypass state.
 - Added Codex parity for the four session-history capabilities that were previously available only through the full ChatGPT connector, delivered through the separately installed Hermes GPT Session History integration and verified with direct native-tool calls.

@@ -1031,5 +1031,8 @@ def test_server_registers_contract_tools(monkeypatch):
         "hermes_contract_dispatch",
         "hermes_contract_validate",
         "hermes_contract_status",
+        "hermes_runner_list",
+        "hermes_runner_status",
+        "hermes_runner_cancel",
     ):
         assert tool in names

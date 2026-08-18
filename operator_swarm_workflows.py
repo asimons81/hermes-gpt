@@ -126,6 +126,7 @@ def canonical_workflow(
     workflow_id: str | None = None,
     owners: dict[str, str] | None = None,
     objectives: dict[str, str] | None = None,
+    executions: dict[str, dict[str, Any]] | None = None,
     implementation_artifacts: list[dict[str, Any]] | None = None,
     tests_artifacts: list[dict[str, Any]] | None = None,
     docs_artifacts: list[dict[str, Any]] | None = None,
@@ -143,6 +144,7 @@ def canonical_workflow(
     """
     owners = dict(DEFAULT_OWNERS, **(owners or {}))
     objectives = objectives or {}
+    executions = executions or {}
     stages: list[dict[str, Any]] = []
     for stage_id, kind, parents in CANONICAL_STAGE_SPECS:
         owner = owners.get(stage_id, DEFAULT_OWNERS[stage_id])
@@ -157,6 +159,8 @@ def canonical_workflow(
             worktree=worktree,
             objective=objectives.get(stage_id),
         )
+        if stage_id in executions:
+            stage["execution"] = dict(executions[stage_id])
         if stage_id == "implementation" and implementation_artifacts:
             stage["expected_artifacts"] = list(implementation_artifacts)
             if implementation_tests:
@@ -170,8 +174,8 @@ def canonical_workflow(
             # review verdict (P2-1: bounded verdict JSON, no transcripts).
             stage["review_requirements"] = {
                 "required": True,
-                "reviewer": "codex",
-                "evidence": "codex review verdict JSON",
+                "reviewer": owner,
+                "evidence": "review verdict evidence",
                 "approval_required": False,
             }
             stage["completion_criteria"] = {

@@ -686,7 +686,7 @@ def _stage_contract(workflow: dict[str, Any], stage: dict[str, Any], *, task_id:
         "approval_reference": "G4-swarm",
     }
 
-    return {
+    contract = {
         "schema": CONTRACT_SCHEMA,
         "task_id": task_id,
         "assigned_agent": stage["owner"],
@@ -705,6 +705,9 @@ def _stage_contract(workflow: dict[str, Any], stage: dict[str, Any], *, task_id:
         "constraints": _string_list(stage.get("constraints") or [], field="constraints"),
         "authorization": auth,
     }
+    if stage.get("execution") is not None:
+        contract["execution"] = stage["execution"]
+    return contract
 
 
 def _stage_contract_sha(contract: dict[str, Any]) -> str:
@@ -1307,6 +1310,7 @@ def _workflow_stages_for_dispatch(record: dict[str, Any]) -> list[dict[str, Any]
             "review_requirements": st.get("review_requirements"),
             "completion_criteria": st.get("completion_criteria"),
             "authorization": st.get("authorization"),
+            "execution": st.get("execution"),
             "worktree": st.get("worktree"),
             "inputs": st.get("inputs", []),
             "constraints": st.get("constraints", []),
@@ -1419,7 +1423,7 @@ def hermes_swarm_stage_advance(
 
     # Codex review stage: drive the existing runner, read the bounded verdict.
     review_evidence: dict[str, Any] | None = None
-    if stage.get("kind") == "codex_review" or stage.get("id") == "codex_review":
+    if (stage.get("kind") == "codex_review" or stage.get("id") == "codex_review") and stage.get("execution") is None and stage.get("owner") == "codex":
         reviewer = codex_reviewer or _default_codex_reviewer
         plan = _worktree_plan(workflow, stage, st.get("task_id") or f"{workflow_id}-{stage_id}")
         # Design §8: target = the merged branch (base:<integration-branch>).

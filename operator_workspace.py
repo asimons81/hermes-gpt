@@ -313,7 +313,22 @@ def hermes_gateway_status(
         )
 
 
+def _hermes_cli() -> str:
+    """Return the Hermes CLI executable used by fixed-argv gateway commands."""
+    configured = os.environ.get("HERMES_CLI", "").strip()
+    if configured:
+        return str(Path(configured).expanduser())
+    found = shutil.which("hermes")
+    if found:
+        return found
+    local_bin = Path.home() / ".local" / "bin" / "hermes"
+    if local_bin.exists():
+        return str(local_bin)
+    return "hermes"
+
+
 def _hermes_argv(profile: str, sub: list[str]) -> list[str]:
+    """Return the stable logical Hermes argv used by plans and injected runners."""
     if profile == "default":
         return ["hermes", *sub]
     return ["hermes", "-p", profile, *sub]
@@ -331,8 +346,13 @@ def _hermes_gateway_restart_raw(
 
     No policy checks; callers must gate mutation themselves.
     """
-    run_fn = runner or op.run_argv
-    return run_fn(_gateway_restart_argv(profile), timeout=120, workdir=None)
+    argv = _gateway_restart_argv(profile)
+    if runner is None:
+        argv = [_hermes_cli(), *argv[1:]]
+        run_fn = op.run_argv
+    else:
+        run_fn = runner
+    return run_fn(argv, timeout=120, workdir=None)
 
 
 def hermes_gateway_restart(

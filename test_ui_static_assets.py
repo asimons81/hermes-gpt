@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+import oauth_auth
 import operator_mission as op_mission
 import operator_policy as op
 import server
@@ -25,6 +26,8 @@ def ui_root(tmp_path: Path, monkeypatch):
     """Hermetic Hermes root; Path.home patched so defaults stay inside tmp."""
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.delenv(oauth_auth.OAUTH_ENABLE_ENV, raising=False)
+    monkeypatch.delenv(oauth_auth.AUTH_TOKEN_ENV, raising=False)
     op.set_audit_log_override(tmp_path / "audit.jsonl")
     op_mission._cache_clear()
     root = tmp_path / ".hermes"

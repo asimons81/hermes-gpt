@@ -23,6 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest",
+  "ruff",
   "build",
   "twine",
   "pyyaml",
@@ -48,6 +49,7 @@ py-modules = [
   "operator_session",
   "operator_mission",
   "operator_contract",
+  "operator_runners",
   "operator_review",
   "operator_events",
   "operator_oauth",
