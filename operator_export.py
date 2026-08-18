@@ -35,8 +35,8 @@ from mcp.types import (
     EmbeddedResource,
     TextContent,
 )
-import operator_policy as op
 
+import operator_policy as op
 
 EXPORT_MAX_BYTES_ENV = "HERMES_GPT_EXPORT_MAX_BYTES"
 EXPORT_ALLOWED_EXTENSIONS_ENV = "HERMES_GPT_EXPORT_ALLOWED_EXTENSIONS"
