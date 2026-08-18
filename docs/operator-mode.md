@@ -511,3 +511,41 @@ $env:HERMES_GPT_OWNER_ACK="I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
 - [Retention policy](retention-policy.md)
 - [v0.7.0 release notes](release-notes-v0.7.0.md)
 - [v0.6.0 release notes](release-notes-v0.6.0.md)
+
+
+## Runner backend trust boundaries
+
+Runner backends are execution transports for already-authorized work contracts;
+they are not completion authorities. Contract validation, expected artifacts,
+review requirements, and forbidden-action checks remain outside the backend.
+
+The built-in `pi_rpc` backend is intentionally **read-only** until Hermes GPT has
+a real filesystem confinement boundary. Starting a subprocess in a workspace is
+not a sandbox: absolute paths, `..` traversal, and shell `cd` can escape a plain
+current working directory. For that reason `pi_rpc` only permits Pi's `read` tool
+and rejects writable authorization classes. Use Fleet, Codex, or another backend
+with an appropriate sandbox boundary for write work.
+
+External runner plugins are trusted in-process code. Setting
+`HERMES_GPT_ENABLE_RUNNER_PLUGINS=1` only enables discovery; each external entry
+point must also be named in `HERMES_GPT_RUNNER_PLUGIN_ALLOWLIST`. Plugin code runs
+inside the Hermes GPT process and should be installed only from sources trusted
+as much as Hermes GPT itself.
+
+Deployments can constrain autonomous routing with comma-separated allowlists:
+
+- `HERMES_GPT_RUNNER_BACKEND_ALLOWLIST` for backend names such as `fleet`,
+  `pi_rpc`, `omx`, and `codex`.
+- `HERMES_GPT_RUNNER_PROVIDER_ALLOWLIST` for provider names selected by Pi.
+- `HERMES_GPT_RUNNER_MODEL_ALLOWLIST` for model names selected by Pi, OMX, or
+  Codex.
+
+Unset allowlists preserve compatibility and allow all values. Set allowlists are
+enforced before dispatch so contracts cannot silently route work into an
+unexpected backend, provider, or model.
+
+Local runner request envelopes are transient. Workers unlink `*.request.json`
+files immediately after loading them, and runner listing/status performs TTL
+cleanup of stale envelopes left by a process that died before loading its
+request. Durable runner metadata intentionally remains bounded state/exit data,
+not prompt text or model output.

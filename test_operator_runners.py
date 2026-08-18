@@ -92,6 +92,7 @@ def test_pi_rpc_dry_run_uses_rpc_plan(tmp_path: Path, monkeypatch: pytest.Monkey
     backend = runners.get_backend("pi_rpc")
     monkeypatch.setattr(backend, "executable", lambda: "/bin/true")
     raw = _contract(ws, backend="pi_rpc", options={"model": "x/y"})
+    raw["authorization"] = {"class": "read_only", "approved": True}
     payload = json.loads(contract_mod.hermes_contract_dispatch(json.dumps(raw), dry_run=True, hermes_root=root))
     assert payload["success"] is True
     assert payload["dry_run"] is True
@@ -114,7 +115,7 @@ def test_pi_defaults_and_profile_credential_reference_are_applied(tmp_path: Path
     )
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(pi_dir))
     monkeypatch.delenv("PI_TEST_PROVIDER_KEY", raising=False)
-    monkeypatch.delenv("PI_TEST_UNRELATED", raising=False)
+    monkeypatch.setenv("PI_TEST_UNRELATED", "parent-secret-must-not-copy")
 
     hermes_root = tmp_path / "hermes"
     hermes_root.mkdir()
@@ -176,6 +177,7 @@ def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest
     )
     fake_pi.chmod(0o755)
     contract = _contract(tmp_path, backend="pi_rpc")
+    contract["authorization"] = {"class": "read_only", "approved": True}
     started = time.monotonic()
     rc, final_text = runners._worker_pi(str(fake_pi), contract, 5, tmp_path / "events.jsonl", tmp_path / "hermes")
     assert rc == 0
@@ -287,7 +289,22 @@ def test_read_only_pi_cannot_enable_write_tools(tmp_path: Path, monkeypatch: pyt
     payload = json.loads(contract_mod.hermes_contract_dispatch(json.dumps(raw), dry_run=True, hermes_root=root))
     assert payload["success"] is False
     assert payload["code"] == "RUNNER_DISPATCH_ERROR"
-    assert "read-only authorization" in payload["safe_message"]
+    assert "read tool" in payload["safe_message"]
+
+
+def test_pi_writable_contract_rejected_until_filesystem_confinement_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    root = tmp_path / "hermes"
+    root.mkdir()
+    _enable_workspace(monkeypatch, ws)
+    backend = runners.get_backend("pi_rpc")
+    monkeypatch.setattr(backend, "executable", lambda: "/bin/true")
+    raw = _contract(ws, backend="pi_rpc")
+    payload = json.loads(contract_mod.hermes_contract_dispatch(json.dumps(raw), dry_run=True, hermes_root=root))
+    assert payload["success"] is False
+    assert payload["code"] == "RUNNER_DISPATCH_ERROR"
+    assert "filesystem confinement" in payload["safe_message"]
 
 
 def test_read_only_omx_cannot_request_workspace_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -350,6 +367,7 @@ def test_popen_failure_deletes_request_envelope(tmp_path: Path, monkeypatch: pyt
 
     monkeypatch.setattr(runners.subprocess, "Popen", _boom)
     raw = _contract(ws, backend="pi_rpc")
+    raw["authorization"] = {"class": "read_only", "approved": True}
     payload = json.loads(contract_mod.hermes_contract_dispatch(json.dumps(raw), dry_run=False, confirm=True, hermes_root=root))
     assert payload["success"] is False
     assert payload["code"] == "RUNNER_SPAWN_FAILED"
@@ -587,6 +605,7 @@ def _fake_entry_points(monkeypatch, candidates):
 
 
 def test_plugin_class_entry_point_instantiates(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(runners.RUNNER_PLUGIN_ALLOWLIST_ENV, "external_probe")
     _fake_entry_points(monkeypatch, {"hermes_gpt.runners": [("external_probe", _ExternalBackend)]})
     loaded = runners.load_entrypoint_backends()
     assert "external_probe" in loaded
@@ -605,3 +624,96 @@ def test_plugin_cannot_shadow_builtin_backend_name(monkeypatch: pytest.MonkeyPat
         runners.get_backend("__never__")  # registry sanity helper
     # The built-in fleet backend must still be the registered one.
     assert runners.get_backend("fleet").__class__ is runners.FleetBackend
+
+
+
+def test_plugin_entry_point_requires_explicit_allowlist(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv(runners.RUNNER_PLUGIN_ALLOWLIST_ENV, raising=False)
+    _fake_entry_points(monkeypatch, {"hermes_gpt.runners": [("external_probe", _ExternalBackend)]})
+    loaded = runners.load_entrypoint_backends()
+    assert loaded == []
+    with pytest.raises(LookupError):
+        runners.get_backend("external_probe")
+
+
+def test_runner_backend_allowlist_blocks_unexpected_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(runners.RUNNER_BACKEND_ALLOWLIST_ENV, "fleet")
+    raw = _contract(tmp_path, backend="pi_rpc")
+    payload = runners.dispatch_contract(raw, confirm=False, dry_run=True, timeout=30, hermes_root=tmp_path / "hermes")
+    assert payload["success"] is False
+    assert payload["code"] == "RUNNER_BACKEND_NOT_ALLOWED"
+
+
+def test_runner_provider_model_allowlists_are_enforced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pi_dir = tmp_path / "pi-agent"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(json.dumps({"defaultProvider": "expensive-provider", "defaultModel": "expensive-model"}), encoding="utf-8")
+    (pi_dir / "models.json").write_text(json.dumps({"providers": {}}), encoding="utf-8")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(pi_dir))
+    monkeypatch.setenv(runners.RUNNER_PROVIDER_ALLOWLIST_ENV, "safe-provider")
+    raw = _contract(tmp_path, backend="pi_rpc")
+    raw["authorization"] = {"class": "read_only", "approved": True}
+    backend = runners.PiRpcBackend()
+    with pytest.raises(PermissionError, match="not allowed"):
+        backend.build_plan(raw)
+
+
+def test_windows_process_tree_cleanup_uses_taskkill(monkeypatch: pytest.MonkeyPatch):
+    calls = []
+
+    class _Proc:
+        pid = 4242
+        waits = 0
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.waits += 1
+            return 0
+
+        def terminate(self):
+            calls.append(["terminate"])
+
+        def kill(self):
+            calls.append(["kill"])
+
+    def _run(argv, **kwargs):
+        calls.append(argv)
+
+    monkeypatch.setattr(runners.os, "name", "nt")
+    monkeypatch.setattr(runners.subprocess, "run", _run)
+    runners._terminate_process_tree(_Proc(), timeout=1)
+    assert ["taskkill", "/PID", "4242", "/T", "/F"] in calls
+
+
+def test_posix_process_tree_cleanup_uses_process_group(monkeypatch: pytest.MonkeyPatch):
+    calls = []
+
+    class _Proc:
+        pid = 4343
+        waits = 0
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.waits += 1
+            return 0
+
+    monkeypatch.setattr(runners.os, "name", "posix")
+    monkeypatch.setattr(runners.os, "killpg", lambda pid, sig: calls.append((pid, sig)))
+    runners._terminate_process_tree(_Proc(), timeout=1)
+    assert calls == [(4343, runners.signal.SIGTERM)]
+
+
+def test_stale_request_envelope_cleanup_removes_old_prompt(tmp_path: Path):
+    task_id = "stale-request-001"
+    _, request_path, _ = runners._job_paths(task_id, tmp_path)
+    runners._atomic_json(request_path, {"contract": {"objective": "stale raw prompt"}})
+    old = time.time() - 7200
+    request_path.touch()
+    import os as _os
+    _os.utime(request_path, (old, old))
+    assert runners._cleanup_stale_request_envelopes(hermes_root=tmp_path, ttl_seconds=3600) == 1
+    assert not request_path.exists()

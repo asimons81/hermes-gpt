@@ -38,6 +38,10 @@ import operator_policy as op
 
 SCHEMA_VERSION = "0.6-runner.1"
 RUNNER_PLUGINS_ENV = "HERMES_GPT_ENABLE_RUNNER_PLUGINS"
+RUNNER_PLUGIN_ALLOWLIST_ENV = "HERMES_GPT_RUNNER_PLUGIN_ALLOWLIST"
+RUNNER_BACKEND_ALLOWLIST_ENV = "HERMES_GPT_RUNNER_BACKEND_ALLOWLIST"
+RUNNER_PROVIDER_ALLOWLIST_ENV = "HERMES_GPT_RUNNER_PROVIDER_ALLOWLIST"
+RUNNER_MODEL_ALLOWLIST_ENV = "HERMES_GPT_RUNNER_MODEL_ALLOWLIST"
 _BACKEND_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _TASK_ID_RE = op_fleet._TASK_ID_RE
 _MAX_OPTIONS_BYTES = 8_000
@@ -103,7 +107,7 @@ def _bounded_text(value: Any, maximum: int = _MAX_RESULT_CHARS) -> str:
 
 
 def _popen_process_group(argv: list[str], **kwargs: Any) -> subprocess.Popen[str]:
-    """Start a child in its own process group/session for bounded cleanup."""
+    """Start a child with a platform-specific process-tree boundary."""
     kwargs.setdefault("close_fds", True)
     if os.name == "nt":
         kwargs.setdefault("creationflags", subprocess.CREATE_NEW_PROCESS_GROUP)
@@ -112,15 +116,39 @@ def _popen_process_group(argv: list[str], **kwargs: Any) -> subprocess.Popen[str
     return subprocess.Popen(argv, **kwargs)
 
 
-def _terminate_process_group(proc: subprocess.Popen[Any], *, timeout: float = 5.0) -> None:
-    """Terminate the child and descendants started by _popen_process_group."""
+def _terminate_process_tree(proc: subprocess.Popen[Any], *, timeout: float = 5.0) -> None:
+    """Terminate the child process tree created by _popen_process_group.
+
+    POSIX uses the child session/process group. Windows does not expose a true
+    process-tree kill through the Python standard library, so production Windows
+    cleanup uses taskkill /T /F for descendants and falls back to direct-child
+    terminate/kill if taskkill is unavailable.
+    """
     if proc.poll() is not None:
         return
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=timeout)
+            return
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            pass
+        return
     try:
-        if os.name == "nt":
-            proc.terminate()
-        else:
-            os.killpg(proc.pid, signal.SIGTERM)
+        os.killpg(proc.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
         pass
     try:
@@ -129,16 +157,18 @@ def _terminate_process_group(proc: subprocess.Popen[Any], *, timeout: float = 5.
     except subprocess.TimeoutExpired:
         pass
     try:
-        if os.name == "nt":
-            proc.kill()
-        else:
-            os.killpg(proc.pid, signal.SIGKILL)
+        os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
         pass
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         pass
+
+
+def _terminate_process_group(proc: subprocess.Popen[Any], *, timeout: float = 5.0) -> None:
+    """Backward-compatible alias for the process-tree terminator."""
+    _terminate_process_tree(proc, timeout=timeout)
 
 
 def _audit_runner(
@@ -165,6 +195,69 @@ def _audit_runner(
         )
     except Exception as exc:
         logger.debug("runner audit failed", exc_info=exc)
+
+
+def _split_allowlist(value: str | None) -> set[str]:
+    return {item.strip() for item in str(value or "").split(",") if item.strip()}
+
+
+def _allowed_by_env(value: str, env_name: str) -> bool:
+    allowed = _split_allowlist(os.environ.get(env_name))
+    return not allowed or value in allowed
+
+
+def _runner_allowed(name: str) -> bool:
+    return _allowed_by_env(name, RUNNER_BACKEND_ALLOWLIST_ENV)
+
+
+def _minimal_child_env() -> dict[str, str]:
+    """Return a non-secret, explicit child env baseline for local runners."""
+    allowed_keys = {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "PYTHONIOENCODING",
+        "PI_CODING_AGENT_DIR",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+    }
+    return {key: value for key, value in os.environ.items() if key in allowed_keys and value}
+
+
+def _cleanup_stale_request_envelopes(*, hermes_root: Path | None = None, ttl_seconds: int = 3600) -> int:
+    """Delete stale transient request envelopes after their TTL expires."""
+    root = _root(hermes_root)
+    if not root.is_dir():
+        return 0
+    now = datetime.now(timezone.utc).timestamp()
+    removed = 0
+    for request_path in root.glob("*.request.json"):
+        try:
+            age = now - request_path.stat().st_mtime
+        except OSError:
+            continue
+        if age < ttl_seconds:
+            continue
+        try:
+            request_path.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 def normalize_execution(value: Any) -> dict[str, Any] | None:
@@ -201,19 +294,27 @@ def _authorization_class(contract: dict[str, Any]) -> str:
 
 
 def _pi_tools(contract: dict[str, Any]) -> str:
+    """Return Pi tools for a confined-read execution posture.
+
+    Pi is intentionally limited to its read tool until Hermes GPT has a real
+    filesystem confinement boundary for absolute paths, ``..`` traversal, and
+    shell ``cd`` escape cases. CWD is not a sandbox.
+    """
     options = ((contract.get("execution") or {}).get("options") or {})
     auth_class = _authorization_class(contract)
+    if auth_class not in {"none", "read_only"}:
+        raise PermissionError("pi_rpc is read-only until filesystem confinement is available")
     requested = options.get("tools")
     if requested is None or requested == "":
-        return "read" if auth_class in {"none", "read_only"} else "read,bash,edit,write"
+        return "read"
     if not isinstance(requested, str):
         raise TypeError("pi_rpc execution.options.tools must be a comma-delimited string")
     tools = [item.strip() for item in requested.split(",") if item.strip()]
     if not tools:
         raise ValueError("pi_rpc execution.options.tools must not be empty")
-    if auth_class in {"none", "read_only"} and set(tools) - {"read"}:
-        raise PermissionError("read-only authorization may only enable Pi's read tool")
-    return ",".join(tools)
+    if set(tools) != {"read"}:
+        raise PermissionError("pi_rpc may only enable Pi's read tool until filesystem confinement is available")
+    return "read"
 
 
 def _pi_agent_dir() -> Path:
@@ -242,15 +343,13 @@ def _unquote_env_value(value: str) -> str:
 
 
 def _pi_child_env(contract: dict[str, Any], hermes_root: Path | None, provider: str) -> dict[str, str]:
-    """Build the Pi child environment with only the selected provider's env-ref credential.
+    """Build a minimal child environment with only the selected provider credential.
 
-    Pi supports custom providers whose ``apiKey`` is an environment reference such
-    as ``$PROVIDER_KEY``. hermes-gpt profiles keep those values in the profile
-    ``.env`` file, but detached local-runner children do not automatically inherit
-    them. Resolve only the single referenced key for the selected provider; never
-    log or persist its value.
+    This intentionally does not inherit ``os.environ`` wholesale. The child gets
+    a small non-secret baseline plus, when configured, exactly the single env-ref
+    credential referenced by the selected Pi provider.
     """
-    child_env = dict(os.environ)
+    child_env = _minimal_child_env()
     if not provider:
         return child_env
 
@@ -264,17 +363,18 @@ def _pi_child_env(contract: dict[str, Any], hermes_root: Path | None, provider: 
     if not match:
         return child_env
     key_name = match.group(1)
-    if child_env.get(key_name):
-        return child_env
 
     profile = str(contract.get("assigned_profile") or "default")
     allowed_profiles = contract.get("allowed_scope", {}).get("profiles") or []
     if allowed_profiles and profile not in allowed_profiles:
         raise PermissionError("Pi runner profile is outside the contract allowed_scope")
-    profile_home = op.resolve_profile_home(profile, hermes_root)
-    import operator_config as op_config
 
-    value = op_config._read_env_value(profile_home / ".env", key_name)
+    value = os.environ.get(key_name)
+    if not value:
+        profile_home = op.resolve_profile_home(profile, hermes_root)
+        import operator_config as op_config
+
+        value = op_config._read_env_value(profile_home / ".env", key_name)
     if value:
         child_env[key_name] = _unquote_env_value(value)
     return child_env
@@ -360,6 +460,9 @@ def load_entrypoint_backends() -> list[str]:
             name = str(getattr(backend, "name", "") or "").strip().lower()
             if name in builtin_names:
                 raise ValueError(f"external runner may not shadow built-in backend {name!r}")
+            allowed_plugins = _split_allowlist(os.environ.get(RUNNER_PLUGIN_ALLOWLIST_ENV))
+            if not allowed_plugins or (name not in allowed_plugins and getattr(ep, "name", "") not in allowed_plugins):
+                raise PermissionError(f"external runner {name!r} is not allowlisted by {RUNNER_PLUGIN_ALLOWLIST_ENV}")
             register_backend(backend, replace=False)
             loaded.append(str(getattr(backend, "name", ep.name)))
         except Exception as exc:
@@ -369,6 +472,7 @@ def load_entrypoint_backends() -> list[str]:
 
 
 def list_backends(*, hermes_root: Path | None = None) -> list[dict[str, Any]]:
+    _cleanup_stale_request_envelopes(hermes_root=hermes_root)
     with _REGISTRY_LOCK:
         items = list(_BACKENDS.values())
     out: list[dict[str, Any]] = []
@@ -384,8 +488,12 @@ def list_backends(*, hermes_root: Path | None = None) -> list[dict[str, Any]]:
 def selected_backend(contract: dict[str, Any]) -> str:
     execution = contract.get("execution")
     if isinstance(execution, dict) and execution.get("backend"):
-        return str(execution["backend"])
-    return "fleet"
+        backend = str(execution["backend"])
+    else:
+        backend = "fleet"
+    if not _runner_allowed(backend):
+        raise PermissionError(f"runner backend {backend!r} is not allowed by {RUNNER_BACKEND_ALLOWLIST_ENV}")
+    return backend
 
 
 def dispatch_contract(
@@ -397,8 +505,8 @@ def dispatch_contract(
     hermes_root: Path | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    backend_name = selected_backend(contract)
     try:
+        backend_name = selected_backend(contract)
         backend = get_backend(backend_name)
     except LookupError as exc:
         return {
@@ -407,7 +515,16 @@ def dispatch_contract(
             "code": "RUNNER_BACKEND_UNKNOWN",
             "safe_message": str(exc),
             "suggested_action": "Select a registered execution.backend.",
-            "backend": backend_name,
+            "backend": str((contract.get("execution") or {}).get("backend") or "fleet"),
+        }
+    except PermissionError as exc:
+        return {
+            "success": False,
+            "ok": False,
+            "code": "RUNNER_BACKEND_NOT_ALLOWED",
+            "safe_message": _bounded_text(exc, 300),
+            "suggested_action": "Update runner backend allowlist or select an allowed backend.",
+            "backend": str((contract.get("execution") or {}).get("backend") or "fleet"),
         }
     try:
         result = backend.dispatch(
@@ -665,6 +782,10 @@ class PiRpcBackend(_LocalProcessBackend):
     def build_plan(self, contract: dict[str, Any]) -> dict[str, Any]:
         tools = _pi_tools(contract)
         provider, model = _pi_selection(contract)
+        if provider and not _allowed_by_env(provider, RUNNER_PROVIDER_ALLOWLIST_ENV):
+            raise PermissionError(f"Pi provider {provider!r} is not allowed by {RUNNER_PROVIDER_ALLOWLIST_ENV}")
+        if model and not _allowed_by_env(model, RUNNER_MODEL_ALLOWLIST_ENV):
+            raise PermissionError(f"Pi model {model!r} is not allowed by {RUNNER_MODEL_ALLOWLIST_ENV}")
         return {"protocol": "jsonl-rpc", "mode": "rpc", "tools": tools, "model": model or None, "provider": provider or None}
 
 
@@ -683,7 +804,10 @@ class OmxBackend(_LocalProcessBackend):
     def build_plan(self, contract: dict[str, Any]) -> dict[str, Any]:
         options = ((contract.get("execution") or {}).get("options") or {})
         sandbox = _sandbox_for(contract, backend="omx")
-        return {"mode": "exec", "json": True, "sandbox": sandbox, "model": options.get("model"), "profile": options.get("profile")}
+        model = options.get("model")
+        if model and not _allowed_by_env(str(model), RUNNER_MODEL_ALLOWLIST_ENV):
+            raise PermissionError(f"OMX model {model!r} is not allowed by {RUNNER_MODEL_ALLOWLIST_ENV}")
+        return {"mode": "exec", "json": True, "sandbox": sandbox, "model": model, "profile": options.get("profile")}
 
 
 @dataclass
@@ -705,11 +829,14 @@ class CodexBackend:
         options = ((contract.get("execution") or {}).get("options") or {})
         workspace = contract["allowed_scope"]["workspaces"][0]
         sandbox = _sandbox_for(contract, backend="codex")
+        model = options.get("model")
+        if model and not _allowed_by_env(str(model), RUNNER_MODEL_ALLOWLIST_ENV):
+            raise PermissionError(f"Codex model {model!r} is not allowed by {RUNNER_MODEL_ALLOWLIST_ENV}")
         result = op_codex.hermes_codex_start(
             prompt=contract["objective"],
             workdir=workspace,
             sandbox=sandbox,
-            model=options.get("model"),
+            model=model,
             ignore_user_config=bool(options.get("ignore_user_config", False)),
             timeout=max(10, min(int(timeout), 3600)),
             confirm=confirm,
@@ -776,6 +903,10 @@ def _worker_pi(
     options = ((contract.get("execution") or {}).get("options") or {})
     tools = _pi_tools(contract)
     provider, model = _pi_selection(contract)
+    if provider and not _allowed_by_env(provider, RUNNER_PROVIDER_ALLOWLIST_ENV):
+        raise PermissionError(f"Pi provider {provider!r} is not allowed by {RUNNER_PROVIDER_ALLOWLIST_ENV}")
+    if model and not _allowed_by_env(model, RUNNER_MODEL_ALLOWLIST_ENV):
+        raise PermissionError(f"Pi model {model!r} is not allowed by {RUNNER_MODEL_ALLOWLIST_ENV}")
     argv = [exe, "--mode", "rpc", "--no-session", "--tools", tools]
     if _authorization_class(contract) in {"none", "read_only"}:
         # Pi extensions execute arbitrary startup code outside the built-in tool
@@ -866,7 +997,10 @@ def _worker_omx(exe: str, contract: dict[str, Any], timeout: int, log_path: Path
     workspace = contract["allowed_scope"]["workspaces"][0]
     argv = [exe, "exec", "--json", "-C", workspace, "--sandbox", sandbox]
     if options.get("model"):
-        argv += ["--model", str(options["model"])]
+        model = str(options["model"])
+        if not _allowed_by_env(model, RUNNER_MODEL_ALLOWLIST_ENV):
+            raise PermissionError(f"OMX model {model!r} is not allowed by {RUNNER_MODEL_ALLOWLIST_ENV}")
+        argv += ["--model", model]
     if options.get("profile"):
         argv += ["--profile", str(options["profile"])]
     argv.append("-")
@@ -1003,6 +1137,7 @@ def hermes_runner_status(task_id: str, hermes_root: Path | None = None) -> str:
     try:
         policy = op.OperatorPolicy()
         policy.require_level("read_only")
+        _cleanup_stale_request_envelopes(hermes_root=hermes_root)
         if not _TASK_ID_RE.fullmatch(task_id or ""):
             raise ValueError("task_id has an invalid format")
         runs = observed_runs(task_id, hermes_root=hermes_root)

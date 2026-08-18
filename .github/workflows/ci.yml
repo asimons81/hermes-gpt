@@ -20,12 +20,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
-      - name: Run non-UI test suite
-        run: >-
-          python -m pytest -q
-          --ignore=test_ui_chat.py
-          --ignore=test_ui_security.py
-          --ignore=test_ui_static_assets.py
+      - name: Run full test suite
+        run: python -m pytest -q
       - name: Run runner regression tests
         run: python -m pytest -q test_operator_runners.py
       - name: Compile operator modules
