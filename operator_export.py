@@ -29,14 +29,13 @@ import os
 from pathlib import Path
 from typing import Any
 
+import operator_policy as op
 from mcp.types import (
     BlobResourceContents,
     CallToolResult,
     EmbeddedResource,
     TextContent,
 )
-
-import operator_policy as op
 
 
 EXPORT_MAX_BYTES_ENV = "HERMES_GPT_EXPORT_MAX_BYTES"
@@ -85,23 +84,6 @@ def _allowed_extensions() -> set[str] | None:
 def _mime_type(path: Path) -> str:
     guessed, _encoding = mimetypes.guess_type(path.name, strict=False)
     return guessed or "application/octet-stream"
-
-
-def _safe_error_result(exc: Exception) -> CallToolResult:
-    envelope = op.error_from_exception(
-        exc,
-        layer="workspace",
-        code="FILE_EXPORT_ERROR",
-        suggested_action=(
-            "Check Operator workspace level, allowed_paths, denied-path policy, "
-            "file size, and optional export extension restrictions."
-        ),
-    )
-    return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(envelope, indent=2))],
-        structuredContent=envelope,
-        isError=True,
-    )
 
 
 def hermes_export_file(path: str) -> CallToolResult:
@@ -198,7 +180,7 @@ def hermes_export_file(path: str) -> CallToolResult:
             structuredContent=metadata,
             isError=False,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - normalize failures into a safe MCP envelope
         envelope = op.error_from_exception(
             exc,
             layer="workspace",
