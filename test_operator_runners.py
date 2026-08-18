@@ -100,6 +100,62 @@ def test_pi_rpc_dry_run_uses_rpc_plan(tmp_path: Path, monkeypatch: pytest.Monkey
     assert payload["plan"]["model"] == "x/y"
 
 
+def test_pi_defaults_and_profile_credential_reference_are_applied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pi_dir = tmp_path / "pi-agent"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"defaultProvider": "test-provider", "defaultModel": "test-model"}),
+        encoding="utf-8",
+    )
+    (pi_dir / "models.json").write_text(
+        json.dumps({"providers": {"test-provider": {"apiKey": "$PI_TEST_PROVIDER_KEY", "models": [{"id": "test-model"}]}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(pi_dir))
+    monkeypatch.delenv("PI_TEST_PROVIDER_KEY", raising=False)
+    monkeypatch.delenv("PI_TEST_UNRELATED", raising=False)
+
+    hermes_root = tmp_path / "hermes"
+    hermes_root.mkdir()
+    (hermes_root / ".env").write_text(
+        "PI_TEST_PROVIDER_KEY=test-credential\nPI_TEST_UNRELATED=do-not-copy\n",
+        encoding="utf-8",
+    )
+    contract = _contract(tmp_path, backend="pi_rpc")
+
+    assert runners._pi_selection(contract) == ("test-provider", "test-model")
+    child_env = runners._pi_child_env(contract, hermes_root, "test-provider")
+    assert child_env["PI_TEST_PROVIDER_KEY"] == "test-credential"
+    assert "PI_TEST_UNRELATED" not in child_env
+
+
+def test_pi_rpc_prompt_rejection_fails_immediately(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pi_dir = tmp_path / "pi-agent"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"defaultProvider": "test-provider", "defaultModel": "test-model"}),
+        encoding="utf-8",
+    )
+    (pi_dir / "models.json").write_text(json.dumps({"providers": {}}), encoding="utf-8")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(pi_dir))
+
+    fake_pi = tmp_path / "fake-pi"
+    fake_pi.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "assert '--no-extensions' in sys.argv\n"
+        "json.loads(sys.stdin.readline())\n"
+        "print(json.dumps({'id':'dispatch','type':'response','command':'prompt','success':False,'error':'provider unavailable'}), flush=True)\n",
+        encoding="utf-8",
+    )
+    fake_pi.chmod(0o755)
+    contract = _contract(tmp_path, backend="pi_rpc")
+    contract["authorization"] = {"class": "read_only", "approved": True}
+
+    with pytest.raises(RuntimeError, match="Pi RPC prompt failed: provider unavailable"):
+        runners._worker_pi(str(fake_pi), contract, 5, tmp_path / "events.jsonl", tmp_path / "hermes")
+
+
 def test_omx_dry_run_uses_native_exec_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -361,7 +417,7 @@ def test_cancel_marker_wins_over_completed(tmp_path: Path, monkeypatch: pytest.M
     cancel_path = root / f"{task_id}.cancel.json"
     runners._atomic_json(cancel_path, {"task_id": task_id})
     monkeypatch.setattr(runners, "get_backend", lambda name: _fake_backend(monkeypatch))
-    monkeypatch.setattr(runners, "_worker_pi", lambda exe, contract, timeout, log_path: (0, "done"))
+    monkeypatch.setattr(runners, "_worker_pi", lambda exe, contract, timeout, log_path, hermes_root=None: (0, "done"))
     rc = runners._worker(task_id, root)
     meta = json.loads(meta_path.read_text())
     assert rc == 0, meta.get("error")
@@ -411,7 +467,7 @@ def test_worker_without_cancel_marker_reports_completed(tmp_path: Path, monkeypa
     root.mkdir(parents=True, exist_ok=True)
     _make_job(root, task_id)
     monkeypatch.setattr(runners, "get_backend", lambda name: _fake_backend(monkeypatch))
-    monkeypatch.setattr(runners, "_worker_pi", lambda exe, contract, timeout, log_path: (0, "done"))
+    monkeypatch.setattr(runners, "_worker_pi", lambda exe, contract, timeout, log_path, hermes_root=None: (0, "done"))
     rc = runners._worker(task_id, root)
     meta = json.loads(meta_path.read_text())
     assert rc == 0, meta.get("error")
@@ -427,7 +483,7 @@ def test_cancel_arriving_during_terminal_write_still_wins(tmp_path: Path, monkey
     _make_job(root, task_id)
     cancel_path = root / f"{task_id}.cancel.json"
     monkeypatch.setattr(runners, "get_backend", lambda name: _fake_backend(monkeypatch))
-    monkeypatch.setattr(runners, "_worker_pi", lambda exe, contract, timeout, log_path: (0, "done"))
+    monkeypatch.setattr(runners, "_worker_pi", lambda exe, contract, timeout, log_path, hermes_root=None: (0, "done"))
     real_atomic = runners._atomic_json
     injected = {"done": False}
 

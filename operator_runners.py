@@ -177,6 +177,70 @@ def _pi_tools(contract: dict[str, Any]) -> str:
     return ",".join(tools)
 
 
+def _pi_agent_dir() -> Path:
+    configured = os.environ.get("PI_CODING_AGENT_DIR", "").strip()
+    return Path(configured).expanduser() if configured else Path.home() / ".pi" / "agent"
+
+
+def _pi_selection(contract: dict[str, Any]) -> tuple[str, str]:
+    """Return the effective Pi provider/model without exposing credentials."""
+    options = ((contract.get("execution") or {}).get("options") or {})
+    provider = str(options.get("provider") or "").strip()
+    model = str(options.get("model") or "").strip()
+    settings = _load_json(_pi_agent_dir() / "settings.json") or {}
+    if not provider:
+        provider = str(settings.get("defaultProvider") or "").strip()
+    if not model:
+        model = str(settings.get("defaultModel") or "").strip()
+    return provider, model
+
+
+def _unquote_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _pi_child_env(contract: dict[str, Any], hermes_root: Path | None, provider: str) -> dict[str, str]:
+    """Build the Pi child environment with only the selected provider's env-ref credential.
+
+    Pi supports custom providers whose ``apiKey`` is an environment reference such
+    as ``$PROVIDER_KEY``. hermes-gpt profiles keep those values in the profile
+    ``.env`` file, but detached local-runner children do not automatically inherit
+    them. Resolve only the single referenced key for the selected provider; never
+    log or persist its value.
+    """
+    child_env = dict(os.environ)
+    if not provider:
+        return child_env
+
+    models = _load_json(_pi_agent_dir() / "models.json") or {}
+    providers = models.get("providers") if isinstance(models.get("providers"), dict) else {}
+    config = providers.get(provider) if isinstance(providers, dict) else None
+    raw_key = config.get("apiKey") if isinstance(config, dict) else None
+    if not isinstance(raw_key, str):
+        return child_env
+    match = re.fullmatch(r"\$([A-Za-z_][A-Za-z0-9_]*)", raw_key.strip())
+    if not match:
+        return child_env
+    key_name = match.group(1)
+    if child_env.get(key_name):
+        return child_env
+
+    profile = str(contract.get("assigned_profile") or "default")
+    allowed_profiles = contract.get("allowed_scope", {}).get("profiles") or []
+    if allowed_profiles and profile not in allowed_profiles:
+        raise PermissionError("Pi runner profile is outside the contract allowed_scope")
+    profile_home = op.resolve_profile_home(profile, hermes_root)
+    import operator_config as op_config
+
+    value = op_config._read_env_value(profile_home / ".env", key_name)
+    if value:
+        child_env[key_name] = _unquote_env_value(value)
+    return child_env
+
+
 def _sandbox_for(contract: dict[str, Any], *, backend: str) -> str:
     options = ((contract.get("execution") or {}).get("options") or {})
     auth_class = _authorization_class(contract)
@@ -562,9 +626,9 @@ class PiRpcBackend(_LocalProcessBackend):
         return None
 
     def build_plan(self, contract: dict[str, Any]) -> dict[str, Any]:
-        options = ((contract.get("execution") or {}).get("options") or {})
         tools = _pi_tools(contract)
-        return {"protocol": "jsonl-rpc", "mode": "rpc", "tools": tools, "model": options.get("model"), "provider": options.get("provider")}
+        provider, model = _pi_selection(contract)
+        return {"protocol": "jsonl-rpc", "mode": "rpc", "tools": tools, "model": model or None, "provider": provider or None}
 
 
 @dataclass
@@ -665,22 +729,44 @@ def _extract_pi_text(message: Any) -> str:
     return ""
 
 
-def _worker_pi(exe: str, contract: dict[str, Any], timeout: int, log_path: Path) -> tuple[int, str]:
+def _worker_pi(
+    exe: str,
+    contract: dict[str, Any],
+    timeout: int,
+    log_path: Path,
+    hermes_root: Path | None = None,
+) -> tuple[int, str]:
     options = ((contract.get("execution") or {}).get("options") or {})
     tools = _pi_tools(contract)
+    provider, model = _pi_selection(contract)
     argv = [exe, "--mode", "rpc", "--no-session", "--tools", tools]
-    if options.get("provider"):
-        argv += ["--provider", str(options["provider"])]
-    if options.get("model"):
-        argv += ["--model", str(options["model"])]
+    if _authorization_class(contract) in {"none", "read_only"}:
+        # Pi extensions execute arbitrary startup code outside the built-in tool
+        # allowlist. Disable extension discovery for read-only contracts so an
+        # extension cannot mutate the workspace before the model even runs.
+        argv.append("--no-extensions")
+    if provider:
+        argv += ["--provider", provider]
+    if model:
+        argv += ["--model", model]
     if options.get("thinking"):
         argv += ["--thinking", str(options["thinking"])]
-    proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    child_env = _pi_child_env(contract, hermes_root, provider)
+    proc = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        env=child_env,
+    )
     assert proc.stdin is not None and proc.stdout is not None
     proc.stdin.write(json.dumps({"id": "dispatch", "type": "prompt", "message": contract["objective"]}, ensure_ascii=False) + "\n")
     proc.stdin.flush()
     final_text = ""
     settled = False
+    rpc_error = ""
     deadline = datetime.now(timezone.utc).timestamp() + timeout
     selector = selectors.DefaultSelector()
     selector.register(proc.stdout, selectors.EVENT_READ)
@@ -703,6 +789,9 @@ def _worker_pi(exe: str, contract: dict[str, Any], timeout: int, log_path: Path)
         etype = event.get("type")
         if etype in {"response", "agent_start", "agent_end", "agent_settled", "turn_end", "message_end", "extension_error", "auto_retry_start", "auto_retry_end"}:
             _append_event(log_path, {"type": etype, "at": _now(), "success": event.get("success"), "command": event.get("command")})
+        if etype == "response" and event.get("command") == "prompt" and event.get("success") is False:
+            rpc_error = _bounded_text(event.get("error") or "Pi RPC prompt rejected", 500)
+            break
         if etype == "message_end":
             text = _extract_pi_text(event.get("message"))
             if text:
@@ -711,13 +800,24 @@ def _worker_pi(exe: str, contract: dict[str, Any], timeout: int, log_path: Path)
             settled = True
             break
     selector.close()
-    if not settled and proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        return 124, final_text
+    if rpc_error:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        raise RuntimeError(f"Pi RPC prompt failed: {rpc_error}")
+    if not settled:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return 124, final_text
+        rc = int(proc.returncode or 0)
+        return (rc if rc else 1), final_text
     try:
         proc.stdin.close()
     except OSError:
@@ -778,6 +878,10 @@ def _worker(task_id: str, jobs_root: Path) -> int:
     contract = request["contract"]
     backend_name = str(request.get("backend") or "")
     timeout = max(10, min(int(request.get("timeout") or 900), 3600))
+    request_root_raw = request.get("hermes_root")
+    request_root = Path(str(request_root_raw)).expanduser() if request_root_raw else None
+    normalized_root = op.normalize_hermes_data_root(request_root) if request_root is not None else None
+    worker_hermes_root = Path(normalized_root) if normalized_root is not None else request_root
     # The objective is needed only to start the worker. Remove the durable
     # request envelope as soon as it has been loaded so prompt text is not
     # retained after dispatch.
@@ -826,7 +930,7 @@ def _worker(task_id: str, jobs_root: Path) -> int:
             _terminalize(meta, state="cancelled")
             return 0
         if backend_name == "pi_rpc":
-            rc, _ = _worker_pi(exe, contract, timeout, log_path)
+            rc, _ = _worker_pi(exe, contract, timeout, log_path, worker_hermes_root)
         elif backend_name == "omx":
             rc, _ = _worker_omx(exe, contract, timeout, log_path)
         else:
