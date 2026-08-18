@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -154,6 +155,52 @@ def test_pi_rpc_prompt_rejection_fails_immediately(tmp_path: Path, monkeypatch: 
 
     with pytest.raises(RuntimeError, match="Pi RPC prompt failed: provider unavailable"):
         runners._worker_pi(str(fake_pi), contract, 5, tmp_path / "events.jsonl", tmp_path / "hermes")
+
+
+def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    pi_dir = tmp_path / "pi-agent"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(json.dumps({}), encoding="utf-8")
+    (pi_dir / "models.json").write_text(json.dumps({"providers": {}}), encoding="utf-8")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(pi_dir))
+
+    fake_pi = tmp_path / "fake-pi-noisy-stderr"
+    fake_pi.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "json.loads(sys.stdin.readline())\n"
+        "os.write(sys.stderr.fileno(), b'x' * (2 * 1024 * 1024))\n"
+        "print(json.dumps({'type':'message_end','message':{'role':'assistant','content':'done'}}), flush=True)\n"
+        "print(json.dumps({'type':'agent_settled','success':True}), flush=True)\n",
+        encoding="utf-8",
+    )
+    fake_pi.chmod(0o755)
+    contract = _contract(tmp_path, backend="pi_rpc")
+    started = time.monotonic()
+    rc, final_text = runners._worker_pi(str(fake_pi), contract, 5, tmp_path / "events.jsonl", tmp_path / "hermes")
+    assert rc == 0
+    assert final_text == "done"
+    assert time.monotonic() - started < 5
+
+
+def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    fake_omx = tmp_path / "fake-omx-descendant"
+    fake_omx.write_text(
+        "#!/usr/bin/env python3\n"
+        "import subprocess, sys, time\n"
+        "subprocess.Popen([sys.executable, '-c', \"import sys,time; sys.stdout.write('held'); sys.stdout.flush(); time.sleep(60)\"])\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    fake_omx.chmod(0o755)
+    contract = _contract(ws, backend="omx")
+    started = time.monotonic()
+    rc, final_text = runners._worker_omx(str(fake_omx), contract, 1, tmp_path / "events.jsonl")
+    assert rc == 124
+    assert final_text == ""
+    assert time.monotonic() - started < 8
 
 
 def test_omx_dry_run_uses_native_exec_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

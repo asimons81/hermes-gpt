@@ -102,6 +102,45 @@ def _bounded_text(value: Any, maximum: int = _MAX_RESULT_CHARS) -> str:
     return text if len(text) <= maximum else text[: maximum - 3] + "..."
 
 
+def _popen_process_group(argv: list[str], **kwargs: Any) -> subprocess.Popen[str]:
+    """Start a child in its own process group/session for bounded cleanup."""
+    kwargs.setdefault("close_fds", True)
+    if os.name == "nt":
+        kwargs.setdefault("creationflags", subprocess.CREATE_NEW_PROCESS_GROUP)
+    else:
+        kwargs.setdefault("start_new_session", True)
+    return subprocess.Popen(argv, **kwargs)
+
+
+def _terminate_process_group(proc: subprocess.Popen[Any], *, timeout: float = 5.0) -> None:
+    """Terminate the child and descendants started by _popen_process_group."""
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            proc.terminate()
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    try:
+        proc.wait(timeout=timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        if os.name == "nt":
+            proc.kill()
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _audit_runner(
     *,
     tool: str,
@@ -534,14 +573,12 @@ class _LocalProcessBackend:
         }
         _atomic_json(meta_path, meta)
         try:
-            proc = subprocess.Popen(
+            proc = _popen_process_group(
                 [sys.executable, str(Path(__file__).resolve()), "--worker", task_id, "--root", str(_root(hermes_root))],
                 cwd=str(workspace),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                close_fds=True,
             )
         except Exception as exc:  # noqa: BLE001
             # Spawn failed after the request/meta envelopes were written.
@@ -752,11 +789,13 @@ def _worker_pi(
     if options.get("thinking"):
         argv += ["--thinking", str(options["thinking"])]
     child_env = _pi_child_env(contract, hermes_root, provider)
-    proc = subprocess.Popen(
+    proc = _popen_process_group(
         argv,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # Route stderr away from PIPE so noisy Pi startup/logging cannot fill an
+        # unconsumed pipe and stall RPC progress before agent_settled.
+        stderr=subprocess.DEVNULL,
         text=True,
         bufsize=1,
         env=child_env,
@@ -801,20 +840,11 @@ def _worker_pi(
             break
     selector.close()
     if rpc_error:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        _terminate_process_group(proc)
         raise RuntimeError(f"Pi RPC prompt failed: {rpc_error}")
     if not settled:
         if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            _terminate_process_group(proc)
             return 124, final_text
         rc = int(proc.returncode or 0)
         return (rc if rc else 1), final_text
@@ -825,8 +855,8 @@ def _worker_pi(
     try:
         rc = proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        proc.terminate()
-        rc = proc.wait(timeout=5)
+        _terminate_process_group(proc)
+        rc = int(proc.returncode or 124)
     return rc, final_text
 
 
@@ -840,12 +870,15 @@ def _worker_omx(exe: str, contract: dict[str, Any], timeout: int, log_path: Path
     if options.get("profile"):
         argv += ["--profile", str(options["profile"])]
     argv.append("-")
-    proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = _popen_process_group(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         stdout, stderr = proc.communicate(input=contract["objective"], timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout, stderr = proc.communicate()
+        _terminate_process_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
         _append_event(log_path, {"type": "timeout", "at": _now()})
         return 124, ""
     final_text = ""
