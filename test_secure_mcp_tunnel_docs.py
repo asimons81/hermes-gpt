@@ -67,9 +67,9 @@ def test_secure_tunnel_docs_are_wired_into_current_entry_points() -> None:
 def test_secure_tunnel_docs_and_launcher_ship_in_package_data() -> None:
     data = tomllib.loads(_read(ROOT / "pyproject.toml"))
     package_data = data["tool"]["setuptools"]["data-files"]
+    shipped_docs = package_data["share/hermes-gpt/docs"]
+    shipped_examples = package_data["share/hermes-gpt/examples"]
 
-    assert "docs/openai-secure-mcp-tunnel.md" in package_data["share/hermes-gpt/docs"]
-    assert (
-        "examples/start-openai-secure-mcp-tunnel.example.ps1"
-        in package_data["share/hermes-gpt/examples"]
-    )
+    assert "docs/openai-secure-mcp-tunnel.md" in shipped_docs
+    assert "docs/cloudflare-tunnel.md" in shipped_docs
+    assert "examples/start-openai-secure-mcp-tunnel.example.ps1" in shipped_examples
