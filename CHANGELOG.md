@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added `hermes_export_file`, a workspace-authorized MCP-native binary export surface with mandatory allowed-path confinement, denied-secret-path enforcement, symlink escape refusal, a 4 MiB default / 16 MiB hard size cap, optional extension allowlisting, safe audit metadata, and no base64 text fallback. Client attachment rendering remains client-controlled.
 - Added a first-class OpenAI Secure MCP Tunnel deployment path for private ChatGPT/Codex/OpenAI access while Hermes GPT stays bound to loopback. Added a canonical guide, supervised Windows launcher, tunnel-aware status example, package wiring, and cross-links from the README, MCP compatibility, Cloudflare, and Windows Codex docs.
 - Documented the tunnel security boundary: no public `HERMES_GPT_ALLOWED_HOSTS` entry is required for the private loopback path, static bearer remains optional defense in depth, and built-in OAuth still requires separately reachable browser-facing authorization-server endpoints.
 

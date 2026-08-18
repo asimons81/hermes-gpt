@@ -165,7 +165,7 @@ Operator Mode is the policy-gated control plane for trusted clients. Tool visibi
 | `cron` | cron run/pause/copy/move |
 | `skills` | skill create/edit/patch/write/copy/sync/delete |
 | `skills_config` | non-secret config and environment writes |
-| `workspace` | scoped workspace writes/tests, gateway restart, Codex jobs, contract/swarm dispatch |
+| `workspace` | scoped workspace reads/writes/tests, bounded binary export, gateway restart, Codex jobs, contract/swarm dispatch |
 | `owner` | break-glass raw command/file operations and final swarm approval; secret paths remain denied |
 
 Mutation requires both the server and the individual call to opt in:
@@ -183,6 +183,8 @@ Owner Mode additionally requires:
 HERMES_GPT_OWNER_ACTIVE=1
 HERMES_GPT_OWNER_ACK=I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE
 ```
+
+`hermes_export_file(path)` is a workspace-authorized, read-only transfer surface for existing local binary files. It requires a non-empty `HERMES_GPT_OPERATOR_ALLOWED_PATHS`, preserves denied secret paths, defaults to a 4 MiB limit with a 16 MiB hard ceiling, and returns bytes as an MCP embedded resource rather than base64 text. See [Binary file export](docs/file-export.md) for the complete limits and client-rendering contract.
 
 See [docs/operator-mode.md](docs/operator-mode.md) for the complete policy model and exact gates.
 

@@ -38,7 +38,7 @@ Higher levels include the capabilities of lower levels.
 | `cron` | cron run, pause, copy, move |
 | `skills` | skill create, edit, patch, write, copy, sync, delete |
 | `skills_config` | non-secret config and environment writes |
-| `workspace` | scoped workspace read/write/test, gateway restart, Codex jobs, contract/swarm dispatch |
+| `workspace` | scoped workspace read/write/test, bounded binary export, gateway restart, Codex jobs, contract/swarm dispatch |
 | `owner` | break-glass raw command/file operations and final swarm approval; secret paths remain denied |
 
 `skills_config` is a reasonable ceiling for routine configuration work. Use `workspace` only when a task requires scoped workspace operations or delegated execution. Treat `owner` as break-glass.
@@ -170,6 +170,10 @@ Prompt-like text is represented by bounded metadata such as `prompt_len` and `pr
 Do not describe the unset state as deny-by-default. The implementation deliberately makes all read-only Mission surfaces available when the variable is absent.
 
 Mission Control requires only `read_only` authority and never needs direct apply mode.
+
+## Binary file export
+
+`hermes_export_file(path)` is a read-only raw-byte transfer surface gated at Operator `workspace` level. It requires a non-empty `HERMES_GPT_OPERATOR_ALLOWED_PATHS`, resolves paths before authorization so symlink escapes are refused, preserves all denied secret/credential paths even in Owner Mode, enforces a 4 MiB default and 16 MiB hard maximum, and supports an optional `HERMES_GPT_EXPORT_ALLOWED_EXTENSIONS` suffix allowlist. Successful bytes are returned as `EmbeddedResource(BlobResourceContents)` with safe metadata; client download/attachment rendering is client-controlled. See [Binary file export](file-export.md).
 
 ## Work Contracts
 
