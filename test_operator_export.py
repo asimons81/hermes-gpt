@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 
+import pytest
 from mcp.types import BlobResourceContents, EmbeddedResource, TextContent
 
 import operator_export as export
@@ -111,6 +112,27 @@ def test_export_rejects_file_outside_allowed_root(monkeypatch, tmp_path) -> None
     assert result.isError is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
     assert str(outside) not in json.dumps(result.structuredContent)
+
+
+def test_export_rejects_symlink_escape_outside_allowed_root(monkeypatch, tmp_path) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "report.pdf"
+    target.write_bytes(b"%PDF-outside")
+    link = allowed / "linked.pdf"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is not available in this test environment")
+    _configure_workspace(monkeypatch, allowed)
+
+    result = export.hermes_export_file(str(link))
+
+    assert result.isError is True
+    assert not any(isinstance(item, EmbeddedResource) for item in result.content)
+    assert "%PDF-outside" not in json.dumps(result.structuredContent)
 
 
 def test_export_rejects_secret_path_even_under_allowed_root(monkeypatch, tmp_path) -> None:
