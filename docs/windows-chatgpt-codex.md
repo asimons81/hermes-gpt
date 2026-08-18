@@ -4,7 +4,7 @@ This guide covers one specific deployment path:
 
 ```text
 ChatGPT
-  -> authenticated/private boundary
+  -> OpenAI Secure MCP Tunnel or another authenticated/private boundary
   -> normal Hermes GPT Operator MCP on 127.0.0.1:4750/mcp
   -> Hermes Operator policy
   -> standalone Codex CLI
@@ -20,7 +20,8 @@ For documentation authority rules, see [docs/README.md](README.md).
 This is an advanced local setup.
 
 - Keep Hermes GPT bound to loopback.
-- Put a private or authenticated boundary in front of it for ChatGPT access.
+- For supported OpenAI products, prefer [OpenAI Secure MCP Tunnel](openai-secure-mcp-tunnel.md) when available so Hermes GPT does not need a public inbound hostname.
+- If Secure MCP Tunnel is unavailable for the target client, put another deliberately configured private/authenticated boundary in front of Hermes GPT.
 - Restrict allowed workspaces narrowly.
 - Start with `sandbox=read-only`.
 - Do not enable Owner Mode for an always-on connector.
@@ -33,7 +34,7 @@ This is an advanced local setup.
 - Python 3.10+
 - Hermes GPT installed or checked out locally
 - Hermes Agent available to the Hermes GPT runtime
-- A private/authenticated HTTPS boundary that forwards to `http://127.0.0.1:4750`
+- OpenAI Secure MCP Tunnel or another private/authenticated boundary that can carry the loopback MCP endpoint to ChatGPT
 - The standalone Codex CLI
 - A dedicated Git repository to use as the approved work directory
 
@@ -127,7 +128,15 @@ Do not initialize Git in a broad personal directory merely to satisfy the CLI.
 
 ChatGPT cannot directly reach the computer's loopback address.
 
-Forward the local MCP endpoint through your private/authenticated boundary, then configure the connector with the resulting HTTPS endpoint:
+### Preferred OpenAI path: Secure MCP Tunnel
+
+When Secure MCP Tunnel is available for the target account/workspace, follow [OpenAI Secure MCP Tunnel](openai-secure-mcp-tunnel.md). Keep Hermes GPT on `127.0.0.1:4750`, point `tunnel-client` at `http://127.0.0.1:4750/mcp`, validate the named profile with `doctor --explain`, and select the associated tunnel in ChatGPT developer mode.
+
+This path does not require a public Hermes GPT hostname or a public `HERMES_GPT_ALLOWED_HOSTS` entry. The repository also ships [`../examples/start-openai-secure-mcp-tunnel.example.ps1`](../examples/start-openai-secure-mcp-tunnel.example.ps1) for supervised Windows startup.
+
+### Other private/authenticated boundaries
+
+If Secure MCP Tunnel is not the chosen transport, forward the local MCP endpoint through a deliberately configured private/authenticated HTTPS boundary, then configure the connector with that boundary's HTTPS endpoint:
 
 ```text
 Protocol: Streaming HTTP
@@ -205,7 +214,9 @@ In Swarm Orchestration, Codex can provide a review verdict but is never an imple
 
 ## 8. Start automatically without visible consoles
 
-Task Scheduler can start both Hermes GPT and the private tunnel/boundary at logon.
+For Secure MCP Tunnel, prefer a single supervised launcher so Hermes GPT and `tunnel-client` fail together instead of leaving a stale half-running bridge. Copy and customize [`../examples/start-openai-secure-mcp-tunnel.example.ps1`](../examples/start-openai-secure-mcp-tunnel.example.ps1) in a private local path.
+
+For another boundary, Task Scheduler can start Hermes GPT and the boundary at logon using separate supervised tasks.
 
 Launching `powershell.exe` directly can flash a console even with `-WindowStyle Hidden`. A small Windows Script Host wrapper can hide the launcher while letting Task Scheduler monitor the process.
 
@@ -231,7 +242,7 @@ Arguments: "C:\path\to\run-powershell-hidden.vbs" "C:\path\to\launcher.ps1"
 Start in: the launcher's working directory
 ```
 
-Use separate tasks for Hermes GPT and the tunnel/boundary. Configure restart-on-failure as appropriate and keep logs free of credentials.
+Configure restart-on-failure as appropriate and keep logs free of credentials.
 
 ## 9. Restart safely
 
@@ -256,12 +267,14 @@ After stopping the verified stale process, restart Hermes GPT and confirm exactl
 | Job returns runner disabled | `HERMES_GPT_ENABLE_CODEX_RUNNER=1` is missing in the running process | Set it in the actual launch environment and restart Hermes GPT. |
 | Job previews but does not execute | Server/call is still dry-run | For an approved real job, use direct mode plus `confirm=true` and `dry_run=false`. |
 | New server cannot bind port 4750 | Stale server still owns the listener | Identify and verify the listener PID before ending that specific process. |
+| Secure tunnel is not visible in ChatGPT | Missing workspace association, Tunnels Use, or developer-mode access | Follow the association/permission checks in [OpenAI Secure MCP Tunnel](openai-secure-mcp-tunnel.md). |
 | ChatGPT shows old tools/gates | Stale server or cached connector schema | Verify the listener, restart Hermes GPT, then reconnect/recreate the connector. |
 
 ## Security checklist
 
 - Keep Hermes GPT on `127.0.0.1`.
-- Require a private/authenticated remote boundary.
+- Prefer Secure MCP Tunnel for supported OpenAI private access when available.
+- Require a deliberate private/authenticated boundary for every other remote path.
 - Restrict `HERMES_GPT_OPERATOR_ALLOWED_PATHS` to specific workspaces.
 - Leave `HERMES_GPT_ALLOW_CODEX_WRITE` unset until a write job is deliberately required.
 - Keep Owner Mode off for always-on access.
@@ -272,6 +285,7 @@ After stopping the verified stale process, restart Hermes GPT and confirm exactl
 ## Related docs
 
 - [Documentation map](README.md)
+- [OpenAI Secure MCP Tunnel](openai-secure-mcp-tunnel.md)
 - [Hermes GPT and Codex](codex.md)
 - [Operator Mode](operator-mode.md)
 - [Updating](updating.md)
