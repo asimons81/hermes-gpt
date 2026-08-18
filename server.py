@@ -26,6 +26,7 @@ import operator_cron as op_cron
 import operator_skills as op_skills
 import operator_config as op_config
 import operator_workspace as op_workspace
+import operator_export as op_export
 import operator_diagnostics as op_diagnostics
 import operator_codex as op_codex
 import operator_fleet as op_fleet
@@ -643,7 +644,7 @@ def clean_error(tool_name: str, exc: Exception) -> RuntimeError:
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ToolAnnotations
 
 import_hermes()
 
@@ -1366,6 +1367,7 @@ def hermes_operator_status() -> str:
             "hermes_env_copy_nonsecret",
             "hermes_gateway_restart",
             "hermes_workspace_read",
+            "hermes_export_file",
             "hermes_workspace_patch",
             "hermes_workspace_write_file",
             "hermes_workspace_run_test",
@@ -1819,6 +1821,10 @@ def hermes_gateway_restart(profile: str = "default", dry_run: bool = True) -> st
 
 def hermes_workspace_read(path: str, offset: int = 1, limit: int = 500) -> str:
     return op_workspace.hermes_workspace_read(path=path, offset=offset, limit=limit)
+
+
+def hermes_export_file(path: str) -> CallToolResult:
+    return op_export.hermes_export_file(path=path)
 
 
 def hermes_workspace_patch(
@@ -2497,6 +2503,14 @@ def register_tools(server: FastMCP) -> None:
     server.add_tool(hermes_gateway_status, meta=tool_meta())
     server.add_tool(hermes_gateway_restart, meta=tool_meta())
     server.add_tool(hermes_workspace_read, meta=tool_meta())
+    server.add_tool(
+        hermes_export_file,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Export an authorized local file as an MCP embedded resource",
+            readOnlyHint=True,
+        ),
+    )
     server.add_tool(hermes_workspace_patch, meta=tool_meta())
     server.add_tool(hermes_workspace_write_file, meta=tool_meta())
     server.add_tool(hermes_workspace_run_test, meta=tool_meta())
