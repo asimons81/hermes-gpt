@@ -62,6 +62,13 @@ def _redact(value: Any) -> Any:
     return value
 
 
+def _normalize_execution_mode(execution_mode: str) -> str | dict[str, Any]:
+    mode = str(execution_mode or "normal").strip().lower()
+    if mode not in {"normal", "nolo"}:
+        return _safe_error("INVALID_EXECUTION_MODE", "execution_mode must be normal or nolo.", "Choose normal or nolo.")
+    return mode
+
+
 def _save(meta: dict[str, Any], hermes_root: Path | None = None) -> None:
     path, _ = _paths(meta["job_id"], hermes_root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,24 +88,27 @@ def _load(job_id: str, hermes_root: Path | None = None) -> dict[str, Any] | None
         return None
 
 
-def _policy(workdir: str, sandbox: str, *, confirm: bool, dry_run: bool) -> tuple[op.OperatorPolicy, Path] | dict[str, Any]:
+def _policy(workdir: str, sandbox: str, execution_mode: str = "normal", *, confirm: bool, dry_run: bool) -> tuple[op.OperatorPolicy, Path, str] | dict[str, Any]:
     policy = op.OperatorPolicy()
     try:
         policy.require_level("workspace")
         policy.require_workspace_path(workdir)
     except (PermissionError, ValueError) as exc:
         return _safe_error("POLICY_REFUSED", str(exc), "Enable Operator workspace level and approve the work directory.")
+    mode = _normalize_execution_mode(execution_mode)
+    if isinstance(mode, dict):
+        return mode
     if sandbox not in {"read-only", "workspace-write"}:
         return _safe_error("INVALID_SANDBOX", "sandbox must be read-only or workspace-write.", "Choose a supported Codex sandbox.")
     if not op.env_truthy(ENABLE_CODEX_RUNNER_ENV):
         return _safe_error("RUNNER_DISABLED", "Codex runner execution is disabled.", f"Set {ENABLE_CODEX_RUNNER_ENV}=1.")
     if sandbox == "workspace-write" and not op.env_truthy(ALLOW_CODEX_WRITE_ENV):
-        return _safe_error("WRITE_DISABLED", "Codex workspace-write execution is disabled.", f"Set {ALLOW_CODEX_WRITE_ENV}=1 or use read-only.")
+        return _safe_error("WRITE_DISABLED", "Codex write-capable execution is disabled.", f"Set {ALLOW_CODEX_WRITE_ENV}=1 or use read-only mode.")
     if not dry_run and (not confirm or policy.apply_mode != "direct"):
         return _safe_error("DIRECT_CONFIRMATION_REQUIRED", "Execution requires direct apply mode and confirm=true.", "Review the plan, set direct mode, and retry with confirm=true and dry_run=false.")
     if policy.level == "owner" and not policy.owner_mode_ready:
         return _safe_error("OWNER_ACK_REQUIRED", "Configured Owner Mode is not acknowledged.", f"Set {op.OWNER_ACK_ENV} to the documented acknowledgement.")
-    return policy, Path(workdir).expanduser().resolve()
+    return policy, Path(workdir).expanduser().resolve(), mode
 
 
 def _is_protected_windows_apps(path: Path) -> bool:
@@ -185,14 +195,19 @@ def resolve_codex_exe() -> dict[str, Any]:
     return {"path": None, "source": "none", "version": None, "reason": reason, "skipped": skipped}
 
 
-def _argv(*, workdir: Path, sandbox: str, prompt: str, model: str | None, ignore_user_config: bool,
+def _argv(*, workdir: Path, sandbox: str, execution_mode: str, prompt: str, model: str | None, ignore_user_config: bool,
           review: bool = False, review_target: str = "uncommitted") -> list[str] | dict[str, Any]:
     resolution = resolve_codex_exe()
     if not resolution["path"]:
         return _safe_error("CODEX_EXE_UNAVAILABLE", resolution["reason"] or "No launchable Codex CLI executable was found.",
                            f"Install the standalone Codex CLI, or set {CODEX_EXE_ENV} to an absolute path outside {WINDOWS_APPS_MARKER}.")
     codex = resolution["path"]
-    argv = [codex, "exec"]
+    argv = [codex]
+    if execution_mode == "nolo" and not review:
+        # Approval policy is a top-level Codex option in 0.147.0; `codex exec`
+        # does not accept -a/--ask-for-approval in its subcommand arguments.
+        argv += ["-a", "never"]
+    argv.append("exec")
     if review:
         argv += ["review", "--json", "--ephemeral"]
         if review_target == "uncommitted":
@@ -243,23 +258,23 @@ def hermes_codex_status(hermes_root: Path | None = None) -> dict[str, Any]:
 
 def hermes_codex_plan(prompt: str, workdir: str, sandbox: str = "read-only", model: str | None = None,
                       ignore_user_config: bool = False, timeout: int = 900, review: bool = False,
-                      review_target: str = "uncommitted") -> dict[str, Any]:
-    return _start(prompt, workdir, sandbox, model, ignore_user_config, timeout, False, True, review, review_target, None)
+                      review_target: str = "uncommitted", execution_mode: str = "normal") -> dict[str, Any]:
+    return _start(prompt, workdir, sandbox, model, ignore_user_config, timeout, False, True, execution_mode, review, review_target, None)
 
 
 def _start(prompt: str, workdir: str, sandbox: str, model: str | None, ignore_user_config: bool, timeout: int,
-           confirm: bool, dry_run: bool, review: bool, review_target: str, hermes_root: Path | None) -> dict[str, Any]:
-    checked = _policy(workdir, sandbox, confirm=confirm, dry_run=dry_run)
+           confirm: bool, dry_run: bool, execution_mode: str, review: bool, review_target: str, hermes_root: Path | None) -> dict[str, Any]:
+    checked = _policy(workdir, sandbox, execution_mode, confirm=confirm, dry_run=dry_run)
     if isinstance(checked, dict):
         return checked
-    _, resolved = checked
+    _, resolved, execution_mode = checked
     timeout = max(MIN_TIMEOUT, min(int(timeout), MAX_TIMEOUT))
-    built = _argv(workdir=resolved, sandbox=sandbox, prompt=prompt, model=model, ignore_user_config=ignore_user_config, review=review, review_target=review_target)
+    built = _argv(workdir=resolved, sandbox=sandbox, execution_mode=execution_mode, prompt=prompt, model=model, ignore_user_config=ignore_user_config, review=review, review_target=review_target)
     if isinstance(built, dict):
         return built
     sanitized_argv = ["<prompt>" if item == prompt and prompt else item for item in built]
     plan = {"success": True, "dry_run": dry_run, "mode": "review" if review else "task", "workdir": str(resolved),
-            "sandbox": sandbox, "model": model, "timeout": timeout, "argv": sanitized_argv,
+            "sandbox": sandbox, "execution_mode": execution_mode, "model": model, "timeout": timeout, "argv": sanitized_argv,
             "prompt_len": len(prompt), "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()}
     if dry_run:
         return _redact(plan)
@@ -284,8 +299,9 @@ def _start(prompt: str, workdir: str, sandbox: str, model: str | None, ignore_us
     threading.Thread(target=_watch, args=(job_id, proc, out_handle, timeout, hermes_root), daemon=True).start()
     op.audit_record(tool="hermes_codex_review_start" if review else "hermes_codex_start", level=checked[0].level,
                     apply_mode=checked[0].apply_mode, dry_run=False, success=True, changed=True, job_id=job_id,
-                    path=str(resolved), prompt=prompt, extra={"mode": meta["mode"], "sandbox": sandbox, "model": model or ""})
-    return _redact({"success": True, "dry_run": False, "job_id": job_id, "status": "running"})
+                    path=str(resolved), prompt=prompt, extra={"mode": meta["mode"], "sandbox": sandbox,
+                    "execution_mode": execution_mode, "model": model or ""})
+    return _redact({"success": True, "dry_run": False, "job_id": job_id, "status": "running", "execution_mode": execution_mode})
 
 
 def _watch(job_id: str, proc: subprocess.Popen[str], handle: Any, timeout: int, hermes_root: Path | None) -> None:
@@ -306,14 +322,14 @@ def _watch(job_id: str, proc: subprocess.Popen[str], handle: Any, timeout: int, 
 
 def hermes_codex_start(prompt: str, workdir: str, sandbox: str = "read-only", model: str | None = None,
                        ignore_user_config: bool = False, timeout: int = 900, confirm: bool = False,
-                       dry_run: bool = True, hermes_root: Path | None = None) -> dict[str, Any]:
-    return _start(prompt, workdir, sandbox, model, ignore_user_config, timeout, confirm, dry_run, False, "uncommitted", hermes_root)
+                       dry_run: bool = True, hermes_root: Path | None = None, execution_mode: str = "normal") -> dict[str, Any]:
+    return _start(prompt, workdir, sandbox, model, ignore_user_config, timeout, confirm, dry_run, execution_mode, False, "uncommitted", hermes_root)
 
 
 def hermes_codex_review_start(workdir: str, target: str = "uncommitted", instructions: str = "", model: str | None = None,
                               ignore_user_config: bool = False, timeout: int = 900, confirm: bool = False,
                               dry_run: bool = True, hermes_root: Path | None = None) -> dict[str, Any]:
-    return _start(instructions, workdir, "read-only", model, ignore_user_config, timeout, confirm, dry_run, True, target, hermes_root)
+    return _start(instructions, workdir, "read-only", model, ignore_user_config, timeout, confirm, dry_run, "normal", True, target, hermes_root)
 
 
 def hermes_codex_jobs(limit: int = 50, hermes_root: Path | None = None) -> dict[str, Any]:
@@ -361,7 +377,8 @@ def hermes_codex_job_result(job_id: str, max_chars: int = MAX_RESULT_CHARS, herm
     truncated = len(latest) > cap
     latest = latest[:cap]
     return _redact({"success": True, "status": meta.get("status"), "return_code": meta.get("return_code"),
-                                "thread_id": thread_id, "usage": usage, "response": latest, "truncated": truncated})
+                                "execution_mode": meta.get("execution_mode", "normal"), "thread_id": thread_id,
+                                "usage": usage, "response": latest, "truncated": truncated})
 
 
 def _terminate(proc: subprocess.Popen[str]) -> None:
@@ -410,7 +427,8 @@ def hermes_codex_cancel(job_id: str, confirm: bool = False, dry_run: bool = True
     meta = _load(job_id, hermes_root)
     if not meta:
         return _safe_error("JOB_NOT_FOUND", "Codex job was not found.", "Check the job ID with hermes_codex_jobs.")
-    checked = _policy(str(meta.get("workdir", "")), str(meta.get("sandbox", "read-only")), confirm=confirm, dry_run=dry_run)
+    checked = _policy(str(meta.get("workdir", "")), str(meta.get("sandbox", "read-only")),
+                      str(meta.get("execution_mode", "normal")), confirm=confirm, dry_run=dry_run)
     if isinstance(checked, dict):
         return checked
     if dry_run:

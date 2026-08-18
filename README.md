@@ -95,12 +95,23 @@ Optional legacy feature gates remain available for compatibility:
 | --- | --- | --- |
 | File write / patch | `HERMES_GPT_ENABLE_WRITE=1` | hidden |
 | Memory mutation | `HERMES_GPT_ENABLE_MEMORY_WRITE=1` | disabled |
-| Session search | `HERMES_GPT_ENABLE_SESSION_SEARCH=1` | hidden |
+| Session search/history | `HERMES_GPT_ENABLE_SESSION_SEARCH=1` | hidden |
+| Session control | `HERMES_GPT_ENABLE_SESSION_CONTROL=1` | hidden |
 | Terminal execution | `HERMES_GPT_ENABLE_TERMINAL=1` | hidden |
 | Vision | `HERMES_GPT_ENABLE_VISION=1` | hidden |
 | Web search / extraction | `HERMES_GPT_ENABLE_WEB=1` | hidden |
 
 For new automation and maintenance work, prefer Operator Mode instead of enabling broad legacy write gates.
+
+## Session history and control
+
+Session history and session control are independent, opt-in surfaces.
+
+With `HERMES_GPT_ENABLE_SESSION_SEARCH=1`, Hermes GPT exposes four bounded read-only history tools: `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, and `hermes_session_export`. The default transcript roles are `user` and `assistant`; `system`, `tool`, and `function` content additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`. Export stays in memory, is size/message bounded, creates no files or paths, and lineage export fails closed.
+
+With `HERMES_GPT_ENABLE_SESSION_CONTROL=1`, Hermes GPT exposes `hermes_session_continue`, `hermes_session_send`, `hermes_session_job_status`, and `hermes_session_job_result`. Control jobs are bounded, use fixed argv with `shell=False`, allow only one active job per session, persist prompt length/hash rather than raw prompts, and return bounded redacted results. A server restart fails closed by marking unowned running jobs orphaned rather than signaling a persisted PID.
+
+See [session history](docs/session-history.md) and [session control](docs/session-control.md). Treat transcript data as private local data.
 
 ## Run modes
 
@@ -224,6 +235,8 @@ Hermes GPT supports two different Codex relationships. Keep them conceptually se
 2. **Codex CLI as delegated worker/reviewer** - a trusted Hermes GPT client can start bounded async Codex jobs through `hermes_codex_*`. This requires Operator `workspace` level, an approved work directory, `HERMES_GPT_ENABLE_CODEX_RUNNER=1`, direct mode for execution, `confirm=true`, and `dry_run=false`.
 
 `HERMES_GPT_ALLOW_CODEX_WRITE=1` is required only for `workspace-write` jobs.
+
+Delegated Codex jobs default to `execution_mode="normal"`. Trusted clients may opt into job-scoped `execution_mode="nolo"`, which adds Codex's `-a never` approval policy while retaining the requested `read-only` or `workspace-write` sandbox. NOLO does not enable `danger-full-access`, does not bypass Hermes workspace/confirmation gates, and does not create persistent global approval-bypass state.
 
 ### Tool-name note
 

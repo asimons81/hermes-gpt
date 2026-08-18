@@ -81,6 +81,10 @@ The curated Codex MCP server registers these names:
 
 The `operator` toolset adds curated namespaced aliases for Operator diagnostics, audit, cron, skills, non-secret config/environment, and gateway operations. It intentionally excludes broad workspace, raw git/command, and Owner file-write surfaces.
 
+### Optional session-history integration
+
+Session history is intentionally separate from the curated `core` and `operator` toolsets. The separately installed **Hermes GPT Session History** integration exposes native read-only `hermes_session_list`, `hermes_session_search`, `hermes_session_read`, and `hermes_session_export` tools to Codex while the backing Hermes GPT server still requires `HERMES_GPT_ENABLE_SESSION_SEARCH=1`. These tools do not create files. Internal `system`, `tool`, and `function` content additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`; keep those roles and lineage disabled during routine inspection. See [session history](session-history.md).
+
 ### Tool-name namespace warning
 
 The curated Codex MCP server is not identical to the main Hermes GPT server.
@@ -157,6 +161,8 @@ HERMES_GPT_ALLOW_CODEX_WRITE=1
 
 Read-only jobs do not need the write gate.
 
+Delegated jobs default to `execution_mode="normal"`. An explicit job-scoped `execution_mode="nolo"` adds Codex's top-level `-a never` approval policy while preserving the requested `read-only` or `workspace-write` sandbox. `workspace-write` still requires `HERMES_GPT_ALLOW_CODEX_WRITE=1`, and Hermes still enforces the approved work directory, direct mode, `confirm=true`, and `dry_run=false`. NOLO expires with the job and is not a persistent global bypass.
+
 **The runner path does not require `HERMES_GPT_ENABLE_CODEX` or `HERMES_GPT_ENABLE_MCP`.** Those two gates belong to Workflow A, where Codex itself is the MCP client.
 
 ### Codex executable resolution
@@ -202,7 +208,7 @@ Delegated jobs use:
 - prompt hashes rather than raw prompt persistence in Operator metadata/audit;
 - approved work directories only.
 
-Danger-full-access, approval bypasses, arbitrary command injection, arbitrary executable arguments, and arbitrary extra-directory grants are unsupported.
+`danger-full-access`, sandbox bypasses, arbitrary command injection, arbitrary executable arguments, and arbitrary extra-directory grants are unsupported. The supported job-scoped `nolo` mode changes Codex's approval policy only; it does not disable the selected sandbox or Hermes policy checks.
 
 Codex review jobs are also bounded. In Swarm Orchestration, Codex can be a reviewer but never an implementation owner.
 

@@ -280,9 +280,9 @@
 
         <article class="bento-card">
           <span class="card-num">03</span>
-          <h3>SQLite Session Indexing</h3>
+          <h3>Private Session History</h3>
           <p>
-            Connects directly to your local Hermes state database to search past chats using SQLite FTS5 index logic, gated behind security switches.
+            The four read-only history tools originally available only to ChatGPT now have native Codex parity through the Hermes GPT Session History integration. Lists, searches, reads, and in-memory Markdown/JSON exports stay bounded, while internal roles remain filtered by default.
           </p>
         </article>
 
@@ -409,6 +409,16 @@ python server.py</code></pre>
       </div>
 
       <div class="release-list">
+        <div class="release-item">
+          <div class="release-meta">
+            <span class="rel-version">Unreleased</span>
+            <span class="rel-date">2026-08-17</span>
+          </div>
+          <div class="release-content">
+            <h4>Bounded Session History and Control</h4>
+            <p>Added native Codex parity for the four gated, read-only session-history tools previously available only to ChatGPT: list, search, safe message reads, and in-memory JSON/Markdown export. Separately gated asynchronous session continue/send jobs remain bounded and fail closed.</p>
+          </div>
+        </div>
         <div class="release-item">
           <div class="release-meta">
             <span class="rel-version">v0.7.0</span>

@@ -6,10 +6,14 @@ import operator_codex as oc
 
 
 def _fake_codex(path: Path, version: str = "0.50.0", *, exit_code: int = 0) -> Path:
-    """Create an executable fake `codex` script that answers --version."""
+    """Create a platform-appropriate fake `codex` command that answers --version."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"#!/bin/sh\necho 'codex {version}'\nexit {exit_code}\n", encoding="utf-8")
-    path.chmod(0o755)
+    if os.name == "nt":
+        path = path.with_suffix(".cmd")
+        path.write_text(f"@echo off\r\necho codex {version}\r\nexit /b {exit_code}\r\n", encoding="utf-8")
+    else:
+        path.write_text(f"#!/bin/sh\necho 'codex {version}'\nexit {exit_code}\n", encoding="utf-8")
+        path.chmod(0o755)
     return path
 
 
@@ -33,13 +37,93 @@ def test_status_and_dry_run_plan(monkeypatch, tmp_path):
     assert plan["success"] is True and plan["dry_run"] is True
     assert "inspect tests" not in json.dumps(plan)
     assert plan["argv"][-1] == "<prompt>"
+    assert plan["execution_mode"] == "normal"
 
 
 def test_gates_and_fixed_arguments(monkeypatch, tmp_path):
     enable(monkeypatch, tmp_path)
+    exe = _fake_codex(tmp_path / "bin" / "codex")
+    monkeypatch.setenv(oc.CODEX_EXE_ENV, str(exe))
     assert oc.hermes_codex_start("change", str(tmp_path), sandbox="workspace-write")["code"] == "WRITE_DISABLED"
+    assert oc.hermes_codex_plan("change", str(tmp_path), sandbox="workspace-write", execution_mode="nolo")["code"] == "WRITE_DISABLED"
+    nolo_read_only = oc.hermes_codex_plan("inspect", str(tmp_path), execution_mode="nolo")
+    assert nolo_read_only["success"] is True
+    assert nolo_read_only["argv"][nolo_read_only["argv"].index("-a") + 1] == "never"
     assert oc.hermes_codex_plan("x", str(tmp_path), sandbox="danger-full-access")["code"] == "INVALID_SANDBOX"
     assert oc.hermes_codex_plan("x", str(tmp_path.parent / "outside"))["code"] == "POLICY_REFUSED"
+
+
+def test_execution_modes_and_nolo_policy(monkeypatch, tmp_path):
+    enable(monkeypatch, tmp_path, write=True)
+    exe = _fake_codex(tmp_path / "bin" / "codex")
+    monkeypatch.setenv(oc.CODEX_EXE_ENV, str(exe))
+
+    normal = oc.hermes_codex_plan("inspect", str(tmp_path))
+    assert normal["execution_mode"] == "normal"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in normal["argv"]
+    assert normal["argv"][normal["argv"].index("-s") + 1] == "read-only"
+
+    nolo = oc.hermes_codex_plan("inspect", str(tmp_path), execution_mode="NOLO")
+    assert nolo["execution_mode"] == "nolo"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in nolo["argv"]
+    assert nolo["argv"].index("-a") < nolo["argv"].index("exec")
+    assert nolo["argv"][nolo["argv"].index("-s") + 1] == "read-only"
+    assert nolo["argv"][nolo["argv"].index("-a") + 1] == "never"
+
+    nolo_write = oc.hermes_codex_plan("change", str(tmp_path), sandbox="workspace-write", execution_mode="nolo")
+    assert nolo_write["execution_mode"] == "nolo"
+    assert nolo_write["argv"][nolo_write["argv"].index("-s") + 1] == "workspace-write"
+    assert nolo_write["argv"][nolo_write["argv"].index("-a") + 1] == "never"
+
+    assert oc.hermes_codex_plan("x", str(tmp_path), execution_mode="anything")["code"] == "INVALID_EXECUTION_MODE"
+    assert oc.hermes_codex_plan("x", str(tmp_path.parent / "outside"), execution_mode="nolo")["code"] == "POLICY_REFUSED"
+    assert oc.hermes_codex_start("x", str(tmp_path), execution_mode="nolo", confirm=False, dry_run=False)["code"] == "DIRECT_CONFIRMATION_REQUIRED"
+
+
+def test_nolo_job_metadata_and_audit(monkeypatch, tmp_path):
+    enable(monkeypatch, tmp_path, write=True)
+    exe = _fake_codex(tmp_path / "bin" / "codex")
+    monkeypatch.setenv(oc.CODEX_EXE_ENV, str(exe))
+    monkeypatch.setattr(oc, "resolve_codex_exe", lambda: {
+        "path": str(exe.resolve()),
+        "source": "env",
+        "version": "codex 0.50.0",
+        "reason": None,
+        "skipped": [],
+    })
+    captured = {}
+
+    class FakeProc:
+        pid = 12345
+        returncode = None
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def poll(self):
+            return self.returncode
+
+    class ImmediateThread:
+        def __init__(self, target, args, daemon=False):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(oc.subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    monkeypatch.setattr(oc.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(oc.op, "audit_record", lambda **kwargs: captured.update(kwargs) or kwargs)
+
+    started = oc.hermes_codex_start("harmless", str(tmp_path), execution_mode="nolo", confirm=True, dry_run=False, hermes_root=tmp_path)
+    assert started["success"] is True
+    assert started["execution_mode"] == "nolo"
+    meta = oc._load(started["job_id"], tmp_path)
+    assert meta is not None and meta["execution_mode"] == "nolo"
+    assert captured["extra"]["execution_mode"] == "nolo"
+    result = oc.hermes_codex_job_result(started["job_id"], hermes_root=tmp_path)
+    assert result["execution_mode"] == "nolo"
 
 
 def test_result_redacts_and_bounds(monkeypatch, tmp_path):

@@ -41,6 +41,10 @@ Flight Deck: durable, interactive, verifiable autonomy.
   Agent source tree is absent (optional-import degradation); profile-scoping
   tests skip only when `hermes_constants` is unavailable.
 
+- Added explicit per-job Codex `execution_mode` with `normal` default and opt-in `nolo`. NOLO now uses Codex 0.147.0's `-a never` approval policy while retaining the requested read-only/workspace-write sandbox, Hermes approved-workspace, direct-mode, confirmation, audit, timeout, and redaction controls. The write gate is required only for `workspace-write`; NOLO expires with the job and does not create persistent global approval-bypass state.
+- Added Codex parity for the four session-history capabilities that were previously available only through the full ChatGPT connector, delivered through the separately installed Hermes GPT Session History integration and verified with direct native-tool calls.
+- Added a dedicated session-history guide covering client availability, privacy-preserving arguments, bounded Markdown export, optional read-only working-model inspection, and a no-write Codex smoke-test procedure.
+- Added separately gated, bounded asynchronous Hermes session continue/send jobs with status and redacted result tools. Session IDs resolve through the existing read-only adapter; prompts are omitted from metadata; subprocesses use fixed arguments without a shell; timeouts and output are capped; restart reconciliation fails closed.
 ## 0.6.0 - 2026-08-13
 
 - Added the v0.6 Mission Control, Work Contracts, and Swarm Orchestration surfaces with bounded, audited, fail-closed operator controls.
@@ -57,13 +61,16 @@ Flight Deck: durable, interactive, verifiable autonomy.
   or unlaunchable PATH candidates. `hermes_codex_status` and `codex doctor`
   report `codex_path`/`codex_source` so availability is never claimed for an
   executable that cannot launch.
-
 - Upgraded A2A fleet control with canonical structured work orders,
   server-controlled profile authority, explicit authorization classes, safe
   completion bundles, hardened bounded parsing, and read-only authority drift
   validation. Existing fleet tools retain registry-only routing, Operator Mode,
   confirmation, dry-run, hashing, redaction, secret-path, and end-of-options
   controls.
+- Added bounded read-only session-history pagination that advances by database rows examined while filtering unsafe roles before client exposure.
+- Added the gated `hermes_session_list`, `hermes_session_read`, and in-memory `hermes_session_export` tools alongside the existing plain-text `hermes_session_search` tool.
+- Added JSON and Markdown export with `MAX_EXPORT_MESSAGES` and `MAX_RESPONSE_BYTES` limits; file creation, file paths, raw exports, and lineage export remain unavailable.
+- Added explicit guidance for the `HERMES_GPT_ENABLE_SESSION_SEARCH=1` and `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1` gates, FTS availability limitations, default role filtering, and transcript privacy.
 
 ## 0.5.0 - 2026-07-10
 

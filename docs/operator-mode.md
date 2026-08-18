@@ -307,6 +307,16 @@ done stages (a re-advance returns current state as a no-op).
 | `hermes_oauth_revoke` | owner | direct + confirm (pending legal) | every call | n/a |
 | `hermes_swarm_reconcile` | workspace/owner | dry-run-first + apply | every call | n/a |
 
+## Session history and session control
+
+These surfaces are independent from the Operator level hierarchy and remain hidden unless their explicit legacy gates are enabled.
+
+`HERMES_GPT_ENABLE_SESSION_SEARCH=1` exposes bounded read-only `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, and `hermes_session_export`. Default transcript roles are `user` and `assistant`; internal roles additionally require `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`. Export is in-memory and bounded, creates no files or paths, and lineage export fails closed.
+
+`HERMES_GPT_ENABLE_SESSION_CONTROL=1` exposes `hermes_session_continue`, `hermes_session_send`, `hermes_session_job_status`, and `hermes_session_job_result`. Session-control jobs use a fixed `hermes --resume <id> --oneshot <prompt>` argv with `shell=False`, bound prompt/timeout/result sizes, permit one active job per session, and persist prompt length/hash rather than raw prompt text. Restart reconciliation marks unowned running jobs orphaned rather than signaling a process from a persisted PID. The configured Hermes provider/model is used and may consume quota.
+
+See [session history](session-history.md) and [session control](session-control.md). Treat transcript content as private local data.
+
 ## Fleet routing through the local A2A registry
 
 Fleet routing uses only peers already present in the authenticated local Hermes A2A registry.
@@ -362,6 +372,8 @@ Real execution requires:
 - `dry_run=false`.
 
 `HERMES_GPT_ALLOW_CODEX_WRITE=1` is required only for `workspace-write`. Read-only Codex jobs do not need it.
+
+Jobs default to `execution_mode="normal"`. An explicit per-job `execution_mode="nolo"` adds Codex's `-a never` approval policy while retaining the requested `read-only` or `workspace-write` sandbox. NOLO therefore removes Codex approval interruptions without granting `danger-full-access` or bypassing Hermes path, direct-mode, confirmation, or write gates. It ends with the job and creates no persistent global approval-bypass state.
 
 `HERMES_GPT_CODEX_EXE` can pin an absolute standalone Codex CLI executable. Hermes GPT rejects protected WindowsApps shims and executables that fail a version probe.
 

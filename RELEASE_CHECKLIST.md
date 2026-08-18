@@ -22,6 +22,8 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - DAG validation, scheduler caps, contract dispatch, observed completion, bounded rework, worktree plans, Codex review posture, approval gate, mutation gates, audit, and redaction must be green.
 - `python -m pytest test_operator_codex.py`
   - Codex executable resolution, runner gates, bounded argv, redaction, and retention behavior must be green.
+- `python -m pytest test_operator_session.py`
+  - Session-control gating, prompt non-persistence, fixed argv, concurrency bounds, timeout/result bounds, redaction, and restart orphan reconciliation must be green.
 - Run the Windows/Linux Python 3.10-3.12 CI matrix.
 
 ## 3. Release doctor
@@ -40,6 +42,8 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - `docs/README.md`
   - `docs/operator-mode.md`
   - `docs/codex.md`
+  - `docs/session-history.md`
+  - `docs/session-control.md`
   - `docs/windows-chatgpt-codex.md`
   - `docs/updating.md`
   - `docs/retention-policy.md`
@@ -49,7 +53,12 @@ Use this checklist before publishing a Hermes GPT release artifact.
 
 ## 5. Security invariants
 
-- Confirm default tools exclude write, patch, terminal, and session search unless their explicit gates are enabled.
+- Confirm default tools exclude write, patch, terminal, session search/history, and session control unless their explicit gates are enabled.
+- With `HERMES_GPT_ENABLE_SESSION_SEARCH=1`, confirm exactly `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, and `hermes_session_export` are exposed for session history.
+- Confirm session history defaults to `user`/`assistant`; internal roles require `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`.
+- Confirm session export stays in memory, enforces message/response bounds, creates no files or paths, and fails closed for lineage.
+- Confirm unavailable session FTS/search reports an unavailable limitation rather than falsely reporting no matches.
+- Confirm session-control jobs use fixed argv with `shell=False`, persist no raw prompt, enforce concurrency/timeout/result bounds, redact results, and fail closed on restart reconciliation.
 - Confirm Mission Control never returns raw messages, memory bodies, transcripts, request dumps, credentials, tokens, or profile-secret bodies.
 - Confirm Mission Control allowlist semantics match implementation:
   - unset = all read-only Mission surfaces;
@@ -97,6 +106,8 @@ Before publication, inspect at minimum:
 - `docs/README.md`
 - `docs/operator-mode.md`
 - `docs/codex.md`
+- `docs/session-history.md`
+- `docs/session-control.md`
 - `docs/windows-chatgpt-codex.md`
 - `docs/updating.md`
 - `docs/retention-policy.md`
