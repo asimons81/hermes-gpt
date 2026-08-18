@@ -81,6 +81,8 @@ py-modules = [
   "docs/oauth.md",
   "docs/operator-mode.md",
   "docs/mcp-compatibility.md",
+  "docs/openai-secure-mcp-tunnel.md",
+  "docs/cloudflare-tunnel.md",
   "docs/release-notes-v0.2.0.md",
   "docs/release-notes-v0.3.0.md",
   "docs/release-notes-v0.4.0.md",
@@ -100,6 +102,7 @@ py-modules = [
 ]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",
+  "examples/start-openai-secure-mcp-tunnel.example.ps1",
   "examples/status-hermes-gpt.example.ps1",
   "examples/install-task.example.ps1",
   "examples/fleet-authority.example.json",

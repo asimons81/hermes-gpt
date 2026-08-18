@@ -49,6 +49,7 @@ See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention poli
 | --- | --- |
 | Understand the repository and current docs | [Documentation map](docs/README.md) |
 | Run Hermes GPT locally | [Local quickstart](#local-quickstart) |
+| Connect ChatGPT/OpenAI privately without publishing Hermes GPT | [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md) |
 | Authenticate a remote MCP connector | [OAuth and bearer authentication](docs/oauth.md) |
 | Verify the MCP protocol surface | [MCP compatibility manifest](docs/mcp-compatibility.md) |
 | Use Codex as an MCP client | [Codex guide](docs/codex.md) |
@@ -141,14 +142,18 @@ Endpoint:
 http://127.0.0.1:7677/mcp
 ```
 
-Keep the server on loopback. A remote client such as ChatGPT cannot use your machine's `127.0.0.1` directly, so remote access requires a deliberately configured private/authenticated boundary. Do not publish an unauthenticated Operator endpoint to the internet.
+Keep the server on loopback. A remote client such as ChatGPT cannot use your machine's `127.0.0.1` directly.
+
+For supported OpenAI products, prefer [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md) when it is available for the target account or workspace. It keeps Hermes GPT on loopback and uses an outbound-only `tunnel-client` connection instead of publishing a public Hermes GPT hostname. Secure MCP Tunnel alone does not require a public `HERMES_GPT_ALLOWED_HOSTS` entry.
+
+For other remote clients, use a deliberately configured private/authenticated HTTPS boundary. The existing [Cloudflare Tunnel deployment](docs/cloudflare-tunnel.md) is a public-proxy path with a different Host/authentication boundary. Do not publish an unauthenticated Operator endpoint to the internet.
 
 Hermes GPT can enforce either a strong static bearer token or a built-in,
 single-confidential-client OAuth authorization-code flow with rotating refresh
-tokens. OAuth credentials are memory-backed and fail closed on missing client
-authentication, unsupported scope/resource, expiry, or replay. See
-[OAuth and bearer authentication](docs/oauth.md) before enabling the `remote`
-profile; authentication does not activate Operator mutation or Owner Mode.
+tokens. With Secure MCP Tunnel, static bearer authentication can be used as an
+optional local-hop defense in depth. Built-in OAuth requires deliberate
+browser-facing authorization-server reachability because the authorization
+server itself is not automatically tunneled. See [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md) and [OAuth and bearer authentication](docs/oauth.md); authentication does not activate Operator mutation or Owner Mode.
 
 ## Operator Mode
 
@@ -290,6 +295,7 @@ Git checkout updates require a clean checkout on the default branch and use fast
 Current operational documentation:
 
 - [Documentation map and source-of-truth rules](docs/README.md)
+- [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md)
 - [OAuth and bearer authentication](docs/oauth.md)
 - [Operator Mode](docs/operator-mode.md)
 - [Codex integration](docs/codex.md)

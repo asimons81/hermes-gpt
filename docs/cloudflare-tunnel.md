@@ -1,5 +1,7 @@
 # Cloudflare Tunnel deployment
 
+This guide covers the **public HTTPS proxy** deployment path. If the only remote client is a supported OpenAI product and you want Hermes GPT to remain strictly loopback/private with no public inbound hostname, prefer [OpenAI Secure MCP Tunnel](openai-secure-mcp-tunnel.md) when it is available for the target account or workspace.
+
 Hermes GPT keeps MCP DNS-rebinding protection enabled. When exposing the HTTP server through a locally managed Cloudflare Tunnel, configure both the proxy and the MCP server so legitimate public requests cannot be rejected with `421 Invalid Host header`.
 
 ## Cloudflare ingress
@@ -29,6 +31,8 @@ HERMES_GPT_ALLOWED_HOSTS=gpt.example.com
 ```
 
 Multiple hosts may be comma-separated. This extends the existing MCP transport-security allowlist; it does not disable DNS-rebinding protection. Loopback hosts remain allowed automatically.
+
+This public-host allowlist is specific to public proxy traffic. Do not add a public Host entry merely because you use OpenAI Secure MCP Tunnel; the Secure MCP Tunnel path targets the loopback MCP URL locally.
 
 For a systemd user service, add the environment variable to the Hermes GPT server unit, then run:
 

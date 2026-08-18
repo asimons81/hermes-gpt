@@ -42,6 +42,8 @@ fails the suite.
 | Streamable HTTP | `/mcp` | Enabled with `--http`; transport security host/origin allowlist |
 | Legacy SSE | `/sse` (plus `/messages/`) | Retained for older clients |
 
+OpenAI Secure MCP Tunnel is an external private bridge, not a fourth Hermes GPT server transport. For the recommended Hermes setup, `tunnel-client` reaches `http://127.0.0.1:4750/mcp` locally over the existing Streamable HTTP transport and carries those MCP requests through an outbound-only OpenAI tunnel. See [OpenAI Secure MCP Tunnel](openai-secure-mcp-tunnel.md).
+
 Server transport security (`TransportSecuritySettings`) enforces an explicit
 host/origin allowlist: loopback by default plus `HERMES_GPT_ALLOWED_HOSTS`
 extensions and the OAuth issuer when configured. Public unauthenticated
@@ -58,6 +60,8 @@ Every tool advertises its security scheme via MCP tool metadata
 | Static bearer (`HERMES_GPT_BEARER_TOKEN`) | `http` / `bearer` |
 | Neither | `noauth` (loopback / trusted-proxy only) |
 
+For Secure MCP Tunnel, the baseline local hop can remain loopback/noauth while OpenAI tunnel identity and Hermes Operator policy protect separate layers. Static bearer can be added as local-hop defense in depth. Built-in OAuth requires separate browser-facing authorization-server reachability because the authorization server itself is not automatically tunneled.
+
 ## Version advertisement
 
 The `initialize` handshake advertises the hermes-gpt app version in
@@ -70,7 +74,7 @@ asserts the handshake reports `versioning.VERSION` and that the pinned floor
 Client notes:
 
 - **ChatGPT (chatgpt.com connector)**: uses the OAuth metadata to drive the
-  ChatGPT connector flow; loopback redirect required.
+  ChatGPT connector flow; loopback redirect required. For private developer-mode access without a public Hermes GPT hostname, see [OpenAI Secure MCP Tunnel](openai-secure-mcp-tunnel.md).
 - **Codex CLI**: uses stdio or streamable HTTP with the configured scheme;
   curated tool names (`hermes_extract_page` vs `hermes_web_extract`) are
   documented in `docs/codex.md`.
