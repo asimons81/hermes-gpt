@@ -2641,7 +2641,12 @@ def _run_codex_mcp(argv: list[str]) -> None:
         return
     eprint(f"hermes-gpt Codex MCP server running at http://{args.host}:{args.port}/mcp")
     import uvicorn
-    uvicorn.run(server.streamable_http_app(), host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="*")
+
+    # No forwarded_allow_ips override: uvicorn defaults to loopback-only
+    # proxy trust (or the operator-set FORWARDED_ALLOW_IPS env). A wildcard
+    # here would trust client-supplied X-Forwarded-For from any peer
+    # (security review t_f9925699 hardening note).
+    uvicorn.run(server.streamable_http_app(), host=args.host, port=args.port, proxy_headers=True)
 
 
 def _run_legacy_server(argv: list[str]) -> None:
