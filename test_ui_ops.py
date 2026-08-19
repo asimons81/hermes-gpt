@@ -15,6 +15,7 @@ Covers the interface contract from t_ab4f3463:
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -57,6 +58,10 @@ def isolate_ui_ops(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.delenv("HERMES_GPT_MISSION_ALLOWED_SURFACES", raising=False)
     monkeypatch.delenv("HERMES_GPT_EVENTS_ALLOWED_SOURCES", raising=False)
+    # Mission surfaces resolve a few state files from Path.home() (e.g.
+    # ~/nexus-wiki action-items). Pin home to the temp root so the test never
+    # reads the invoking user's real files (audit t_9d200636 Class B).
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     # Ensure the temp root exists (some surfaces read it directly).
     tmp_path.mkdir(parents=True, exist_ok=True)
     return tmp_path
@@ -89,11 +94,34 @@ def test_mission_surface_envelope_shape(client, surface):
     assert data["fetched_at"]
     assert isinstance(data["data"], dict)
     # Redacted mission envelope: never raw prompts, secrets, or transcripts.
+    # Assert on secret-shaped tokens, not bare substrings: "sk-" alone also
+    # matches benign "hermes-task-*" ids (audit t_9d200636 Class B). Shape
+    # mirrors operator_policy.redact_output's OpenAI-key pattern.
     serialized = json.dumps(data["data"])
-    assert "sk-" not in serialized
+    assert not re.search(r"(?i)\bsk(?:-proj)?-[A-Za-z0-9_-]{20,}\b", serialized)
     assert "AKIA" not in serialized
     assert "Bearer " not in serialized
     assert "prompt_sha256" in serialized or "counts" in serialized or True  # shape-tolerant
+
+
+_SECRET_SCAN_RE = re.compile(r"(?i)\bsk(?:-proj)?-[A-Za-z0-9_-]{20,}\b")
+
+
+@pytest.mark.parametrize(
+    "payload,expect_secret",
+    [
+        # Benign ids that contain the "sk-" substring must NOT trip the scan
+        # (audit t_9d200636 Class B: hermes-task-* ids from action-items).
+        ({"id": "hermes-task-maintenance-cron-error", "status": "open"}, False),
+        ({"id": "task-sk-123-review", "status": "open"}, False),
+        # Real secret-shaped keys MUST trip the scan.
+        ({"id": "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", "status": "open"}, True),
+        ({"id": "sk-proj-abcdefghijklmnopqrstuvwxyz123456", "status": "open"}, True),
+    ],
+)
+def test_secret_scan_regex_separates_task_ids_from_real_keys(payload, expect_secret):
+    serialized = json.dumps(payload)
+    assert bool(_SECRET_SCAN_RE.search(serialized)) is expect_secret
 
 
 def test_mission_surface_overview_is_composite(client):

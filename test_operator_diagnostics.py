@@ -143,6 +143,19 @@ def test_doctor_fails_for_dead_pid(hermes_root, clean_env, audit_override):
     assert parsed["checks"]["gateway_status"]["layer"] == "gateway"
 
 
+def test_doctor_fails_when_heartbeat_exists_without_pid(hermes_root, clean_env, audit_override):
+    (hermes_root / "cron" / "ticker_heartbeat").write_text("ok", encoding="utf-8")
+    out = od.hermes_operator_doctor(profile="default", hermes_root=hermes_root)
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["overall_status"] == "FAIL"
+    assert "gateway_status" in parsed["failed_checks"]
+    check = parsed["checks"]["gateway_status"]
+    assert check["code"] == "GATEWAY_PID_MISSING"
+    assert check["running"] is False
+    assert check["pid"] is None
+
+
 def test_doctor_fails_for_corrupt_cron_jobs(hermes_root, clean_env, audit_override):
     (hermes_root / "cron" / "jobs.json").write_text("not json", encoding="utf-8")
     out = od.hermes_operator_doctor(profile="default", hermes_root=hermes_root)

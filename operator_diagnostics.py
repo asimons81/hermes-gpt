@@ -294,6 +294,19 @@ def _check_gateway_status(profile_home: Path) -> dict[str, Any]:
             extra={"pid": pid, "running": False},
         )
 
+    # A heartbeat alone is not proof that the gateway is alive. Stale state files
+    # can survive service restarts or crashes, so never emit GATEWAY_OK without
+    # a live PID.
+    if pid is None:
+        return _check_result(
+            status=STATUS_FAIL,
+            layer="gateway",
+            code="GATEWAY_PID_MISSING",
+            message="Gateway heartbeat exists but no live gateway PID can be verified.",
+            suggested_action="Verify the live systemd service and refresh gateway state before trusting operator health.",
+            extra={"pid": None, "running": False, "heartbeat_mtime": heartbeat_mtime},
+        )
+
     if heartbeat_stale:
         return _check_result(
             status=STATUS_WARN,

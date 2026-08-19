@@ -106,7 +106,21 @@ def is_loopback_host(host: str) -> bool:
 
 
 def is_hermes_root(path: Path) -> bool:
-    return path.exists() and ((path / "tools").is_dir() or (path / "hermes_state.py").exists())
+    """Return True when ``path`` looks like a Hermes agent SOURCE root.
+
+    Requires a regular ``tools`` package (``tools/__init__.py``) or a top-level
+    ``hermes_state.py``. A bare ``tools/`` directory is not enough: stray
+    namespace ``tools/`` dirs at the Hermes DATA root (e.g. an unrelated tool
+    install under ``~/.hermes/tools``) must not make the data root masquerade
+    as a source root — that poisoned ``sys.path`` and broke ``import tools``
+    (audit t_9d200636 Class C).
+    """
+    if not path.exists():
+        return False
+    tools_dir = path / "tools"
+    if tools_dir.is_dir() and (tools_dir / "__init__.py").is_file():
+        return True
+    return (path / "hermes_state.py").is_file()
 
 
 def candidate_roots() -> list[Path]:
@@ -2627,7 +2641,12 @@ def _run_codex_mcp(argv: list[str]) -> None:
         return
     eprint(f"hermes-gpt Codex MCP server running at http://{args.host}:{args.port}/mcp")
     import uvicorn
-    uvicorn.run(server.streamable_http_app(), host=args.host, port=args.port, proxy_headers=True, forwarded_allow_ips="*")
+
+    # No forwarded_allow_ips override: uvicorn defaults to loopback-only
+    # proxy trust (or the operator-set FORWARDED_ALLOW_IPS env). A wildcard
+    # here would trust client-supplied X-Forwarded-For from any peer
+    # (security review t_f9925699 hardening note).
+    uvicorn.run(server.streamable_http_app(), host=args.host, port=args.port, proxy_headers=True)
 
 
 def _run_legacy_server(argv: list[str]) -> None:
