@@ -35,6 +35,7 @@ from typing import Any, Protocol
 
 import operator_fleet as op_fleet
 import operator_policy as op
+import runner_confinement as confinement
 
 SCHEMA_VERSION = "0.6-runner.1"
 RUNNER_PLUGINS_ENV = "HERMES_GPT_ENABLE_RUNNER_PLUGINS"
@@ -321,16 +322,23 @@ def _authorization_class(contract: dict[str, Any]) -> str:
 
 
 def _pi_tools(contract: dict[str, Any]) -> str:
-    """Return Pi tools for a confined-read execution posture.
+    """Return Pi tools for the execution posture.
 
-    Pi is intentionally limited to its read tool until Hermes GPT has a real
-    filesystem confinement boundary for absolute paths, ``..`` traversal, and
-    shell ``cd`` escape cases. CWD is not a sandbox.
+    Pi remains limited to its read tool unless (a) the contract's
+    authorization class permits writes, (b) the contract requests the
+    ``workspace-write`` sandbox, and (c) OS-level filesystem confinement
+    is enabled and available. CWD alone is never treated as a sandbox;
+    confinement must be backed by bubblewrap/sandbox-exec (see
+    ``runner_confinement``). This fails closed: when confinement is not
+    active, write-capable toolsets are rejected.
     """
     options = ((contract.get("execution") or {}).get("options") or {})
     auth_class = _authorization_class(contract)
-    if auth_class not in {"none", "read_only"}:
-        raise PermissionError("pi_rpc is read-only until filesystem confinement is available")
+    if auth_class not in {"none", "read_only"} and not confinement.confinement_available():
+        raise PermissionError(
+            "pi_rpc write tools require filesystem confinement; set "
+            f"{confinement.CONFINEMENT_ENABLE_ENV}=1 and install bubblewrap (or sandbox-exec on macOS)"
+        )
     requested = options.get("tools")
     if requested is None or requested == "":
         return "read"
@@ -339,9 +347,16 @@ def _pi_tools(contract: dict[str, Any]) -> str:
     tools = [item.strip() for item in requested.split(",") if item.strip()]
     if not tools:
         raise ValueError("pi_rpc execution.options.tools must not be empty")
-    if set(tools) != {"read"}:
-        raise PermissionError("pi_rpc may only enable Pi's read tool until filesystem confinement is available")
-    return "read"
+    write_tools = set(tools) - {"read"}
+    if write_tools:
+        if auth_class not in {"none", "read_only"} and not confinement.confinement_available():
+            raise PermissionError("pi_rpc is read-only until filesystem confinement is available")
+        if not confinement.confinement_available():
+            raise PermissionError("pi_rpc may only enable Pi's read tool until filesystem confinement is available")
+        sandbox = options.get("sandbox")
+        if sandbox != "workspace-write":
+            raise PermissionError("pi_rpc write tools require execution.options.sandbox=workspace-write")
+    return ",".join(dict.fromkeys(tools))
 
 
 def _pi_agent_dir() -> Path:
@@ -944,6 +959,14 @@ def _worker_pi(
     if options.get("thinking"):
         argv += ["--thinking", str(options["thinking"])]
     child_env = _pi_child_env(contract, hermes_root, provider)
+    workspaces = contract.get("allowed_scope", {}).get("workspaces") or []
+    if set(tools.split(",")) - {"read"}:
+        # Write-capable toolset: require a workspace and wrap the child in the
+        # OS confinement layer so writes are physically bounded to it.
+        if not workspaces:
+            raise PermissionError("pi_rpc write tools require an allowed workspace")
+        workspace = Path(str(workspaces[0])).expanduser().resolve()
+        argv = confinement.wrap_argv(argv, workspace)
     proc = _popen_process_group(
         argv,
         stdin=subprocess.PIPE,

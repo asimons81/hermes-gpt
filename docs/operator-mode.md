@@ -523,12 +523,46 @@ Runner backends are execution transports for already-authorized work contracts;
 they are not completion authorities. Contract validation, expected artifacts,
 review requirements, and forbidden-action checks remain outside the backend.
 
-The built-in `pi_rpc` backend is intentionally **read-only** until Hermes GPT has
-a real filesystem confinement boundary. Starting a subprocess in a workspace is
-not a sandbox: absolute paths, `..` traversal, and shell `cd` can escape a plain
-current working directory. For that reason `pi_rpc` only permits Pi's `read` tool
-and rejects writable authorization classes. Use Fleet, Codex, or another backend
-with an appropriate sandbox boundary for write work.
+### Filesystem confinement
+
+`pi_rpc` write tools are gated on **OS-level filesystem confinement**, not on
+the process working directory. CWD is not a sandbox: absolute paths, `..`
+traversal, and shell `cd` can escape a plain current working directory.
+
+Confinement uses bubblewrap (`bwrap`) on Linux and `sandbox-exec` on macOS to
+run the Pi child with the contract workspace bound read-write and the rest of
+the host filesystem read-only. The confined process physically cannot write
+outside its workspace, regardless of which tools it enables.
+
+Configuration:
+
+- `HERMES_GPT_ENABLE_RUNNER_CONFINEMENT=1` — opt in to confinement (off by
+  default; when off, `pi_rpc` stays read-only exactly as before).
+- `HERMES_GPT_RUNNER_WORKSPACE_ROOT` — root directory for confined runner
+  workspaces (default `<hermes_root>/runner-workspaces`).
+
+A write-capable `pi_rpc` contract requires **all** of:
+
+1. an authorization class that permits writes,
+2. `execution.options.sandbox=workspace-write`,
+3. `HERMES_GPT_ENABLE_RUNNER_CONFINEMENT=1` with the OS confinement binary
+   installed and available.
+
+If any condition is missing, dispatch fails closed with a `PermissionError`
+before any subprocess starts. Artifact and path checks additionally reject
+absolute paths, `..` traversal, and symlink escapes relative to the authorized
+workspace (`runner_confinement.confine_path`).
+
+Note for Linux deployments: install `bubblewrap` (e.g.
+`apt install bubblewrap`) and verify it works in your environment (some
+containerized hosts restrict user namespaces; confinement then reports
+unavailable and write tools stay disabled rather than silently downgrading).
+
+The built-in `pi_rpc` backend remains **read-only by default** until
+confinement is explicitly enabled. Without confinement, `pi_rpc` only permits
+Pi's `read` tool and rejects writable authorization classes. Use Fleet, Codex,
+or another backend with an appropriate sandbox boundary for write work when
+confinement is unavailable.
 
 External runner plugins are trusted in-process code. Setting
 `HERMES_GPT_ENABLE_RUNNER_PLUGINS=1` only enables discovery; each external entry
