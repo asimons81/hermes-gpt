@@ -16,9 +16,9 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.7.0** (local checkout, not yet released).
+Repository version: **0.7.0**. The matching GitHub release `v0.7.0` is published.
 
-The latest published releases are GitHub `v0.6.0` and PyPI `0.6.0`. PyPI is an independent distribution channel and can lag the repository release. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set.
+The latest PyPI release is **0.4.0**: PyPI is an independent distribution channel and has lagged GitHub since v0.5.0. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.5+ features require the GitHub distribution until PyPI catches up.
 
 ## Current operational docs
 
@@ -35,6 +35,8 @@ The latest published releases are GitHub `v0.6.0` and PyPI `0.6.0`. PyPI is an i
 | [`windows-chatgpt-codex.md`](windows-chatgpt-codex.md) | current | Windows ChatGPT -> Hermes GPT -> Codex CLI deployment |
 | [`updating.md`](updating.md) | current | check-first Git and PyPI update behavior |
 | [`retention-policy.md`](retention-policy.md) | current | local diagnostic artifact retention and cleanup |
+| [`session-history.md`](session-history.md) | current | gated read-only session history surface and privacy defaults |
+| [`session-control.md`](session-control.md) | current | gated asynchronous session continue/send jobs |
 | [`ui-security-boundary.md`](ui-security-boundary.md) | current | conversational UI browser security boundary and opt-in UI mount |
 | [`flight-deck-coverage.md`](flight-deck-coverage.md) | current | Flight Deck browser coverage and mutation safety decisions |
 | [`release-notes-v0.7.0.md`](release-notes-v0.7.0.md) | current release record | shipped v0.7 behavior and gates |

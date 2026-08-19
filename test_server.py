@@ -368,6 +368,10 @@ def test_http_asgi_app_exposes_confidential_oauth_and_protects_mcp(monkeypatch):
         metadata = client.get("/.well-known/oauth-authorization-server")
         assert metadata.status_code == 200
         assert "refresh_token" in metadata.json()["grant_types_supported"]
+        # ChatGPT probes OIDC discovery even with OIDC disabled. Hermes does
+        # not implement an OpenID Provider, so this must be a public 404 rather
+        # than a 401 that can make the connector appear disconnected.
+        assert client.get("/.well-known/openid-configuration").status_code == 404
         unauthenticated = client.post(
             "/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},

@@ -18,40 +18,13 @@ import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
-# The sidecar adds the Hermes agent source root to sys.path at startup
-# (server.import_hermes).  Tests need the same discovery so ui_chat's lazy
-# ``from hermes_state import SessionDB`` resolves — without touching the real
-# data root (HERMES_HOME is redirected to a tmp dir by the fixture below).
-def _real_user_home() -> Path:
-    # Worker shells sandbox HOME (e.g. ~/.hermes/profiles/<name>/home); the
-    # real user home still resolves from the passwd database.
-    try:
-        import pwd
-
-        return Path(pwd.getpwuid(os.getuid()).pw_dir)
-    except Exception:
-        return Path.home()
-
-
-def _add_hermes_agent_to_path() -> None:
-    real_home = _real_user_home()
-    candidates = [
-        real_home / ".hermes" / "hermes-agent",
-        real_home / "hermes-agent",
-    ]
-    env_home = os.environ.get("HERMES_HOME")
-    if env_home:
-        candidates.append(Path(env_home).expanduser() / "hermes-agent")
-    for cand in candidates:
-        try:
-            if cand.exists() and ((cand / "tools").is_dir() or (cand / "hermes_state.py").exists()):
-                sys.path.insert(0, str(cand))
-                return
-        except OSError:
-            continue
-
-
-_add_hermes_agent_to_path()
+# The chat UI resolves ``hermes_state`` lazily (ui_chat._session_db). The repo
+# ships a SessionDB-compatible shim (hermes_state.py) for environments without
+# a Hermes Agent checkout (CI, packaged installs) — the same resolution order
+# applies here, with the repo dir on sys.path below. Do NOT insert the real
+# agent source root at collection time: it makes ``hermes_cli`` importable in
+# the pytest process and lets fleet tests read the invoking machine's real
+# Hermes config (audit t_9d200636 Class A).
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
