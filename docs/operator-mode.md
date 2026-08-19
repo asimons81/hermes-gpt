@@ -525,22 +525,27 @@ review requirements, and forbidden-action checks remain outside the backend.
 
 ### Filesystem confinement
 
-`pi_rpc` write tools are gated on **OS-level filesystem confinement**, not on
+Every `pi_rpc` session is gated on **OS-level filesystem confinement**, not on
 the process working directory. CWD is not a sandbox: absolute paths, `..`
-traversal, and shell `cd` can escape a plain current working directory.
+traversal, shell `cd`, and outward symlinks can escape a plain current working
+directory.
 
 Confinement uses bubblewrap (`bwrap`) on Linux and `sandbox-exec` on macOS to
-run the Pi child with the contract's explicitly authorized workspace bound
-read-write. On Linux, unrelated host paths are either absent or mounted
-read-only; on macOS, the sandbox profile denies host writes outside the
-workspace.
+make `allowed_scope.workspaces` a physical read boundary. Read-only Pi sessions
+receive the authorized workspace read-only. Write-capable sessions receive that
+workspace read-write only after the independent authorization and sandbox gates
+have passed. Only the minimal read-only runtime trees required to execute Pi are
+exposed outside the workspace.
 
 Configuration:
 
 - `HERMES_GPT_ENABLE_RUNNER_CONFINEMENT=1` — opt in to confinement (off by
-  default; when off, `pi_rpc` stays read-only exactly as before).
+  default; when off, `pi_rpc` dispatch fails closed, including read-only runs,
+  because workspace read scope cannot otherwise be enforced).
 
-A write-capable `pi_rpc` contract requires **all** of:
+Every `pi_rpc` contract requires an allowed workspace and a successful bounded
+capability probe for its exact posture. A write-capable contract additionally
+requires **all** of:
 
 1. a write-authorized class (`reversible_write` or `high_impact`); `none` and
    `read_only` can never enable `bash`, `edit`, or `write`,
@@ -549,18 +554,24 @@ A write-capable `pi_rpc` contract requires **all** of:
    installed **and a bounded capability probe succeeding on the current host**.
 
 Binary presence alone is not treated as availability. The capability probe
-launches the same confinement wrapper used for runner children and verifies
-that a temporary workspace is host-writable while an attempted sibling write
-outside that workspace cannot modify the corresponding host path (it may be
-denied or land in a private sandbox filesystem). Probe failure, timeout, or an
-unusable namespace/profile
-causes confinement to report unavailable and dispatch fails closed with a
-`PermissionError` before the runner child starts. Before a write-capable child
-is wrapped, the workspace boundary is also validated for inode/mount aliases:
-pre-existing hard links with any alias outside the workspace and nested mount
-points are rejected. Artifact and path checks additionally reject
-absolute paths, `..` traversal, and symlink escapes relative to the authorized
-workspace (`runner_confinement.confine_path`).
+launches the same confinement posture used for the runner child. Both postures
+prove that the workspace is readable while absolute, `..`, and outward-symlink
+reads cannot reach a sibling host file. Writable posture additionally proves an
+in-workspace host write succeeds while an out-of-scope host write cannot modify
+the corresponding host path. Read-only posture proves the workspace itself
+cannot be mutated. Probe failure, timeout, or an unusable namespace/profile
+causes dispatch to fail closed with a `PermissionError` before Pi starts.
+
+Before any Pi child is wrapped, the workspace boundary is validated for
+path/inode/mount aliases. Pre-existing outward symlinks, hard links with any
+alias outside the workspace, special filesystem entries (device nodes, FIFOs,
+sockets, etc.), and nested mount points/filesystems are rejected. This matters
+for reads as well as writes: any of those aliases/channels can expose
+out-of-scope host data through an in-workspace pathname even when the workspace
+itself is read-only. Artifact/path validation also rejects absolute paths, `..`
+traversal, and symlink escapes where Hermes itself resolves paths
+(`runner_confinement.confine_path`). Pi's built-in read tool is protected by
+the OS confinement boundary rather than by that helper.
 
 On Linux, the wrapper exposes only the read-only system/runtime trees needed
 to launch the runner, plus a narrowly selected read-only runtime tree when the
@@ -568,19 +579,17 @@ runner executable is installed outside system prefixes (for example Pi below
 `~/.local/.../node_modules`). The rest of the user's home directory is not
 mounted into the sandbox. `/tmp` and `/run` are private sandbox filesystems, so
 host temporary files and Unix-domain service sockets are not exposed. The
-authorized workspace is the only host tree bound read-write, and the child is
-started with all Linux capabilities dropped so a privileged launch cannot
-remount the boundary writable. Install
-`bubblewrap` (e.g. `apt install bubblewrap`) and verify it works in your
-environment; some containerized hosts restrict user namespaces, in which case
-the capability probe fails and write tools stay disabled rather than silently
-downgrading.
+authorized workspace is bound read-only for read-only sessions and read-write
+only for authorized write sessions. All Linux capabilities are dropped so a
+privileged launch cannot remount the boundary writable. On macOS, the
+`sandbox-exec` profile likewise denies host reads outside the workspace and
+minimal runtime allowlist, and grants a workspace write exception only in
+writable posture.
 
-The built-in `pi_rpc` backend remains **read-only by default** until
-confinement is explicitly enabled. Without confinement, `pi_rpc` only permits
-Pi's `read` tool and rejects writable authorization classes. Use Fleet, Codex,
-or another backend with an appropriate sandbox boundary for write work when
-confinement is unavailable.
+Install `bubblewrap` (e.g. `apt install bubblewrap`) and verify it works in your
+environment; some containerized hosts restrict user namespaces. In any case,
+capability-probe failure disables `pi_rpc` entirely rather than silently
+falling back to an unconfined read-only child.
 
 External runner plugins are trusted in-process code. Setting
 `HERMES_GPT_ENABLE_RUNNER_PLUGINS=1` only enables discovery; each external entry

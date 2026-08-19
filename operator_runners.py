@@ -327,41 +327,28 @@ _PI_WRITE_AUTH_CLASSES = frozenset({"reversible_write", "high_impact"})
 def _pi_tools(contract: dict[str, Any]) -> str:
     """Return Pi tools for the execution posture.
 
-    Pi remains limited to its read tool unless (a) the contract's
-    authorization class permits writes, (b) the contract requests the
-    ``workspace-write`` sandbox, and (c) OS-level filesystem confinement
-    is enabled and demonstrably usable. CWD alone is never treated as a
-    sandbox; confinement must be backed by a successful bubblewrap/
-    sandbox-exec capability probe (see ``runner_confinement``).
+    Every Pi session requires a demonstrably usable OS confinement posture.
+    Read-only sessions are physically scoped to the authorized workspace;
+    write-capable tools additionally require a write-authorized contract and
+    the ``workspace-write`` sandbox. CWD alone is never treated as a sandbox.
     """
     options = ((contract.get("execution") or {}).get("options") or {})
     auth_class = _authorization_class(contract)
     writable_auth = auth_class in _PI_WRITE_AUTH_CLASSES
-    confinement_ok: bool | None = None
-
-    # Preserve the existing fail-closed posture for contracts that carry a
-    # write-authorized class: without a usable OS boundary, pi_rpc is not an
-    # eligible execution backend even if the caller only requested ``read``.
-    if writable_auth:
-        confinement_ok = confinement.confinement_available()
-        if not confinement_ok:
-            raise PermissionError(
-                "pi_rpc write-authorized contracts require usable filesystem confinement; set "
-                f"{confinement.CONFINEMENT_ENABLE_ENV}=1 and install a working bubblewrap "
-                "(or sandbox-exec on macOS)"
-            )
 
     requested = options.get("tools")
     if requested is None or requested == "":
-        return "read"
-    if not isinstance(requested, str):
-        raise TypeError("pi_rpc execution.options.tools must be a comma-delimited string")
-    tools = [item.strip() for item in requested.split(",") if item.strip()]
-    if not tools:
-        raise ValueError("pi_rpc execution.options.tools must not be empty")
+        tools = ["read"]
+    else:
+        if not isinstance(requested, str):
+            raise TypeError("pi_rpc execution.options.tools must be a comma-delimited string")
+        tools = [item.strip() for item in requested.split(",") if item.strip()]
+        if not tools:
+            raise ValueError("pi_rpc execution.options.tools must not be empty")
 
     write_tools = set(tools) - {"read"}
-    if write_tools:
+    writable = bool(write_tools)
+    if writable:
         # Authorization is a separate trust boundary from OS confinement.
         # A usable sandbox must never upgrade ``none``/``read_only`` into a
         # write-capable contract.
@@ -370,14 +357,16 @@ def _pi_tools(contract: dict[str, Any]) -> str:
                 "pi_rpc read-only authorization may only enable Pi's read tool; write tools require "
                 "authorization.class=reversible_write or high_impact"
             )
-        sandbox = options.get("sandbox")
-        if sandbox != "workspace-write":
+        if options.get("sandbox") != "workspace-write":
             raise PermissionError("pi_rpc write tools require execution.options.sandbox=workspace-write")
-        # ``writable_auth`` was already capability-gated above. Keep this
-        # explicit assertion adjacent to the write-tools branch so future
-        # refactors cannot accidentally make confinement optional here.
-        if confinement_ok is not True:
-            raise PermissionError("pi_rpc write tools require usable filesystem confinement")
+
+    if not confinement.confinement_available(writable=writable):
+        posture = "write-capable" if writable else "read-only"
+        raise PermissionError(
+            f"pi_rpc {posture} sessions require usable filesystem confinement; set "
+            f"{confinement.CONFINEMENT_ENABLE_ENV}=1 and install a working bubblewrap "
+            "(or sandbox-exec on macOS)"
+        )
 
     return ",".join(dict.fromkeys(tools))
 
@@ -970,10 +959,11 @@ def _worker_pi(
     if model and not _allowed_by_env(model, RUNNER_MODEL_ALLOWLIST_ENV):
         raise PermissionError(f"Pi model {model!r} is not allowed by {RUNNER_MODEL_ALLOWLIST_ENV}")
     argv = [exe, "--mode", "rpc", "--no-session", "--tools", tools]
-    if _authorization_class(contract) in {"none", "read_only"}:
+    writable = bool(set(tools.split(",")) - {"read"})
+    if not writable:
         # Pi extensions execute arbitrary startup code outside the built-in tool
-        # allowlist. Disable extension discovery for read-only contracts so an
-        # extension cannot mutate the workspace before the model even runs.
+        # allowlist. A read-only tool posture must disable extension discovery
+        # even when the contract itself carries a write-authorized class.
         argv.append("--no-extensions")
     if provider:
         argv += ["--provider", provider]
@@ -983,13 +973,14 @@ def _worker_pi(
         argv += ["--thinking", str(options["thinking"])]
     child_env = _pi_child_env(contract, hermes_root, provider)
     workspaces = contract.get("allowed_scope", {}).get("workspaces") or []
-    if set(tools.split(",")) - {"read"}:
-        # Write-capable toolset: require a workspace and wrap the child in the
-        # OS confinement layer so writes are physically bounded to it.
-        if not workspaces:
-            raise PermissionError("pi_rpc write tools require an allowed workspace")
-        workspace = Path(str(workspaces[0])).expanduser().resolve()
-        argv = confinement.wrap_argv(argv, workspace)
+    if not workspaces:
+        raise PermissionError("pi_rpc sessions require an allowed workspace")
+    workspace = Path(str(workspaces[0])).expanduser().resolve()
+    # Every Pi child is physically scoped to the authorized workspace. Read-only
+    # toolsets receive a read-only workspace mount/profile; write-capable
+    # toolsets receive a writable workspace only after _pi_tools() has enforced
+    # the independent authorization + sandbox gates.
+    argv = confinement.wrap_argv(argv, workspace, writable=writable)
     proc = _popen_process_group(
         argv,
         stdin=subprocess.PIPE,

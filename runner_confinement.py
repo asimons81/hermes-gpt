@@ -1,8 +1,9 @@
 """Filesystem confinement for runner sessions.
 
-This module provides the real filesystem confinement boundary that
-``operator_runners`` needs before write-capable runner tools (Pi
-``edit``/``write``/``bash``) may be enabled.
+This module provides the real filesystem confinement boundary used by
+``operator_runners`` for every Pi session. Read-only sessions are physically
+scoped to the authorized workspace; write-capable sessions additionally permit
+workspace writes only after the runner policy has authorized them.
 
 Design
 ------
@@ -13,11 +14,13 @@ mechanisms rather than working-directory conventions:
 
 - Linux: ``bubblewrap`` (``bwrap``) with only required system/runtime trees
   exposed read-only, private ``/tmp`` and ``/run``, and the authorized
-  workspace bound read-write at its original absolute path.
-- macOS: ``sandbox-exec`` with an equivalent no-host-write-outside profile.
+  workspace bound read-only or read-write at its original absolute path.
+- macOS: ``sandbox-exec`` with host reads denied outside the authorized
+  workspace/runtime allowlist and workspace writes enabled only for writable
+  posture.
 
-If the OS confinement tool is unavailable, confinement is not considered
-active and write-capable runner tools stay disabled (fail closed).
+If the OS confinement tool is unavailable or its posture-specific capability
+probe fails, Pi dispatch is rejected before the child starts (fail closed).
 
 The module also provides ``confine_path`` — a pure path-containment
 check (absolute-escape, ``..`` traversal, symlink escape) used to
@@ -65,15 +68,53 @@ def _macos_quote(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
 
 
-def _macos_sandbox_profile(workspace: str) -> str:
-    escaped = _macos_quote(workspace)
-    return (
-        "(version 1)(allow default)(deny file-write*)"
-        f'(allow file-write* (subpath "{escaped}"))'
-    )
+_MACOS_RO_PATHS = ("/System", "/usr", "/bin", "/sbin", "/Library", "/etc", "/private/etc", "/dev")
 
 
-_LINUX_RO_PATHS = ("/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt", "/nix")
+def _macos_sandbox_profile(
+    workspace: str,
+    *,
+    writable: bool,
+    runtime_root: Path | None = None,
+) -> str:
+    """Return a sandbox-exec profile for the requested workspace posture."""
+    escaped_workspace = _macos_quote(workspace)
+    rules = ["(version 1)", "(allow default)", "(deny file-write*)", "(deny file-read*)"]
+
+    # Every Pi posture treats allowed_scope.workspaces as a read boundary.
+    # Permit only the system/runtime trees required to execute Pi plus the
+    # authorized workspace. Writable posture adds one file-write exception for
+    # that workspace; read-only posture has no host-write exception at all.
+    for source in _MACOS_RO_PATHS:
+        rules.append(f'(allow file-read* (subpath "{_macos_quote(source)}"))')
+    if runtime_root is not None:
+        rules.append(f'(allow file-read* (subpath "{_macos_quote(str(runtime_root))}"))')
+    rules.append(f'(allow file-read* (subpath "{escaped_workspace}"))')
+    if writable:
+        rules.append(f'(allow file-write* (subpath "{escaped_workspace}"))')
+    return "".join(rules)
+
+
+_LINUX_RO_PATHS = ("/usr", "/lib", "/lib64", "/bin", "/sbin", "/nix")
+_LINUX_ETC_RO_PATHS = (
+    "/etc/ssl",
+    "/etc/ca-certificates",
+    "/etc/pki",
+    "/etc/resolv.conf",
+    "/etc/hosts",
+    "/etc/host.conf",
+    "/etc/nsswitch.conf",
+    "/etc/gai.conf",
+    "/etc/passwd",
+    "/etc/group",
+    "/etc/localtime",
+    "/etc/timezone",
+    "/etc/ld.so.cache",
+    "/etc/ld.so.conf",
+    "/etc/ld.so.conf.d",
+    "/etc/protocols",
+    "/etc/services",
+)
 
 
 def _path_within(path: Path, root: Path) -> bool:
@@ -126,35 +167,61 @@ def _runtime_readonly_root(argv: list[str], workspace: Path) -> Path | None:
     for system_root in (Path(item) for item in _LINUX_RO_PATHS):
         if _path_within(executable, system_root):
             return None
+    if _path_within(executable, Path("/opt")):
+        relative_parts = executable.relative_to("/opt").parts
+        if relative_parts:
+            return Path("/opt") / relative_parts[0]
     # Pi's package CLI is commonly installed below ~/.local/.../node_modules.
-    # Bind the node_modules tree so relative package imports keep working while
-    # the rest of the user's home directory remains absent from the sandbox.
+    # Expose the package itself (including its nested dependencies), not the
+    # entire enclosing node_modules tree, so unrelated globally installed
+    # packages do not become readable through Pi's built-in read tool.
     for parent in executable.parents:
-        if parent.name == "node_modules":
-            return parent
+        if parent.name != "node_modules":
+            continue
+        relative_parts = executable.relative_to(parent).parts
+        if not relative_parts:
+            break
+        package_parts = relative_parts[:2] if relative_parts[0].startswith("@") else relative_parts[:1]
+        return parent.joinpath(*package_parts)
     parent = executable.parent
     if _path_within(parent, workspace):
         return None
     return parent
 
 
-def _wrap_argv_with_tool(argv: list[str], workspace: Path, tool: str) -> list[str]:
+def _wrap_argv_with_tool(
+    argv: list[str],
+    workspace: Path,
+    tool: str,
+    *,
+    writable: bool = True,
+) -> list[str]:
     """Build the platform confinement argv with an already-resolved tool."""
     workspace_path = Path(workspace).expanduser().resolve()
     workspace_resolved = str(workspace_path)
+    runtime_root = _runtime_readonly_root(argv, workspace_path)
     if sys.platform.startswith("linux"):
         wrapped = [tool]
         for source in _LINUX_RO_PATHS:
             wrapped += ["--ro-bind-try", source, source]
+        # Avoid exposing all of /etc, which may contain root-readable host
+        # credentials when Hermes itself runs privileged. Bind only the public
+        # runtime/network/TLS files Pi and its dynamic linker may need.
+        wrapped += ["--dir", "/etc"]
+        for source in _LINUX_ETC_RO_PATHS:
+            wrapped += ["--ro-bind-try", source, source]
         # Do not expose host runtime sockets or host temporary files. Pi still
         # has normal writable scratch space, but it is private to the sandbox.
-        wrapped += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run"]
-        runtime_root = _runtime_readonly_root(argv, workspace_path)
+        # Keep /proc private and empty. A real procfs would expose the child's
+        # own environment via /proc/self/environ, including the selected
+        # provider credential. Pi does not require procfs for RPC operation.
+        wrapped += ["--dir", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run"]
         if runtime_root is not None:
             runtime = str(runtime_root)
             wrapped += ["--ro-bind", runtime, runtime]
+        workspace_bind = "--bind" if writable else "--ro-bind"
         wrapped += [
-            "--bind", workspace_resolved, workspace_resolved,
+            workspace_bind, workspace_resolved, workspace_resolved,
             "--chdir", workspace_resolved,
             "--unshare-pid",
             "--cap-drop", "ALL",
@@ -164,24 +231,27 @@ def _wrap_argv_with_tool(argv: list[str], workspace: Path, tool: str) -> list[st
         ]
         return wrapped
     if sys.platform == "darwin":
-        return [tool, "-p", _macos_sandbox_profile(workspace_resolved), *argv]
+        profile = _macos_sandbox_profile(
+            workspace_resolved,
+            writable=writable,
+            runtime_root=runtime_root,
+        )
+        return [tool, "-p", profile, *argv]
     raise RuntimeError(f"confinement unsupported on platform {sys.platform!r}")
 
 
-def _probe_confinement(tool: str) -> bool:
-    """Prove the backend can enforce the intended write boundary on this host.
+def _probe_confinement(tool: str, *, writable: bool = True) -> bool:
+    """Prove the backend can enforce the requested workspace boundary.
 
-    The probe is deliberately bounded and fail-closed. A child must be able to
-    create a host-visible marker inside a temporary workspace while an attempted
-    sibling write outside that workspace must not modify the host path (it may
-    be denied or land in a private sandbox filesystem). This catches hosts where
-    the confinement binary exists but cannot create the required namespace/
-    profile (for example restricted Linux user namespaces in containers).
+    The probe is bounded and fail-closed. Both postures prove the workspace is
+    readable while absolute, ``..``, and symlink reads cannot reach a sibling
+    host path. Writable posture additionally proves an in-scope host write
+    succeeds while an out-of-scope host write cannot occur; read-only posture
+    proves the workspace cannot be mutated.
     """
     shell = "/bin/sh" if Path("/bin/sh").is_file() else shutil.which("sh")
     if not shell:
         return False
-    probe_script = 'printf ok > "$1" || exit 71; printf escape > "$2" 2>/dev/null || true; exit 0'
     try:
         with tempfile.TemporaryDirectory(prefix="hermes-gpt-confinement-probe-") as temp_dir:
             root = Path(temp_dir).resolve()
@@ -189,11 +259,43 @@ def _probe_confinement(tool: str) -> bool:
             workspace.mkdir()
             inside = workspace / "inside.marker"
             outside = root / "outside.marker"
-            wrapped = _wrap_argv_with_tool(
-                [shell, "-c", probe_script, "hermes-gpt-probe", str(inside), str(outside)],
-                workspace,
-                tool,
-            )
+            inside.write_text("inside", encoding="utf-8")
+            outside.write_text("outside", encoding="utf-8")
+
+            escape_link = workspace / "escape-link"
+            escape_link.symlink_to(outside)
+            dotdot = workspace / ".." / outside.name
+            if writable:
+                probe_script = (
+                    'cat "$1" >/dev/null 2>&1 || exit 71; '
+                    'cat "$2" >/dev/null 2>&1 && exit 72; '
+                    'cat "$3" >/dev/null 2>&1 && exit 73; '
+                    'cat "$4" >/dev/null 2>&1 && exit 74; '
+                    'printf ok > "$1" || exit 75; '
+                    'printf escape > "$2" 2>/dev/null || true; '
+                    'exit 0'
+                )
+            else:
+                probe_script = (
+                    'cat "$1" >/dev/null 2>&1 || exit 76; '
+                    'cat "$2" >/dev/null 2>&1 && exit 77; '
+                    'cat "$3" >/dev/null 2>&1 && exit 78; '
+                    'cat "$4" >/dev/null 2>&1 && exit 79; '
+                    'printf mutate > "$1" 2>/dev/null && exit 80; '
+                    'exit 0'
+                )
+            argv = [
+                shell,
+                "-c",
+                probe_script,
+                "hermes-gpt-probe",
+                str(inside),
+                str(outside),
+                str(dotdot),
+                str(escape_link),
+            ]
+
+            wrapped = _wrap_argv_with_tool(argv, workspace, tool, writable=writable)
             completed = subprocess.run(
                 wrapped,
                 stdin=subprocess.DEVNULL,
@@ -202,23 +304,26 @@ def _probe_confinement(tool: str) -> bool:
                 check=False,
                 timeout=_PROBE_TIMEOUT_SECONDS,
             )
-            return completed.returncode == 0 and inside.is_file() and not outside.exists()
+            if completed.returncode != 0:
+                return False
+            if writable:
+                return inside.read_text(encoding="utf-8") == "ok" and outside.read_text(encoding="utf-8") == "outside"
+            return inside.read_text(encoding="utf-8") == "inside" and outside.read_text(encoding="utf-8") == "outside"
     except (OSError, subprocess.SubprocessError):
         return False
 
 
-def confinement_available() -> bool:
-    """Return True only when the opted-in confinement backend is usable.
+def confinement_available(*, writable: bool = True) -> bool:
+    """Return True only when the opted-in confinement posture is usable.
 
     Binary presence alone is not sufficient. Availability requires a bounded
-    capability probe that demonstrates a host-writable workspace while an
-    attempted write outside it cannot modify the corresponding host path, so
+    capability probe for the exact read-only or writable posture requested, so
     restricted/containerized hosts fail closed.
     """
     if not confinement_enabled():
         return False
     tool = confinement_tool()
-    return bool(tool and _probe_confinement(tool))
+    return bool(tool and _probe_confinement(tool, writable=writable))
 
 
 def confine_path(base: Path, candidate: str | Path) -> Path:
@@ -243,13 +348,14 @@ def confine_path(base: Path, candidate: str | Path) -> Path:
 def validate_workspace_boundary(workspace: Path) -> Path:
     """Fail closed on workspace aliases that can bypass path/mount isolation.
 
-    A pre-existing hard link inside the writable workspace can reference the
-    same inode as a file outside it. A bind-mount sandbox cannot distinguish
-    those aliases: writing the in-workspace name would mutate the out-of-scope
-    file. We therefore prove that every regular-file hard link is fully
-    accounted for inside the workspace before granting write tools. Nested
-    filesystems/mounts are also rejected so the writable subtree cannot smuggle
-    a second host filesystem through the authorized path.
+    A pre-existing hard link inside the workspace can reference the same inode
+    as a file outside it. A mount sandbox cannot distinguish those aliases:
+    reading the in-workspace name can disclose out-of-scope data, and writing it
+    in writable posture can mutate the out-of-scope file. We therefore prove
+    that every regular-file hard link is fully accounted for inside the
+    workspace before any Pi child starts. Pre-existing symlinks that resolve
+    outside the workspace and nested filesystems/mounts are also rejected so
+    the authorized subtree cannot smuggle host data through an in-scope path.
     """
     root = Path(workspace).expanduser().resolve()
     try:
@@ -283,7 +389,15 @@ def validate_workspace_boundary(workspace: Path) -> Path:
                 path = current_path / name
                 entry_stat = path.lstat()
                 if stat.S_ISLNK(entry_stat.st_mode):
+                    try:
+                        target = path.resolve(strict=False)
+                    except OSError as exc:
+                        raise PermissionError(f"unable to resolve workspace symlink: {path}") from exc
+                    if not _path_within(target, root):
+                        raise PermissionError(f"confined workspace contains an outward symlink: {path}")
                     continue
+                if not (stat.S_ISDIR(entry_stat.st_mode) or stat.S_ISREG(entry_stat.st_mode)):
+                    raise PermissionError(f"confined workspace contains a special filesystem entry: {path}")
                 if entry_stat.st_dev != root_stat.st_dev:
                     raise PermissionError(f"confined workspace contains a nested filesystem: {path}")
                 if stat.S_ISREG(entry_stat.st_mode):
@@ -304,19 +418,20 @@ def validate_workspace_boundary(workspace: Path) -> Path:
     return root
 
 
-def wrap_argv(argv: list[str], workspace: Path) -> list[str]:
+def wrap_argv(argv: list[str], workspace: Path, *, writable: bool = True) -> list[str]:
     """Wrap ``argv`` so the child process is confined to ``workspace``.
 
-    Linux: bubblewrap exposes only required runtime trees read-only, provides
-    private temporary/runtime filesystems, and binds only the authorized
-    workspace from the host read-write. macOS: ``sandbox-exec`` applies an
-    equivalent no-host-write-outside profile. Raises ``RuntimeError`` when no
-    confinement tool is installed; callers that need a trust-boundary decision
-    must gate on :func:`confinement_available`, which additionally probes that
-    the backend is usable on this host.
+    Linux exposes only required runtime trees read-only, provides private
+    temporary/runtime filesystems, and binds the authorized workspace either
+    read-write or read-only according to ``writable``. macOS applies the same
+    workspace posture through ``sandbox-exec`` and, for read-only sessions,
+    denies host reads outside the workspace/runtime allowlist. Raises
+    ``RuntimeError`` when no confinement tool is installed; callers that need a
+    trust-boundary decision must gate on :func:`confinement_available` for the
+    same posture.
     """
     tool = confinement_tool()
     if tool is None:
         raise RuntimeError("no OS confinement tool available (install bubblewrap or sandbox-exec)")
     validated_workspace = validate_workspace_boundary(workspace)
-    return _wrap_argv_with_tool(argv, validated_workspace, tool)
+    return _wrap_argv_with_tool(argv, validated_workspace, tool, writable=writable)

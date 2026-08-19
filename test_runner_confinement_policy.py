@@ -17,7 +17,7 @@ def _clean_confinement_env(monkeypatch: pytest.MonkeyPatch):
 
 
 def _confinement_active(monkeypatch: pytest.MonkeyPatch, active: bool) -> None:
-    monkeypatch.setattr(confinement, "confinement_available", lambda: active)
+    monkeypatch.setattr(confinement, "confinement_available", lambda *, writable=True: active)
     monkeypatch.setattr(confinement, "confinement_enabled", lambda: active)
 
 
@@ -60,13 +60,17 @@ def test_writable_pi_requires_workspace_write_sandbox(tmp_path: Path, monkeypatc
         runners._pi_tools(raw)
 
 
-def test_read_only_tools_unchanged_without_confinement(tmp_path: Path):
+def test_read_only_pi_rejected_without_confinement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _confinement_active(monkeypatch, False)
     raw = _contract(tmp_path, backend="pi_rpc", options={"tools": "read"})
     raw["authorization"] = {"class": "read_only", "approved": True}
-    assert runners._pi_tools(raw) == "read"
+    with pytest.raises(PermissionError, match="read-only.*confinement"):
+        runners._pi_tools(raw)
+
     raw_default = _contract(tmp_path, backend="pi_rpc")
     raw_default["authorization"] = {"class": "read_only", "approved": True}
-    assert runners._pi_tools(raw_default) == "read"
+    with pytest.raises(PermissionError, match="read-only.*confinement"):
+        runners._pi_tools(raw_default)
 
 
 def test_read_only_default_still_rejects_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -84,17 +88,57 @@ def test_worker_pi_wraps_argv_under_confinement(tmp_path: Path, monkeypatch: pyt
     root.mkdir()
     _enable_workspace(monkeypatch, ws)
     _confinement_active(monkeypatch, True)
-    monkeypatch.setattr(confinement, "wrap_argv", lambda argv, workspace: ["/usr/bin/bwrap", *argv])
-
     captured: dict = {}
+
+    def fake_wrap(argv, workspace, *, writable=True):
+        captured["workspace"] = workspace
+        captured["writable"] = writable
+        return ["/usr/bin/bwrap", *argv]
 
     def fake_popen(argv, **kwargs):
         captured["argv"] = argv
         raise RuntimeError("stop after spawn")
 
+    monkeypatch.setattr(confinement, "wrap_argv", fake_wrap)
     monkeypatch.setattr(runners, "_popen_process_group", fake_popen)
     raw = _contract(ws, backend="pi_rpc", options={"tools": "read,write", "sandbox": "workspace-write"})
     with pytest.raises(RuntimeError, match="stop after spawn"):
         runners._worker_pi("/bin/true", raw, 1, tmp_path / "log.jsonl", root)
     assert captured["argv"][0] == "/usr/bin/bwrap"
-    assert str(ws.resolve()) in captured["argv"] or True  # bwrap binds the resolved workspace
+    assert captured["workspace"] == ws.resolve()
+    assert captured["writable"] is True
+
+
+def test_worker_pi_read_only_uses_read_only_workspace_confinement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    root = tmp_path / "hermes"
+    root.mkdir()
+    _enable_workspace(monkeypatch, ws)
+    _confinement_active(monkeypatch, True)
+    captured: dict = {}
+
+    def fake_wrap(argv, workspace, *, writable=True):
+        captured["workspace"] = workspace
+        captured["writable"] = writable
+        captured["inner_argv"] = list(argv)
+        return ["/usr/bin/bwrap", *argv]
+
+    def fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        raise RuntimeError("stop after spawn")
+
+    monkeypatch.setattr(confinement, "wrap_argv", fake_wrap)
+    monkeypatch.setattr(runners, "_popen_process_group", fake_popen)
+    raw = _contract(ws, backend="pi_rpc", options={"tools": "read", "sandbox": "read-only"})
+    raw["authorization"] = {"class": "read_only", "approved": True}
+    with pytest.raises(RuntimeError, match="stop after spawn"):
+        runners._worker_pi("/bin/true", raw, 1, tmp_path / "log.jsonl", root)
+
+    assert captured["argv"][0] == "/usr/bin/bwrap"
+    assert captured["workspace"] == ws.resolve()
+    assert captured["writable"] is False
+    assert "--no-extensions" in captured["inner_argv"]

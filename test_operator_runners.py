@@ -51,6 +51,16 @@ def _enable_workspace(monkeypatch: pytest.MonkeyPatch, ws: Path) -> None:
     monkeypatch.setenv(op.OPERATOR_ALLOWED_PATHS_ENV, str(ws))
 
 
+def _enable_pi_confinement(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub a usable boundary in tests that are not exercising confinement itself."""
+    monkeypatch.setattr(runners.confinement, "confinement_available", lambda *, writable=True: True)
+    monkeypatch.setattr(
+        runners.confinement,
+        "wrap_argv",
+        lambda argv, workspace, *, writable=True: list(argv),
+    )
+
+
 def test_builtin_backends_registered():
     names = {item["name"] for item in runners.list_backends()}
     assert {"fleet", "pi_rpc", "omx", "codex"}.issubset(names)
@@ -89,6 +99,7 @@ def test_pi_rpc_dry_run_uses_rpc_plan(tmp_path: Path, monkeypatch: pytest.Monkey
     root = tmp_path / "hermes"
     root.mkdir()
     _enable_workspace(monkeypatch, ws)
+    _enable_pi_confinement(monkeypatch)
     backend = runners.get_backend("pi_rpc")
     monkeypatch.setattr(backend, "executable", lambda: "/bin/true")
     raw = _contract(ws, backend="pi_rpc", options={"model": "x/y"})
@@ -132,6 +143,7 @@ def test_pi_defaults_and_profile_credential_reference_are_applied(tmp_path: Path
 
 
 def test_pi_rpc_prompt_rejection_fails_immediately(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _enable_pi_confinement(monkeypatch)
     pi_dir = tmp_path / "pi-agent"
     pi_dir.mkdir()
     (pi_dir / "settings.json").write_text(
@@ -159,6 +171,7 @@ def test_pi_rpc_prompt_rejection_fails_immediately(tmp_path: Path, monkeypatch: 
 
 
 def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _enable_pi_confinement(monkeypatch)
     pi_dir = tmp_path / "pi-agent"
     pi_dir.mkdir()
     (pi_dir / "settings.json").write_text(json.dumps({}), encoding="utf-8")
@@ -452,6 +465,7 @@ def test_popen_failure_deletes_request_envelope(tmp_path: Path, monkeypatch: pyt
     root = tmp_path / "hermes"
     root.mkdir()
     _enable_workspace(monkeypatch, ws)
+    _enable_pi_confinement(monkeypatch)
     backend = runners.get_backend("pi_rpc")
     monkeypatch.setattr(backend, "executable", lambda: "/bin/true")
 
@@ -738,6 +752,7 @@ def test_runner_backend_allowlist_blocks_unexpected_backend(tmp_path: Path, monk
 
 
 def test_runner_provider_model_allowlists_are_enforced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _enable_pi_confinement(monkeypatch)
     pi_dir = tmp_path / "pi-agent"
     pi_dir.mkdir()
     (pi_dir / "settings.json").write_text(json.dumps({"defaultProvider": "expensive-provider", "defaultModel": "expensive-model"}), encoding="utf-8")
