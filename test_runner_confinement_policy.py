@@ -14,7 +14,6 @@ from test_operator_runners import _contract, _enable_workspace
 @pytest.fixture(autouse=True)
 def _clean_confinement_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(confinement.CONFINEMENT_ENABLE_ENV, raising=False)
-    monkeypatch.delenv(confinement.WORKSPACE_ROOT_ENV, raising=False)
 
 
 def _confinement_active(monkeypatch: pytest.MonkeyPatch, active: bool) -> None:
@@ -33,6 +32,25 @@ def test_writable_pi_allowed_when_confinement_on(tmp_path: Path, monkeypatch: py
     _confinement_active(monkeypatch, True)
     raw = _contract(tmp_path, backend="pi_rpc", options={"tools": "read,write,edit", "sandbox": "workspace-write"})
     assert runners._pi_tools(raw) == "read,write,edit"
+
+
+@pytest.mark.parametrize("auth_class", ["none", "read_only"])
+@pytest.mark.parametrize("write_tool", ["write", "edit", "bash"])
+def test_read_authorization_cannot_gain_write_tools_with_confinement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    auth_class: str,
+    write_tool: str,
+):
+    _confinement_active(monkeypatch, True)
+    raw = _contract(
+        tmp_path,
+        backend="pi_rpc",
+        options={"tools": f"read,{write_tool}", "sandbox": "workspace-write"},
+    )
+    raw["authorization"] = {"class": auth_class, "approved": True}
+    with pytest.raises(PermissionError, match="authorization.class"):
+        runners._pi_tools(raw)
 
 
 def test_writable_pi_requires_workspace_write_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -321,24 +321,36 @@ def _authorization_class(contract: dict[str, Any]) -> str:
     return str(contract.get("authorization", {}).get("class") or "none")
 
 
+_PI_WRITE_AUTH_CLASSES = frozenset({"reversible_write", "high_impact"})
+
+
 def _pi_tools(contract: dict[str, Any]) -> str:
     """Return Pi tools for the execution posture.
 
     Pi remains limited to its read tool unless (a) the contract's
     authorization class permits writes, (b) the contract requests the
     ``workspace-write`` sandbox, and (c) OS-level filesystem confinement
-    is enabled and available. CWD alone is never treated as a sandbox;
-    confinement must be backed by bubblewrap/sandbox-exec (see
-    ``runner_confinement``). This fails closed: when confinement is not
-    active, write-capable toolsets are rejected.
+    is enabled and demonstrably usable. CWD alone is never treated as a
+    sandbox; confinement must be backed by a successful bubblewrap/
+    sandbox-exec capability probe (see ``runner_confinement``).
     """
     options = ((contract.get("execution") or {}).get("options") or {})
     auth_class = _authorization_class(contract)
-    if auth_class not in {"none", "read_only"} and not confinement.confinement_available():
-        raise PermissionError(
-            "pi_rpc write tools require filesystem confinement; set "
-            f"{confinement.CONFINEMENT_ENABLE_ENV}=1 and install bubblewrap (or sandbox-exec on macOS)"
-        )
+    writable_auth = auth_class in _PI_WRITE_AUTH_CLASSES
+    confinement_ok: bool | None = None
+
+    # Preserve the existing fail-closed posture for contracts that carry a
+    # write-authorized class: without a usable OS boundary, pi_rpc is not an
+    # eligible execution backend even if the caller only requested ``read``.
+    if writable_auth:
+        confinement_ok = confinement.confinement_available()
+        if not confinement_ok:
+            raise PermissionError(
+                "pi_rpc write-authorized contracts require usable filesystem confinement; set "
+                f"{confinement.CONFINEMENT_ENABLE_ENV}=1 and install a working bubblewrap "
+                "(or sandbox-exec on macOS)"
+            )
+
     requested = options.get("tools")
     if requested is None or requested == "":
         return "read"
@@ -347,15 +359,26 @@ def _pi_tools(contract: dict[str, Any]) -> str:
     tools = [item.strip() for item in requested.split(",") if item.strip()]
     if not tools:
         raise ValueError("pi_rpc execution.options.tools must not be empty")
+
     write_tools = set(tools) - {"read"}
     if write_tools:
-        if auth_class not in {"none", "read_only"} and not confinement.confinement_available():
-            raise PermissionError("pi_rpc is read-only until filesystem confinement is available")
-        if not confinement.confinement_available():
-            raise PermissionError("pi_rpc may only enable Pi's read tool until filesystem confinement is available")
+        # Authorization is a separate trust boundary from OS confinement.
+        # A usable sandbox must never upgrade ``none``/``read_only`` into a
+        # write-capable contract.
+        if not writable_auth:
+            raise PermissionError(
+                "pi_rpc read-only authorization may only enable Pi's read tool; write tools require "
+                "authorization.class=reversible_write or high_impact"
+            )
         sandbox = options.get("sandbox")
         if sandbox != "workspace-write":
             raise PermissionError("pi_rpc write tools require execution.options.sandbox=workspace-write")
+        # ``writable_auth`` was already capability-gated above. Keep this
+        # explicit assertion adjacent to the write-tools branch so future
+        # refactors cannot accidentally make confinement optional here.
+        if confinement_ok is not True:
+            raise PermissionError("pi_rpc write tools require usable filesystem confinement")
+
     return ",".join(dict.fromkeys(tools))
 
 

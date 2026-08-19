@@ -530,33 +530,51 @@ the process working directory. CWD is not a sandbox: absolute paths, `..`
 traversal, and shell `cd` can escape a plain current working directory.
 
 Confinement uses bubblewrap (`bwrap`) on Linux and `sandbox-exec` on macOS to
-run the Pi child with the contract workspace bound read-write and the rest of
-the host filesystem read-only. The confined process physically cannot write
-outside its workspace, regardless of which tools it enables.
+run the Pi child with the contract's explicitly authorized workspace bound
+read-write. On Linux, unrelated host paths are either absent or mounted
+read-only; on macOS, the sandbox profile denies host writes outside the
+workspace.
 
 Configuration:
 
 - `HERMES_GPT_ENABLE_RUNNER_CONFINEMENT=1` — opt in to confinement (off by
   default; when off, `pi_rpc` stays read-only exactly as before).
-- `HERMES_GPT_RUNNER_WORKSPACE_ROOT` — root directory for confined runner
-  workspaces (default `<hermes_root>/runner-workspaces`).
 
 A write-capable `pi_rpc` contract requires **all** of:
 
-1. an authorization class that permits writes,
+1. a write-authorized class (`reversible_write` or `high_impact`); `none` and
+   `read_only` can never enable `bash`, `edit`, or `write`,
 2. `execution.options.sandbox=workspace-write`,
 3. `HERMES_GPT_ENABLE_RUNNER_CONFINEMENT=1` with the OS confinement binary
-   installed and available.
+   installed **and a bounded capability probe succeeding on the current host**.
 
-If any condition is missing, dispatch fails closed with a `PermissionError`
-before any subprocess starts. Artifact and path checks additionally reject
+Binary presence alone is not treated as availability. The capability probe
+launches the same confinement wrapper used for runner children and verifies
+that a temporary workspace is host-writable while an attempted sibling write
+outside that workspace cannot modify the corresponding host path (it may be
+denied or land in a private sandbox filesystem). Probe failure, timeout, or an
+unusable namespace/profile
+causes confinement to report unavailable and dispatch fails closed with a
+`PermissionError` before the runner child starts. Before a write-capable child
+is wrapped, the workspace boundary is also validated for inode/mount aliases:
+pre-existing hard links with any alias outside the workspace and nested mount
+points are rejected. Artifact and path checks additionally reject
 absolute paths, `..` traversal, and symlink escapes relative to the authorized
 workspace (`runner_confinement.confine_path`).
 
-Note for Linux deployments: install `bubblewrap` (e.g.
-`apt install bubblewrap`) and verify it works in your environment (some
-containerized hosts restrict user namespaces; confinement then reports
-unavailable and write tools stay disabled rather than silently downgrading).
+On Linux, the wrapper exposes only the read-only system/runtime trees needed
+to launch the runner, plus a narrowly selected read-only runtime tree when the
+runner executable is installed outside system prefixes (for example Pi below
+`~/.local/.../node_modules`). The rest of the user's home directory is not
+mounted into the sandbox. `/tmp` and `/run` are private sandbox filesystems, so
+host temporary files and Unix-domain service sockets are not exposed. The
+authorized workspace is the only host tree bound read-write, and the child is
+started with all Linux capabilities dropped so a privileged launch cannot
+remount the boundary writable. Install
+`bubblewrap` (e.g. `apt install bubblewrap`) and verify it works in your
+environment; some containerized hosts restrict user namespaces, in which case
+the capability probe fails and write tools stay disabled rather than silently
+downgrading.
 
 The built-in `pi_rpc` backend remains **read-only by default** until
 confinement is explicitly enabled. Without confinement, `pi_rpc` only permits

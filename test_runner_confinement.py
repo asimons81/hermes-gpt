@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,7 +16,6 @@ import runner_confinement as confinement
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(confinement.CONFINEMENT_ENABLE_ENV, raising=False)
-    monkeypatch.delenv(confinement.WORKSPACE_ROOT_ENV, raising=False)
 
 
 def test_confinement_disabled_by_default():
@@ -24,38 +25,46 @@ def test_confinement_disabled_by_default():
 
 def test_confinement_requires_os_tool(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(confinement.CONFINEMENT_ENABLE_ENV, "1")
-    if confinement.confinement_tool() is None:
-        # Enabled but no tool: must fail closed.
-        assert confinement.confinement_available() is False
-    else:
-        assert confinement.confinement_available() is True
+    monkeypatch.setattr(confinement, "confinement_tool", lambda: None)
+    assert confinement.confinement_available() is False
 
 
-def test_workspace_root_default(tmp_path: Path):
-    root = confinement.confinement_workspace_root(tmp_path)
-    assert root == tmp_path / confinement.DEFAULT_WORKSPACE_DIR
+def test_confinement_requires_successful_capability_probe(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(confinement.CONFINEMENT_ENABLE_ENV, "1")
+    monkeypatch.setattr(confinement, "confinement_tool", lambda: "/usr/bin/fake-confinement")
+    monkeypatch.setattr(confinement, "_probe_confinement", lambda tool: False)
+    assert confinement.confinement_available() is False
+
+    monkeypatch.setattr(confinement, "_probe_confinement", lambda tool: True)
+    assert confinement.confinement_available() is True
 
 
-def test_workspace_root_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    override = tmp_path / "custom"
-    monkeypatch.setenv(confinement.WORKSPACE_ROOT_ENV, str(override))
-    assert confinement.confinement_workspace_root(tmp_path) == override
+def test_probe_failure_is_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        confinement,
+        "_wrap_argv_with_tool",
+        lambda argv, workspace, tool: ["/usr/bin/fake-confinement", *argv],
+    )
+    monkeypatch.setattr(
+        confinement.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 1),
+    )
+    assert confinement._probe_confinement("/usr/bin/fake-confinement") is False
 
 
-def test_confined_workspace_creates_directory(tmp_path: Path):
-    ws = confinement.confined_workspace("task-123", tmp_path)
-    assert ws.is_dir()
-    assert ws == tmp_path / confinement.DEFAULT_WORKSPACE_DIR / "task-123" / "workspace"
+def test_probe_timeout_is_fail_closed(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        confinement,
+        "_wrap_argv_with_tool",
+        lambda argv, workspace, tool: ["/usr/bin/fake-confinement", *argv],
+    )
 
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=confinement._PROBE_TIMEOUT_SECONDS)
 
-def test_confined_workspace_rejects_hostile_task_id(tmp_path: Path):
-    # Traversal characters are sanitized away: the task id must resolve to a
-    # single component under the workspace root.
-    ws = confinement.confined_workspace("../escape", tmp_path)
-    assert ws.parent.parent == tmp_path / confinement.DEFAULT_WORKSPACE_DIR
-    assert "/" not in ws.parent.name and ".." not in ws.parent.name
-    with pytest.raises(ValueError):
-        confinement.confined_workspace("", tmp_path)
+    monkeypatch.setattr(confinement.subprocess, "run", timeout)
+    assert confinement._probe_confinement("/usr/bin/fake-confinement") is False
 
 
 def test_confine_path_accepts_inside(tmp_path: Path):
@@ -91,13 +100,68 @@ def test_confine_path_rejects_symlink_escape(tmp_path: Path):
         confinement.confine_path(base, link)
 
 
+def test_workspace_boundary_rejects_hardlink_alias_outside(tmp_path: Path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("safe")
+    os.link(outside, ws / "alias.txt")
+    with pytest.raises(PermissionError, match="hard link"):
+        confinement.validate_workspace_boundary(ws)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux mountinfo only")
+def test_linux_nested_mount_parser_handles_escaped_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "work space"
+    ws.mkdir()
+    escaped_ws = str(ws).replace(" ", "\\040")
+    nested = ws / "nested mount"
+    escaped_nested = str(nested).replace(" ", "\\040")
+    mountinfo = (
+        f"10 1 0:1 / {escaped_ws} rw - tmpfs tmpfs rw\n"
+        f"11 10 0:2 / {escaped_nested} rw - tmpfs tmpfs rw\n"
+    )
+    monkeypatch.setattr(Path, "read_text", lambda self, **kwargs: mountinfo)
+    assert confinement._linux_nested_mounts(ws) == [nested]
+
+
+def test_workspace_boundary_rejects_nested_mount(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setattr(confinement, "_linux_nested_mounts", lambda root: [root / "mounted"])
+    with pytest.raises(PermissionError, match="nested mount point"):
+        confinement.validate_workspace_boundary(ws)
+
+
+def test_workspace_boundary_allows_hardlinks_fully_inside(tmp_path: Path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    first = ws / "first.txt"
+    first.write_text("safe")
+    os.link(first, ws / "second.txt")
+    assert confinement.validate_workspace_boundary(ws) == ws.resolve()
+
+
+def test_macos_profile_escapes_workspace_literal():
+    profile = confinement._macos_sandbox_profile('/tmp/a"b\\c\nworkspace')
+    assert 'subpath "/tmp/a\\"b\\\\c\\nworkspace"' in profile
+    assert '\nworkspace")' not in profile
+
+
 @pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="requires bwrap on linux")
 def test_wrap_argv_linux_shape(tmp_path: Path):
     ws = tmp_path / "ws"
     ws.mkdir()
-    wrapped = confinement.wrap_argv(["pi", "--mode", "rpc"], ws)
+    wrapped = confinement.wrap_argv(["/usr/bin/true"], ws)
     assert wrapped[0].endswith("bwrap")
+    assert wrapped[1:4] == ["--ro-bind-try", "/usr", "/usr"]
+    assert ["--tmpfs", "/tmp"] == wrapped[wrapped.index("--tmpfs"):wrapped.index("--tmpfs") + 2]
+    assert "--run" not in wrapped
+    assert "/run" in wrapped
     assert "--bind" in wrapped
+    cap_drop = wrapped.index("--cap-drop")
+    assert wrapped[cap_drop:cap_drop + 2] == ["--cap-drop", "ALL"]
+    assert "--new-session" in wrapped
     assert str(ws.resolve()) in wrapped
 
 
