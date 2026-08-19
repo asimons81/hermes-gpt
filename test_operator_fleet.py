@@ -253,6 +253,76 @@ def test_fleet_dispatch_sends_to_registered_agent_and_redacts_prompt_from_output
     assert calls[-1] == [HERMES, "a2a", "send", "--json", "rza", "--", message]
 
 
+def test_official_send_timeout_recovers_peer_task_id_by_context(monkeypatch):
+    monkeypatch.setattr(fleet, "_fetch_card", lambda *args, **kwargs: {})
+    calls = []
+
+    def fake_post(url, body, headers, timeout):
+        calls.append(body)
+        if body["method"] == "SendMessage":
+            raise TimeoutError("peer reply timed out")
+        assert body["method"] == "ListTasks"
+        context_id = body["params"]["contextId"]
+        assert context_id == calls[0]["params"]["message"]["contextId"]
+        return {"result": {"tasks": [{"id": "task-peer123"}]}}
+
+    monkeypatch.setattr(fleet, "_http_post_json", fake_post)
+    peer = {"url": "http://rza.example:8765", "auth": {}, "timeout": 30}
+
+    with pytest.raises(fleet.FleetDispatchTimeout) as excinfo:
+        fleet._send_message("rza", peer, "long-running task", 30)
+
+    assert excinfo.value.task_id == "task-peer123"
+    assert [call["method"] for call in calls] == ["SendMessage", "ListTasks"]
+
+
+def test_fleet_dispatch_timeout_returns_pollable_task_id(monkeypatch):
+    enable_workspace(monkeypatch)
+    monkeypatch.setattr(fleet, "_registered_agent", lambda *args, **kwargs: ("rza", None))
+    monkeypatch.setattr(fleet, "_a2a_peers_with_resolved_tokens", lambda: {
+        "rza": {"url": "http://rza.example:8765", "auth": {}},
+    })
+    monkeypatch.setattr(
+        fleet,
+        "_send_message",
+        lambda *args, **kwargs: (_ for _ in ()).throw(fleet.FleetDispatchTimeout("task-timeout123")),
+    )
+
+    out = json.loads(fleet.hermes_fleet_dispatch(
+        agent="rza", message="long-running task", dry_run=False, confirm=True,
+    ))
+
+    assert out["success"] is False
+    assert out["code"] == "FLEET_DISPATCH_TIMEOUT"
+    assert out["task_id"] == "task-timeout123"
+    assert out["submission_may_have_succeeded"] is True
+    assert "hermes_fleet_task" in out["suggested_action"]
+
+
+def test_work_order_timeout_returns_remote_pollable_task_id(monkeypatch, tmp_path):
+    enable_workspace(monkeypatch)
+    monkeypatch.setattr(fleet, "_registered_agent", lambda *args, **kwargs: ("rza", None))
+    monkeypatch.setattr(fleet, "_verify_live_peer", lambda *args, **kwargs: None)
+    monkeypatch.setattr(fleet, "_a2a_peers_with_resolved_tokens", lambda: {
+        "rza": {"url": "http://rza.example:8765", "auth": {}},
+    })
+    monkeypatch.setattr(
+        fleet,
+        "_send_message",
+        lambda *args, **kwargs: (_ for _ in ()).throw(fleet.FleetDispatchTimeout("task-timeout456")),
+    )
+
+    out = json.loads(fleet.hermes_fleet_dispatch_work_order(
+        **work_order(), dry_run=False, confirm=True,
+        authority_manifest=authority_manifest(tmp_path),
+    ))
+
+    assert out["success"] is False
+    assert out["code"] == "FLEET_DISPATCH_TIMEOUT"
+    assert out["task_id"] == "task-timeout456"
+    assert out["submission_may_have_succeeded"] is True
+
+
 def test_fleet_task_rejects_unknown_agent_before_any_remote_command(monkeypatch):
     enable_read_only(monkeypatch)
     calls: list[list[str]] = []

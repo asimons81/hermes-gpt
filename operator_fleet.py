@@ -95,6 +95,18 @@ class PeerVerificationError(RuntimeError):
     """A live Agent Card could not be safely matched to local authority."""
 
 
+class FleetDispatchTimeout(TimeoutError):
+    """A peer may have accepted a task even though the reply timed out.
+
+    ``task_id`` is the peer-assigned A2A task id recovered by context lookup,
+    not the local JSON-RPC request id.
+    """
+
+    def __init__(self, task_id: str):
+        super().__init__("timed out awaiting A2A peer reply")
+        self.task_id = task_id
+
+
 def _a2a_mode() -> str:
     """Return the configured A2A backend mode: 'official', 'bridge', or 'auto'."""
     value = os.environ.get(A2A_REGISTRY_MODE_ENV, "auto").strip().lower()
@@ -223,14 +235,28 @@ def _fetch_card(base_url: str, headers: dict[str, str], timeout: int) -> dict[st
     return _http_get_json(base_url.rstrip("/") + "/.well-known/agent.json", headers, timeout)
 
 
-def _rpc_url(base_url: str, card: dict[str, Any] | None) -> str:
+def _jsonrpc_interface(card: dict[str, Any] | None) -> dict[str, Any] | None:
     if isinstance(card, dict):
         for iface in card.get("supportedInterfaces", []) or []:
             if isinstance(iface, dict) and iface.get("protocolBinding") == "JSONRPC" and isinstance(iface.get("url"), str):
-                return iface["url"]
-        if isinstance(card.get("url"), str) and card["url"]:
-            return card["url"]
+                return iface
+    return None
+
+
+def _rpc_url(base_url: str, card: dict[str, Any] | None) -> str:
+    iface = _jsonrpc_interface(card)
+    if iface is not None:
+        return str(iface["url"])
+    if isinstance(card, dict) and isinstance(card.get("url"), str) and card["url"]:
+        return card["url"]
     return base_url.rstrip("/")
+
+
+def _interface_tenant(card: dict[str, Any] | None, peer: dict[str, Any]) -> str:
+    iface = _jsonrpc_interface(card)
+    if iface is not None and iface.get("tenant"):
+        return str(iface["tenant"])
+    return str(peer.get("tenant") or "")
 
 
 def _send_message(agent: str, peer: dict[str, Any], text: str, timeout: int) -> dict[str, Any]:
@@ -248,20 +274,58 @@ def _send_message(agent: str, peer: dict[str, Any], text: str, timeout: int) -> 
         pass
 
     rpc_url = _rpc_url(base_url, card)
-    task_id = f"task-{hashlib.sha256((agent + text + str(os.urandom(8))).encode()).hexdigest()[:16]}"
+    request_id = f"req-{hashlib.sha256((agent + text + str(os.urandom(8))).encode()).hexdigest()[:16]}"
+    context_id = f"ctx-{hashlib.sha256((request_id + str(os.urandom(8))).encode()).hexdigest()[:16]}"
     body = {
         "jsonrpc": "2.0",
-        "id": task_id,
+        "id": request_id,
         "method": "SendMessage",
         "params": {
             "message": {
                 "role": "ROLE_USER",
                 "parts": [{"text": text, "mediaType": "text/plain"}],
-                "messageId": task_id.replace("task-", "msg-"),
+                "messageId": request_id.replace("req-", "msg-"),
+                "contextId": context_id,
             },
         },
     }
-    resp = _http_post_json(rpc_url, body, headers, cap)
+    tenant = _interface_tenant(card, peer)
+    if tenant:
+        body["params"]["tenant"] = tenant
+
+    def recover_task_id() -> str:
+        lookup = {
+            "jsonrpc": "2.0",
+            "id": f"lookup-{request_id}",
+            "method": "ListTasks",
+            "params": {
+                "contextId": context_id,
+                "pageSize": 5,
+                "includeArtifacts": False,
+                "historyLength": 0,
+            },
+        }
+        if tenant:
+            lookup["params"]["tenant"] = tenant
+        recovered = _http_post_json(rpc_url, lookup, headers, min(max(cap, 5), 15))
+        result = recovered.get("result", {}) if isinstance(recovered, dict) else {}
+        tasks = result.get("tasks", []) if isinstance(result, dict) else []
+        matches = [
+            item.get("id") for item in tasks
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and _TASK_ID_RE.fullmatch(item["id"])
+        ]
+        if len(matches) != 1:
+            raise RuntimeError("could not uniquely recover peer task after timeout")
+        return matches[0]
+
+    try:
+        resp = _http_post_json(rpc_url, body, headers, cap)
+    except TimeoutError as exc:
+        raise FleetDispatchTimeout(recover_task_id()) from exc
+    except urllib.error.URLError as exc:
+        if isinstance(getattr(exc, "reason", None), TimeoutError):
+            raise FleetDispatchTimeout(recover_task_id()) from exc
+        raise
     if not isinstance(resp, dict):
         raise ValueError("A2A peer returned a non-JSON-RPC response")
     if "error" in resp:
@@ -286,6 +350,9 @@ def _get_task(agent: str, peer: dict[str, Any], task_id: str, timeout: int) -> d
         "method": "GetTask",
         "params": {"id": task_id},
     }
+    tenant = _interface_tenant(card, peer)
+    if tenant:
+        body["params"]["tenant"] = tenant
     resp = _http_post_json(rpc_url, body, headers, cap)
     if not isinstance(resp, dict):
         raise ValueError("A2A peer returned a non-JSON-RPC response")
@@ -371,6 +438,21 @@ def _registry(*, runner: Runner | None, hermes_bin: str | None, timeout: int = _
 
 def _error(code: str, message: str, action: str) -> str:
     return json.dumps(op.make_error_envelope(layer="operator", code=code, safe_message=message, suggested_action=action), indent=2)
+
+
+def _dispatch_timeout_error(agent: str, task_id: str) -> str:
+    payload = op.make_error_envelope(
+        layer="operator",
+        code="FLEET_DISPATCH_TIMEOUT",
+        safe_message="timed out awaiting A2A peer reply; remote task state is unknown",
+        suggested_action="Call hermes_fleet_task with the returned task_id before retrying dispatch.",
+    )
+    payload.update({
+        "agent": agent,
+        "task_id": task_id,
+        "submission_may_have_succeeded": True,
+    })
+    return json.dumps(payload, indent=2)
 
 
 def _clean_text(value: Any, *, field: str, maximum: int = _MAX_TEXT, required: bool = True) -> str:
@@ -772,6 +854,16 @@ def hermes_fleet_dispatch(agent: str, message: str, confirm: bool = False, dry_r
         op.audit_record(tool="hermes_fleet_dispatch", level=policy.level, apply_mode=policy.apply_mode, dry_run=False, success=True,
                         changed=True, summary=f"fleet task submitted to {peer}", prompt=message, job_id=task_id, extra={"agent": peer, "state": status.get("state")})
         return json.dumps({"success": True, "changed": True, "agent": peer, "task_id": task_id, "state": status.get("state")}, indent=2)
+    except FleetDispatchTimeout as exc:
+        op.audit_record(
+            tool="hermes_fleet_dispatch", level=policy.level, apply_mode=policy.apply_mode,
+            dry_run=False, success=False, changed=True,
+            summary=f"fleet dispatch timed out after submission to {agent}",
+            error="peer reply timed out; remote task state unknown",
+            prompt=message, job_id=exc.task_id,
+            extra={"agent": agent, "submission_may_have_succeeded": True},
+        )
+        return _dispatch_timeout_error(agent, exc.task_id)
     except LookupError:
         return _error("UNKNOWN_AGENT", "agent is not a registered fleet peer", "Call hermes_fleet_list and use one returned name.")
     except PermissionError as exc:
@@ -839,6 +931,21 @@ def hermes_fleet_dispatch_work_order(agent: str, task_id: str, target_profile: s
         return json.dumps({"success": True, "changed": True, "agent": peer, "task_id": remote_id,
                            "requested_task_id": task_id, "state": status.get("state"), "live_peer_verified": True,
                            "prompt_sha256": digest}, indent=2)
+    except FleetDispatchTimeout as exc:
+        op.audit_record(
+            tool="hermes_fleet_dispatch_work_order", level=policy.level, apply_mode=policy.apply_mode,
+            dry_run=False, success=False, changed=True,
+            summary=f"fleet work-order timed out after submission to {agent}",
+            error="peer reply timed out; remote task state unknown",
+            prompt=canonical, job_id=exc.task_id,
+            extra={
+                "agent": agent,
+                "profile": target_profile,
+                "requested_task_id": task_id,
+                "submission_may_have_succeeded": True,
+            },
+        )
+        return _dispatch_timeout_error(agent, exc.task_id)
     except LookupError:
         return _error("UNKNOWN_AGENT", "agent is not a registered fleet peer", "Call hermes_fleet_list and use one returned name.")
     except FileNotFoundError:
