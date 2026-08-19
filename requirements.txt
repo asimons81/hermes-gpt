@@ -1,2 +1,2 @@
-mcp[cli]
+mcp[cli]>=1.0,<2
 uvicorn
