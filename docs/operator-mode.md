@@ -586,9 +586,14 @@ host temporary files and Unix-domain service sockets are not exposed. The
 authorized workspace is bound read-only for read-only sessions and read-write
 only for authorized write sessions. All Linux capabilities are dropped so a
 privileged launch cannot remount the boundary writable. On macOS, the
-`sandbox-exec` profile likewise denies host reads outside the workspace and
-minimal runtime allowlist, and grants a workspace write exception only in
-writable posture.
+`sandbox-exec` profile likewise denies host reads outside the workspace and a
+narrow runtime allowlist. System code is limited to required system/runtime
+roots, while host configuration trees such as `/Library`, `/etc`, and
+`/private/etc` are not exposed wholesale; only concrete runtime files needed
+for name resolution, service lookup, devices, and time data are allowed. A
+non-system Pi/Node installation is exposed only through its narrowly selected
+runtime tree. Writable posture adds a workspace write exception and nothing
+broader.
 
 Install `bubblewrap` (e.g. `apt install bubblewrap`) and verify it works in your
 environment; some containerized hosts restrict user namespaces. In any case,

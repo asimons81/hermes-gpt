@@ -187,6 +187,26 @@ def test_macos_writable_profile_denies_host_reads_outside_runtime_and_workspace(
     assert f'(allow file-write* (subpath "{ws}"))' in profile
 
 
+def test_macos_profile_does_not_expose_broad_config_trees(tmp_path: Path):
+    ws = tmp_path / "ws"
+    profile = confinement._macos_sandbox_profile(str(ws), writable=False)
+    assert '(subpath "/Library")' not in profile
+    assert '(subpath "/etc")' not in profile
+    assert '(subpath "/private/etc")' not in profile
+    assert '(literal "/etc/hosts")' in profile
+    assert '(literal "/private/etc/resolv.conf")' in profile
+    assert '(literal "/private/var/run/resolv.conf")' in profile
+
+
+def test_macos_node_runtime_root_scopes_homebrew_keg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    node_root = tmp_path / "homebrew" / "Cellar" / "node" / "22.0.0"
+    executable = node_root / "bin" / "node"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("node", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda name: str(executable) if name == "node" else None)
+    assert confinement._macos_node_runtime_root() == node_root.resolve()
+
+
 def test_macos_read_only_profile_denies_host_reads_and_workspace_writes(tmp_path: Path):
     ws = tmp_path / "ws"
     runtime = tmp_path / "runtime"

@@ -68,7 +68,69 @@ def _macos_quote(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
 
 
-_MACOS_RO_PATHS = ("/System", "/usr", "/bin", "/sbin", "/Library", "/etc", "/private/etc", "/dev")
+_MACOS_RO_SUBPATHS = (
+    "/System",
+    "/usr/bin",
+    "/usr/lib",
+    "/usr/libexec",
+    "/usr/share/zoneinfo",
+    "/var/db/timezone/zoneinfo",
+    "/bin",
+    "/sbin",
+)
+_MACOS_RO_FILES = (
+    "/dev/null",
+    "/dev/random",
+    "/dev/urandom",
+    "/dev/tty",
+    "/etc/hosts",
+    "/private/etc/hosts",
+    "/etc/resolv.conf",
+    "/private/etc/resolv.conf",
+    "/var/run/resolv.conf",
+    "/private/var/run/resolv.conf",
+    "/etc/services",
+    "/private/etc/services",
+    "/etc/protocols",
+    "/private/etc/protocols",
+    "/etc/localtime",
+    "/private/etc/localtime",
+)
+
+
+def _macos_node_runtime_root() -> Path | None:
+    """Return a narrowly scoped non-system Node runtime tree, if required."""
+    node = shutil.which("node")
+    if not node:
+        return None
+    try:
+        executable = Path(node).resolve()
+    except OSError:
+        executable = Path(node)
+    for system_root in (Path(item) for item in _MACOS_RO_SUBPATHS):
+        if _path_within(executable, system_root):
+            return None
+
+    parts = executable.parts
+    if "Cellar" in parts:
+        index = parts.index("Cellar")
+        # Homebrew: .../Cellar/node/<version>/bin/node. Expose only the Node
+        # keg, not the rest of the Homebrew prefix.
+        if len(parts) > index + 2:
+            return Path(*parts[: index + 3])
+    for marker in (".nvm", ".volta"):
+        if marker in parts:
+            index = parts.index(marker)
+            # These managers keep runtime files below their own versioned tree.
+            # The exact executable parent is sufficient for normal Node builds;
+            # widen only to the manager-specific Node version root when known.
+            if marker == ".nvm" and len(parts) > index + 4 and parts[index + 1:index + 3] == ("versions", "node"):
+                return Path(*parts[: index + 4])
+            if marker == ".volta" and "node" in parts[index + 1:]:
+                node_index = parts.index("node", index + 1)
+                if len(parts) > node_index + 1:
+                    return Path(*parts[: node_index + 2])
+    return executable.parent
 
 
 def _macos_sandbox_profile(
@@ -82,13 +144,24 @@ def _macos_sandbox_profile(
     rules = ["(version 1)", "(allow default)", "(deny file-write*)", "(deny file-read*)"]
 
     # Every Pi posture treats allowed_scope.workspaces as a read boundary.
-    # Permit only the system/runtime trees required to execute Pi plus the
-    # authorized workspace. Writable posture adds one file-write exception for
-    # that workspace; read-only posture has no host-write exception at all.
-    for source in _MACOS_RO_PATHS:
+    # Permit only system code roots, concrete OS runtime files, the exact Pi/
+    # Node runtime trees when installed outside system roots, and the workspace.
+    # Broad configuration/data trees such as /Library or /private/etc are never
+    # granted wholesale.
+    for source in _MACOS_RO_SUBPATHS:
         rules.append(f'(allow file-read* (subpath "{_macos_quote(source)}"))')
-    if runtime_root is not None:
-        rules.append(f'(allow file-read* (subpath "{_macos_quote(str(runtime_root))}"))')
+    for source in _MACOS_RO_FILES:
+        rules.append(f'(allow file-read* (literal "{_macos_quote(source)}"))')
+    runtime_roots = [runtime_root, _macos_node_runtime_root()]
+    seen_runtime_roots: set[str] = set()
+    for root in runtime_roots:
+        if root is None:
+            continue
+        root_value = str(root)
+        if root_value in seen_runtime_roots:
+            continue
+        seen_runtime_roots.add(root_value)
+        rules.append(f'(allow file-read* (subpath "{_macos_quote(root_value)}"))')
     rules.append(f'(allow file-read* (subpath "{escaped_workspace}"))')
     if writable:
         rules.append(f'(allow file-write* (subpath "{escaped_workspace}"))')
@@ -164,17 +237,10 @@ def _runtime_readonly_root(argv: list[str], workspace: Path) -> Path | None:
         executable = raw.resolve()
     except OSError:
         executable = raw
-    for system_root in (Path(item) for item in _LINUX_RO_PATHS):
-        if _path_within(executable, system_root):
-            return None
-    if _path_within(executable, Path("/opt")):
-        relative_parts = executable.relative_to("/opt").parts
-        if relative_parts:
-            return Path("/opt") / relative_parts[0]
-    # Pi's package CLI is commonly installed below ~/.local/.../node_modules.
-    # Expose the package itself (including its nested dependencies), not the
-    # entire enclosing node_modules tree, so unrelated globally installed
-    # packages do not become readable through Pi's built-in read tool.
+    # Pi's package CLI is commonly installed below a node_modules tree. Expose
+    # the package itself (including its nested dependencies), not the enclosing
+    # package manager prefix. This must run before generic /opt handling so a
+    # Homebrew Pi install does not expose all of /opt/homebrew.
     for parent in executable.parents:
         if parent.name != "node_modules":
             continue
@@ -183,6 +249,15 @@ def _runtime_readonly_root(argv: list[str], workspace: Path) -> Path | None:
             break
         package_parts = relative_parts[:2] if relative_parts[0].startswith("@") else relative_parts[:1]
         return parent.joinpath(*package_parts)
+
+    system_paths = _MACOS_RO_SUBPATHS if sys.platform == "darwin" else _LINUX_RO_PATHS
+    for system_root in (Path(item) for item in system_paths):
+        if _path_within(executable, system_root):
+            return None
+    if sys.platform.startswith("linux") and _path_within(executable, Path("/opt")):
+        relative_parts = executable.relative_to("/opt").parts
+        if relative_parts:
+            return Path("/opt") / relative_parts[0]
     parent = executable.parent
     if _path_within(parent, workspace):
         return None
