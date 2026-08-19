@@ -16,7 +16,7 @@ The built-in authorization server is intentionally narrow:
 - signed, five-minute stateless authorization codes plus bounded process-memory replay, access-token, and refresh-token stores;
 - no dynamic client registration, user accounts, persistent plaintext token database, or OpenID Provider claims.
 
-`openid` is accepted because ChatGPT may add it even with OIDC disabled. Hermes GPT does not advertise OpenID Provider metadata and does not issue ID tokens. Configure the ChatGPT connector with OIDC disabled.
+`openid` is accepted because ChatGPT may add it even with OIDC disabled. Hermes GPT does not advertise OpenID Provider metadata and does not issue ID tokens; `/.well-known/openid-configuration` is served as a public 404 (not an auth challenge) so clients that probe OIDC discovery with OIDC disabled do not mistake the connector for disconnected. Configure the ChatGPT connector with OIDC disabled.
 
 The client secret is the credential that prevents an arbitrary network caller from exchanging an authorization code. Public clients using token endpoint authentication method `none` are not supported. Do not expose an OAuth-enabled endpoint until a strong client secret is configured.
 

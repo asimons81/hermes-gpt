@@ -11,7 +11,7 @@
 
 - **Repository version:** 0.7.0
 - **Latest GitHub release:** v0.7.0
-- **Latest PyPI release:** 0.7.0
+- **Latest PyPI release:** 0.4.0 (PyPI has lagged GitHub since v0.5.0; check the badge for the current value)
 - **Python requirement:** 3.10+
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
@@ -211,7 +211,7 @@ The `hermes_contract_*` family makes completion verifiable instead of trusting a
 - `hermes_contract_validate` checks observed runs, artifacts, audit evidence, tests, and review evidence.
 - `hermes_contract_status` links a contract to bounded observed state.
 
-Validation is fail-closed. Missing evidence cannot become `SATISFIED`. v0.6.0 does not ship a production review-accept writer, so required review evidence must already exist through an authorized external review path or human approval reference.
+Validation is fail-closed. Missing evidence cannot become `SATISFIED`. Since v0.7.0, required review evidence can be recorded through the owner-gated `hermes_review_accept` writer (distinct reviewer enforced at write time); before v0.7.0 it had to already exist through an authorized external review path or human approval reference.
 
 ## Swarm Orchestration
 
