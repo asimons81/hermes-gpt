@@ -106,7 +106,21 @@ def is_loopback_host(host: str) -> bool:
 
 
 def is_hermes_root(path: Path) -> bool:
-    return path.exists() and ((path / "tools").is_dir() or (path / "hermes_state.py").exists())
+    """Return True when ``path`` looks like a Hermes agent SOURCE root.
+
+    Requires a regular ``tools`` package (``tools/__init__.py``) or a top-level
+    ``hermes_state.py``. A bare ``tools/`` directory is not enough: stray
+    namespace ``tools/`` dirs at the Hermes DATA root (e.g. an unrelated tool
+    install under ``~/.hermes/tools``) must not make the data root masquerade
+    as a source root — that poisoned ``sys.path`` and broke ``import tools``
+    (audit t_9d200636 Class C).
+    """
+    if not path.exists():
+        return False
+    tools_dir = path / "tools"
+    if tools_dir.is_dir() and (tools_dir / "__init__.py").is_file():
+        return True
+    return (path / "hermes_state.py").is_file()
 
 
 def candidate_roots() -> list[Path]:
