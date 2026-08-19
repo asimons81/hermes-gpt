@@ -492,6 +492,10 @@ class BearerAuthMiddleware:
         "/.well-known/oauth-protected-resource",
         "/.well-known/oauth-protected-resource/mcp",
         "/.well-known/oauth-authorization-server",
+        # ChatGPT probes OIDC discovery after OAuth even when OIDC is disabled.
+        # Keep this path unauthenticated so the normal router can return 404
+        # (no OpenID Provider is implemented) instead of an auth-challenge.
+        "/.well-known/openid-configuration",
         "/oauth/authorize",
         "/oauth/token",
     }
