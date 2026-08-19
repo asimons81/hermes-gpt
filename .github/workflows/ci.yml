@@ -62,6 +62,7 @@ jobs:
       - run: >-
           python -m ruff check
           operator_runners.py test_operator_runners.py
+          runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
           operator_export.py test_operator_export.py test_server_export.py
 
   windows-docs:

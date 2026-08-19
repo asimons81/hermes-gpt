@@ -527,12 +527,78 @@ Runner backends are execution transports for already-authorized work contracts;
 they are not completion authorities. Contract validation, expected artifacts,
 review requirements, and forbidden-action checks remain outside the backend.
 
-The built-in `pi_rpc` backend is intentionally **read-only** until Hermes GPT has
-a real filesystem confinement boundary. Starting a subprocess in a workspace is
-not a sandbox: absolute paths, `..` traversal, and shell `cd` can escape a plain
-current working directory. For that reason `pi_rpc` only permits Pi's `read` tool
-and rejects writable authorization classes. Use Fleet, Codex, or another backend
-with an appropriate sandbox boundary for write work.
+### Filesystem confinement
+
+Every `pi_rpc` session is gated on **OS-level filesystem confinement**, not on
+the process working directory. CWD is not a sandbox: absolute paths, `..`
+traversal, shell `cd`, and outward symlinks can escape a plain current working
+directory.
+
+Confinement uses bubblewrap (`bwrap`) on Linux and `sandbox-exec` on macOS to
+make `allowed_scope.workspaces` a physical read boundary. Read-only Pi sessions
+receive the authorized workspace read-only. Write-capable sessions receive that
+workspace read-write only after the independent authorization and sandbox gates
+have passed. Only the minimal read-only runtime trees required to execute Pi are
+exposed outside the workspace.
+
+Configuration:
+
+- `HERMES_GPT_ENABLE_RUNNER_CONFINEMENT=1` — opt in to confinement (off by
+  default; when off, `pi_rpc` dispatch fails closed, including read-only runs,
+  because workspace read scope cannot otherwise be enforced).
+
+Every `pi_rpc` contract requires an allowed workspace and a successful bounded
+capability probe for its exact posture. A write-capable contract additionally
+requires **all** of:
+
+1. a write-authorized class (`reversible_write` or `high_impact`); `none` and
+   `read_only` can never enable `bash`, `edit`, or `write`,
+2. `execution.options.sandbox=workspace-write`,
+3. `HERMES_GPT_ENABLE_RUNNER_CONFINEMENT=1` with the OS confinement binary
+   installed **and a bounded capability probe succeeding on the current host**.
+
+Binary presence alone is not treated as availability. The capability probe
+launches the same confinement posture used for the runner child. Both postures
+prove that the workspace is readable while absolute, `..`, and outward-symlink
+reads cannot reach a sibling host file. Writable posture additionally proves an
+in-workspace host write succeeds while an out-of-scope host write cannot modify
+the corresponding host path. Read-only posture proves the workspace itself
+cannot be mutated. Probe failure, timeout, or an unusable namespace/profile
+causes dispatch to fail closed with a `PermissionError` before Pi starts.
+
+Before any Pi child is wrapped, the workspace boundary is validated for
+path/inode/mount aliases. Pre-existing outward symlinks, hard links with any
+alias outside the workspace, special filesystem entries (device nodes, FIFOs,
+sockets, etc.), and nested mount points/filesystems are rejected. This matters
+for reads as well as writes: any of those aliases/channels can expose
+out-of-scope host data through an in-workspace pathname even when the workspace
+itself is read-only. Artifact/path validation also rejects absolute paths, `..`
+traversal, and symlink escapes where Hermes itself resolves paths
+(`runner_confinement.confine_path`). Pi's built-in read tool is protected by
+the OS confinement boundary rather than by that helper.
+
+On Linux, the wrapper exposes only the read-only system/runtime trees needed
+to launch the runner, plus a narrowly selected read-only runtime tree when the
+runner executable is installed outside system prefixes (for example Pi below
+`~/.local/.../node_modules`). The rest of the user's home directory is not
+mounted into the sandbox. `/tmp` and `/run` are private sandbox filesystems, so
+host temporary files and Unix-domain service sockets are not exposed. The
+authorized workspace is bound read-only for read-only sessions and read-write
+only for authorized write sessions. All Linux capabilities are dropped so a
+privileged launch cannot remount the boundary writable. On macOS, the
+`sandbox-exec` profile likewise denies host reads outside the workspace and a
+narrow runtime allowlist. System code is limited to required system/runtime
+roots, while host configuration trees such as `/Library`, `/etc`, and
+`/private/etc` are not exposed wholesale; only concrete runtime files needed
+for name resolution, service lookup, devices, and time data are allowed. A
+non-system Pi/Node installation is exposed only through its narrowly selected
+runtime tree. Writable posture adds a workspace write exception and nothing
+broader.
+
+Install `bubblewrap` (e.g. `apt install bubblewrap`) and verify it works in your
+environment; some containerized hosts restrict user namespaces. In any case,
+capability-probe failure disables `pi_rpc` entirely rather than silently
+falling back to an unconfined read-only child.
 
 External runner plugins are trusted in-process code. Setting
 `HERMES_GPT_ENABLE_RUNNER_PLUGINS=1` only enables discovery; each external entry
