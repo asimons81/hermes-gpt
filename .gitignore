@@ -28,3 +28,8 @@ tunnel-url.txt
 
 # Live deployment scripts (customized from examples/)
 *.ps1
+
+# Local agent/worktree state (not part of the source tree)
+.hardproof/
+.hermes/
+.worktrees/
