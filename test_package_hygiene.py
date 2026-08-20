@@ -20,12 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 GUARD = REPO_ROOT / "tools" / "check_package_hygiene.py"
 
 sys.path.insert(0, str(REPO_ROOT / "tools"))
-import check_package_hygiene as guard  # noqa: E402
-
-
-# ---------------------------------------------------------------------------
-# Unit tests for the pattern layer (fast, no build required)
-# ---------------------------------------------------------------------------
+import check_package_hygiene as guard  # noqa: I001
 
 
 @pytest.mark.parametrize(
@@ -52,8 +47,7 @@ def test_scan_flags_machine_home_paths(text):
     ],
 )
 def test_scan_allows_placeholders_and_localhost(text):
-    findings = guard.scan_text(text)
-    assert findings == [], findings
+    assert guard.scan_text(text) == []
 
 
 @pytest.mark.parametrize(
@@ -109,8 +103,7 @@ def test_scan_flags_operational_metrics(text):
     ],
 )
 def test_scan_does_not_false_positive_on_public_content(text):
-    findings = guard.scan_text(text)
-    assert findings == [], findings
+    assert guard.scan_text(text) == []
 
 
 @pytest.mark.parametrize(
@@ -143,11 +136,6 @@ def test_member_name_scan_allows_public_auth_related_modules_and_docs(name):
     assert guard.scan_member_name(name) == []
 
 
-# ---------------------------------------------------------------------------
-# Build + guard integration (real wheel and sdist)
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(scope="module")
 def built_artifacts(tmp_path_factory):
     """Build wheel + sdist once per module and return the artifact paths."""
@@ -172,6 +160,7 @@ def test_wheel_and_sdist_are_hygiene_clean(built_artifacts):
     """The release-blocking guard must pass on both built artifacts."""
     result = subprocess.run(
         [sys.executable, str(GUARD), *[str(a) for a in built_artifacts]],
+        check=False,
         capture_output=True,
         text=True,
         timeout=120,
@@ -193,23 +182,14 @@ def test_sdist_does_not_ship_internal_docs(built_artifacts):
     assert not any("docs/design/" in n or "docs/releases/" in n for n in names), (
         "sdist contains internal docs/design or docs/releases packets"
     )
-    assert any("docs/release-notes-v0.6.0.md" in n for n in names), (
-        "sdist missing public release notes"
-    )
-    assert any("docs/release-notes-v0.7.0.md" in n for n in names), (
-        "sdist missing v0.7 public release notes"
-    )
-    assert any("docs/retention-policy.md" in n for n in names), (
-        "sdist missing public retention policy"
-    )
-    assert any("docs/mcp-compatibility.md" in n for n in names), (
-        "sdist missing public MCP compatibility manifest"
-    )
+    assert any("docs/release-notes-v0.6.0.md" in n for n in names), "sdist missing public release notes"
+    assert any("docs/release-notes-v0.7.0.md" in n for n in names), "sdist missing v0.7 public release notes"
+    assert any("docs/retention-policy.md" in n for n in names), "sdist missing public retention policy"
+    assert any("docs/mcp-compatibility.md" in n for n in names), "sdist missing public MCP compatibility manifest"
 
 
 def test_wheel_contains_public_docs_and_all_py_modules(built_artifacts):
-    """Proof 10: the wheel data-files ship both v0.7 docs and every
-    pyproject.toml py-module as a top-level module."""
+    """Proof 10: wheel ships v0.7 docs and every declared top-level module."""
     try:
         import tomllib
     except ModuleNotFoundError:
@@ -220,13 +200,11 @@ def test_wheel_contains_public_docs_and_all_py_modules(built_artifacts):
     assert wheels, "no wheel built"
     with zipfile.ZipFile(wheels[0]) as zf:
         names = zf.namelist()
-
     for suffix in (
         "share/hermes-gpt/docs/mcp-compatibility.md",
         "share/hermes-gpt/docs/release-notes-v0.7.0.md",
     ):
         assert any(n.endswith(suffix) for n in names), f"wheel missing data file: {suffix}"
-
     with open(REPO_ROOT / "pyproject.toml", "rb") as fh:
         pyproject = tomllib.load(fh)
     modules = pyproject["tool"]["setuptools"]["py-modules"]
