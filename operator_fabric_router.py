@@ -495,7 +495,7 @@ def _audit_route(decision: dict[str, Any], *, success: bool, dry_run: bool) -> N
                 "candidate_count": len(decision.get("candidates", [])),
             },
         )
-    except Exception:
+    except (OSError, RuntimeError, TypeError, ValueError):
         return
 
 
@@ -853,12 +853,12 @@ def register_runner_backend() -> None:
 
 
 __all__ = [
-    "AutoBackend",
-    "AutoRouter",
     "ROUTER_NAME",
     "ROUTING_DECISION_SCHEMA",
     "ROUTING_POLICY_ENV",
     "ROUTING_POLICY_SCHEMA",
+    "AutoBackend",
+    "AutoRouter",
     "RoutingError",
     "RoutingPolicy",
     "TargetFacts",
