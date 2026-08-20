@@ -7,7 +7,7 @@ summary; the operator explicitly re-advances through the existing gated
 ``hermes_swarm_stage_advance``. It also reloads the durable token envelope
 (when S5's token store is present) and verifies integrity.
 
-Fabric v0.8 adds an idempotent runner-backend bootstrap here because this
+Fabric v0.8 adds idempotent runner-backend bootstrap here because this
 module is imported unconditionally by the operator server before tools are
 registered. Fabric's own distributed restart reconciliation remains fail-closed
 and is implemented in its durable coordinator/peer journals; this module does
@@ -25,13 +25,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 import operator_fabric as op_fabric
+import operator_fabric_router as op_fabric_router
 import operator_policy as op
 import operator_swarm as op_swarm
 
 # Core runtime registration is idempotent and performs no network or mutation.
-# It makes execution.backend="fabric" visible through the existing runner
-# registry before Work Contract tools are called.
+# It makes execution.backend="fabric" and execution.backend="auto" visible
+# through the existing runner registry before Work Contract tools are called.
 op_fabric.register_runner_backend()
+op_fabric_router.register_runner_backend()
 
 TOOL_NAME = "hermes_operator_recover"
 RECONCILE_SURFACE = "swarm_restart_reconcile"
