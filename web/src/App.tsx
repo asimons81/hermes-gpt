@@ -6,6 +6,7 @@ import { ApprovalsPanel } from './flight/ApprovalsPanel';
 import { ContractDetail, ContractsPanel } from './flight/ContractsPanel';
 import { DeckOverview } from './flight/DeckOverview';
 import { EventHistoryPanel } from './flight/EventHistoryPanel';
+import { FabricAttemptDetail, FabricPanel } from './flight/FabricPanel';
 import { FleetPanel } from './flight/FleetPanel';
 import { SURFACE_SCHEMAS } from './flight/schemas';
 import { SurfacePanel } from './flight/SurfacePanel';
@@ -18,7 +19,7 @@ function FlightNav() {
       <Link to="/chat" className="fd-nav-brand">HERMES</Link>
       <div className="fd-nav-links">
         <Link to="/chat">Chat</Link><Link to="/ops">Deck</Link><Link to="/events">Events</Link>
-        <Link to="/ops/contracts">Contracts</Link><Link to="/ops/swarm">Swarm</Link><Link to="/account">Account</Link>
+        <Link to="/ops/contracts">Contracts</Link><Link to="/ops/swarm">Swarm</Link><Link to="/ops/fabric">Fabric</Link><Link to="/account">Account</Link>
       </div>
     </nav>
   );
@@ -34,6 +35,7 @@ function OpsSurface() {
     })}
     <Route path="contracts" element={<ContractsPanel />} /><Route path="contracts/:contractSha256" element={<ContractDetail />} />
     <Route path="swarm" element={<SwarmMonitor />} /><Route path="swarm/:workflowId" element={<SwarmDetail />} />
+    <Route path="fabric" element={<FabricPanel />} /><Route path="fabric/:attemptId" element={<FabricAttemptDetail />} />
     <Route path="*" element={<DeckOverview />} />
   </Routes></main></div>;
 }
