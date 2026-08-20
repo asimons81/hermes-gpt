@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 import operator_fabric as fabric
 import operator_fabric_router as router
 import operator_runners as runners
-import pytest
 
 
 NOW = datetime(2026, 8, 20, 15, 0, tzinfo=timezone.utc)
