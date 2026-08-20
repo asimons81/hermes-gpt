@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 import operator_fabric as fabric
 import operator_fabric_router as router
 import operator_runners as runners
+import pytest
 
 
 NOW = datetime(2026, 8, 20, 15, 0, tzinfo=timezone.utc)
@@ -156,7 +155,7 @@ def test_fresh_gpu_remote_can_win_specialized_hardware_rank(tmp_path, monkeypatc
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
     facts = {
         "local": target_facts(runner_names=("codex",), gpu=False, cost_bucket=0, locality_bucket=0),
-        "node-a": target_facts(gpu=True, gpu_memory_mb=24576, cost_bucket=9, locality_bucket=9),
+        "node-a": target_facts(gpu=True, gpu_memory_mb=24576, cost_bucket=9, locality_bucket=0),
     }
     r = make_router(facts=facts, nodes={"node-a": node()})
     decision = r.route(
