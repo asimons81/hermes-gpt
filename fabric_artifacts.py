@@ -9,8 +9,9 @@ import os
 import re
 import sqlite3
 import stat
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable
+from typing import Any
 
 import operator_fabric as base
 import operator_policy as op
