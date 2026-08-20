@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent
 GUARD = REPO_ROOT / "tools" / "check_package_hygiene.py"
 
 sys.path.insert(0, str(REPO_ROOT / "tools"))
-import check_package_hygiene as guard  # noqa: I001
+import check_package_hygiene as guard
 
 
 @pytest.mark.parametrize(
