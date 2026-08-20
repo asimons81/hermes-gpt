@@ -185,7 +185,6 @@ jobs:
               raise SystemExit('plugin-react dependency marker not found')
           package.write_text(text)
           PY
-          rm -f .github/workflows/g4d-routing-receipt.yml
           python -m ruff check --fix \
             operator_fabric_router.py operator_fabric_view.py ui_fabric.py \
             test_operator_fabric_view.py test_ui_fabric.py
@@ -198,17 +197,9 @@ jobs:
           npm test
           npm run build
           cd ..
-      - name: Finalize stabilization commit
+      - name: Push validated code and lockfile
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('.github/workflows/ci.yml')
-          text = path.read_text()
-          start = text.index('  # G4D_STABILIZE_BEGIN\n')
-          end = text.index('  # G4D_STABILIZE_END\n') + len('  # G4D_STABILIZE_END\n')
-          path.write_text(text[:start] + text[end:])
-          PY
           python -m ruff check \
             operator_fabric_router.py operator_fabric_view.py ui_fabric.py \
             test_operator_fabric_view.py test_ui_fabric.py
@@ -216,8 +207,12 @@ jobs:
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'test(fabric): stabilize G4-D gate'
+          git add operator_fabric_router.py ui_fabric.py web/package.json web/package-lock.json
+          if git diff --cached --quiet; then
+            echo 'Validated code changes already present.'
+            exit 0
+          fi
+          git commit -m 'test(fabric): stabilize G4-D code gate'
           git push origin HEAD:v0.8-fabric-g4d-flight-deck
   # G4D_STABILIZE_END
 
