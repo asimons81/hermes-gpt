@@ -10,6 +10,11 @@ Soft hints can choose between safe candidates. They can never create authority,
 turn an unknown capability into a positive fact, or revive an unhealthy peer.
 Generic Fleet/A2A delegation is intentionally excluded from automatic verified
 Fabric placement.
+
+G4-B intentionally keeps automatic write placement fail-closed. Durable write
+conflict ownership, retry/cancel reconciliation, and writer lifecycle containment
+arrive in G4-C. Until those guards exist, ``auto`` may choose read-only work only;
+explicit concrete backend selection keeps its existing policy-gated behavior.
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ ROUTING_DECISION_SCHEMA = "hermes.fabric-routing-decision/v1"
 ROUTING_POLICY_ENV = "HERMES_GPT_FABRIC_ROUTING_POLICY"
 
 _AUTH_RANK = {"none": 0, "read_only": 1, "reversible_write": 2, "high_impact": 3}
+_WRITE_AUTH_CLASSES = frozenset({"reversible_write", "high_impact"})
 _TARGET_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/@+-]{0,255}$")
 _ABS_WINDOWS_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
@@ -350,6 +356,15 @@ def _capability_missing(exclusions: list[dict[str, str]], code: str, detail: str
     exclusions.append({"code": code, "detail": detail[:240]})
 
 
+def _apply_write_guard(auth_class: str, exclusions: list[dict[str, str]]) -> None:
+    if auth_class in _WRITE_AUTH_CLASSES:
+        _capability_missing(
+            exclusions,
+            "WRITE_CONFLICT_GUARD_UNAVAILABLE",
+            "automatic write placement is disabled until G4-C installs durable write ownership and lifecycle containment",
+        )
+
+
 def _has_any(required: list[str], actual: frozenset[str]) -> bool:
     return not required or bool(set(required).intersection(actual))
 
@@ -436,6 +451,9 @@ def _default_local_posture(*, dry_run: bool) -> dict[str, Any]:
     workspace = bool(policy.enabled and op.has_level("workspace", policy.level))
     if not dry_run:
         workspace = bool(workspace and policy.apply_mode == "direct")
+    # ``high_impact`` is the Work Contract authorization ceiling, not Owner
+    # Mode. The existing contract parser separately requires explicit approval
+    # metadata for that class. Owner-only control-plane operations remain Owner-gated.
     return {"ready": workspace, "max_authorization": "high_impact" if workspace else "none"}
 
 
@@ -586,6 +604,7 @@ class AutoRouter:
         posture = self.local_posture(dry_run)
         for backend in self.local_backends():
             exclusions: list[dict[str, str]] = []
+            _apply_write_guard(auth_class, exclusions)
             if requirements["location"] == "remote":
                 _capability_missing(exclusions, "LOCATION_MISMATCH", "contract requires remote execution")
             if requirements["runners"] and backend not in requirements["runners"]:
@@ -660,6 +679,13 @@ class AutoRouter:
 
             for backend in sorted(node.allowed_remote_backends):
                 exclusions: list[dict[str, str]] = []
+                _apply_write_guard(auth_class, exclusions)
+                if contract.get("expected_artifacts"):
+                    _capability_missing(
+                        exclusions,
+                        "REMOTE_ARTIFACT_ADMISSION_UNAVAILABLE",
+                        "remote auto placement with required artifacts is disabled until G4-C installs bounded artifact admission",
+                    )
                 if registry_error:
                     exclusions.append(registry_error)
                 if requirements["location"] == "local":
