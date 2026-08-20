@@ -52,6 +52,7 @@ py-modules = [
   "operator_fabric_control",
   "operator_fabric_router",
   "operator_fabric_g4c",
+  "operator_fabric_view",
   "operator_diagnostics",
   "operator_codex",
   "operator_session",
@@ -77,6 +78,7 @@ py-modules = [
   "ui_security",
   "ui_chat",
   "ui_ops",
+  "ui_fabric",
 ]
 
 [tool.setuptools.data-files]

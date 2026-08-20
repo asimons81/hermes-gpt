@@ -1,13 +1,14 @@
-"""Route composition for the Hermes ChatGPT UI (v0.7 conversational shell).
+"""Route composition for the Hermes ChatGPT UI (v0.8 Fabric).
 
 This is a COMPOSITION-ONLY file (architecture.md §16): it owns the route
 registry, the JSON envelope shape, and static serving of the built SPA. It
 does not implement feature routes. Each feature card contributes a
 ``<module>_routes()`` function:
 
-- ``ui_security_routes()`` (t_7266e74c) — boundary, /api/me, /api/connection
-- ``ui_chat_routes()``     (t_9d31cd92) — sessions + chat SSE
-- ``ui_ops_routes()``      (t_1135e15b) — operator adapters + gated mutations
+- ``ui_security_routes()`` — boundary, /api/me, /api/connection
+- ``ui_chat_routes()``     — sessions + chat SSE
+- ``ui_ops_routes()``      — operator adapters + gated mutations
+- ``ui_fabric_routes()``   — Fabric distributed read models, GET-only
 
 The registry composes whatever sibling modules are present. In parallel
 worktrees a sibling module may be absent mid-build; a missing or broken
@@ -153,8 +154,8 @@ def routes() -> list[BaseRoute]:
     """Compose the full UI route list (mounted before the MCP catch-all)."""
     result: list[BaseRoute] = []
     # Security/boundary routes are the skeleton every card builds against;
-    # chat and flight compose in when their modules land.
-    for module_name in ("ui_security", "ui_chat", "ui_ops"):
+    # chat, Flight Deck, and Fabric read models compose in as sibling modules.
+    for module_name in ("ui_security", "ui_chat", "ui_ops", "ui_fabric"):
         result.extend(_sibling_routes(module_name))
     result.extend(_static_routes())
     return result

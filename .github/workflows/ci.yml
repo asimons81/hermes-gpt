@@ -31,6 +31,8 @@ jobs:
           test_operator_fabric_control.py
           test_operator_fabric_router.py
           test_operator_fabric_g4c.py
+          test_operator_fabric_view.py
+          test_ui_fabric.py
       - name: Run binary export regression tests
         run: python -m pytest -q test_operator_export.py test_server_export.py
       - name: Compile operator modules
@@ -48,6 +50,7 @@ jobs:
           operator_fabric_control.py
           operator_fabric_router.py
           operator_fabric_g4c.py
+          operator_fabric_view.py
           operator_fleet.py
           operator_runners.py
           operator_swarm.py
@@ -61,6 +64,8 @@ jobs:
           operator_oauth.py
           token_store.py
           seams.py
+          ui_api.py
+          ui_fabric.py
       - name: Check whitespace
         run: git diff --check
 
@@ -75,12 +80,29 @@ jobs:
       - run: >-
           python -m ruff check
           fabric_artifacts.py fabric_write_guard.py
-          operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py
+          operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py
           test_operator_fabric.py test_operator_fabric_adversarial.py test_operator_fabric_control.py
-          test_operator_fabric_router.py test_operator_fabric_g4c.py
+          test_operator_fabric_router.py test_operator_fabric_g4c.py test_operator_fabric_view.py test_ui_fabric.py
           operator_runners.py test_operator_runners.py
           runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
           operator_export.py test_operator_export.py test_server_export.py
+          ui_api.py ui_fabric.py
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
 
   windows-docs:
     runs-on: windows-latest
@@ -108,7 +130,7 @@ jobs:
           }
 
   build:
-    needs: [test, lint, windows-docs]
+    needs: [test, lint, web, windows-docs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
