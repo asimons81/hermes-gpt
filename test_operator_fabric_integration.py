@@ -143,9 +143,6 @@ def test_auto_remote_dispatch_evidence_contract_and_flight_deck_compose(tmp_path
     assert attempt["evidence"]["observations"][0]["provenance"] == "managed_peer_structured"
     assert attempt["authority"]["granted"] == "read_only_or_none"
 
-    # The G4-C test peer replaces get_backend while it is alive. Restore the
-    # real registry accessor before exercising the existing Work Contract
-    # validator so this assertion crosses the production runner registry seam.
     monkeypatch.setattr(runners, "get_backend", real_get_backend)
     canonical, _normalized = op_contract._canonical_contract(placed)
     verdict = _validate_with_coordinator(canonical, coord, tmp_path)
@@ -245,7 +242,7 @@ def test_write_retry_cannot_overlap_and_epoch_moves_only_after_cancel(tmp_path, 
 
     first = coord.dispatch(value, dry_run=False, confirm=True, timeout=10)
     old_row = row_for(svc, first["attempt_id"])
-    assert first["write_epoch"] == 1
+    assert old_row["write_epoch"] == 1
     assert claim_for(svc)["attempt_id"] == first["attempt_id"]
 
     with pytest.raises(base.FabricError) as exc:
