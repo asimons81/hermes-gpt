@@ -2,8 +2,7 @@
 
 Builds the wheel + sdist and asserts the release-blocking hygiene guard
 (tools/check_package_hygiene.py) reports NO forbidden private/operational
-patterns (absolute /home paths, RFC1918/Tailscale IPs, machine hostnames,
-live profile counts / operational metrics) in either artifact.
+patterns or private/cache member names in either artifact.
 
 Also unit-checks the scanner's pattern logic on synthetic content so a
 regression in the guard itself is caught without a full build.
@@ -45,10 +44,10 @@ def test_scan_flags_machine_home_paths(text):
 @pytest.mark.parametrize(
     "text",
     [
-        "/home/user/.env",  # explicit placeholder
-        "/home/example/projects",  # explicit placeholder
-        "C:\\Users\\Alice\\hermes\\server.py",  # placeholder Windows path
-        "bind 127.0.0.1:4750",  # generic localhost
+        "/home/user/.env",
+        "/home/example/projects",
+        "C:\\Users\\Alice\\hermes\\server.py",
+        "bind 127.0.0.1:4750",
         "localhost:4750/mcp",
     ],
 )
@@ -112,6 +111,36 @@ def test_scan_flags_operational_metrics(text):
 def test_scan_does_not_false_positive_on_public_content(text):
     findings = guard.scan_text(text)
     assert findings == [], findings
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("pkg/.env", "private_env_file"),
+        ("pkg/.env.production", "private_env_file"),
+        ("pkg/client.pem", "private_key_file"),
+        ("pkg/private.key", "private_key_file"),
+        ("pkg/runtime.log", "private_log_file"),
+        ("pkg/__pycache__/server.cpython-312.pyc", "private_cache_path"),
+        ("pkg/.pytest_cache/v/cache/nodeids", "private_cache_path"),
+    ],
+)
+def test_scan_flags_private_artifact_member_names(name, expected):
+    findings = guard.scan_member_name(name)
+    assert any(kind == expected for kind, _ in findings), findings
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "hermes_gpt/token_store.py",
+        "hermes_gpt/oauth_auth.py",
+        "share/hermes-gpt/docs/oauth.md",
+        "share/hermes-gpt/examples/fleet-authority.example.json",
+    ],
+)
+def test_member_name_scan_allows_public_auth_related_modules_and_docs(name):
+    assert guard.scan_member_name(name) == []
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +212,7 @@ def test_wheel_contains_public_docs_and_all_py_modules(built_artifacts):
     pyproject.toml py-module as a top-level module."""
     try:
         import tomllib
-    except ModuleNotFoundError:  # Python < 3.11
+    except ModuleNotFoundError:
         import tomli as tomllib
     import zipfile
 
