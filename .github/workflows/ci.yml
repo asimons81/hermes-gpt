@@ -32,6 +32,7 @@ jobs:
           test_operator_fabric_router.py
           test_operator_fabric_g4c.py
           test_operator_fabric_view.py
+          test_operator_fabric_integration.py
           test_ui_fabric.py
       - name: Run binary export regression tests
         run: python -m pytest -q test_operator_export.py test_server_export.py
@@ -82,7 +83,7 @@ jobs:
           fabric_artifacts.py fabric_write_guard.py
           operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py
           test_operator_fabric.py test_operator_fabric_adversarial.py test_operator_fabric_control.py
-          test_operator_fabric_router.py test_operator_fabric_g4c.py test_operator_fabric_view.py test_ui_fabric.py
+          test_operator_fabric_router.py test_operator_fabric_g4c.py test_operator_fabric_view.py test_operator_fabric_integration.py test_ui_fabric.py
           operator_runners.py test_operator_runners.py
           runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
           operator_export.py test_operator_export.py test_server_export.py
