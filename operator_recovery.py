@@ -1,4 +1,4 @@
-"""Restart reconciliation for hermes-gpt v0.7 (Flight Deck, S2).
+"""Restart reconciliation for hermes-gpt v0.7+ (Flight Deck, S2).
 
 Per ADR-007 the recovery surface is **fail-closed and never auto-advancing**:
 after a process restart it marks swarm stages found in ``running`` as
@@ -6,6 +6,12 @@ after a process restart it marks swarm stages found in ``running`` as
 summary; the operator explicitly re-advances through the existing gated
 ``hermes_swarm_stage_advance``. It also reloads the durable token envelope
 (when S5's token store is present) and verifies integrity.
+
+Fabric v0.8 adds an idempotent runner-backend bootstrap here because this
+module is imported unconditionally by the operator server before tools are
+registered. Fabric's own distributed restart reconciliation remains fail-closed
+and is implemented in its durable coordinator/peer journals; this module does
+not auto-execute remote work.
 
 No auto-execution path exists. All mutations are dry-run-first with an apply
 gate.
@@ -18,8 +24,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import operator_fabric as op_fabric
 import operator_policy as op
 import operator_swarm as op_swarm
+
+# Core runtime registration is idempotent and performs no network or mutation.
+# It makes execution.backend="fabric" visible through the existing runner
+# registry before Work Contract tools are called.
+op_fabric.register_runner_backend()
 
 TOOL_NAME = "hermes_operator_recover"
 RECONCILE_SURFACE = "swarm_restart_reconcile"
