@@ -10,8 +10,11 @@ regression in the guard itself is caught without a full build.
 
 from __future__ import annotations
 
+import io
 import subprocess
 import sys
+import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -113,6 +116,10 @@ def test_scan_does_not_false_positive_on_public_content(text):
         ("pkg/.env.production", "private_env_file"),
         ("pkg/client.pem", "private_key_file"),
         ("pkg/private.key", "private_key_file"),
+        ("pkg/id_ed25519", "private_key_file"),
+        ("pkg/client-identity.p12", "private_key_file"),
+        ("pkg/.ssh/config", "private_config_path"),
+        ("pkg/nested/.aws/credentials", "private_config_path"),
         ("pkg/runtime.log", "private_log_file"),
         ("pkg/__pycache__/server.cpython-312.pyc", "private_cache_path"),
         ("pkg/.pytest_cache/v/cache/nodeids", "private_cache_path"),
@@ -134,6 +141,33 @@ def test_scan_flags_private_artifact_member_names(name, expected):
 )
 def test_member_name_scan_allows_public_auth_related_modules_and_docs(name):
     assert guard.scan_member_name(name) == []
+
+
+@pytest.mark.parametrize("kind", ["wheel", "sdist"])
+def test_synthetic_archives_reject_nested_private_configuration_and_key_bundles(tmp_path, kind):
+    members = {
+        "hermes_gpt/oauth_auth.py": b"# legitimate public auth source\n",
+        "share/hermes-gpt/docs/oauth.md": b"Public OAuth documentation.\n",
+        "pkg/nested/.kube/config": b"private configuration\n",
+        "pkg/identity.pfx": b"private key bundle\n",
+    }
+    if kind == "wheel":
+        artifact = tmp_path / "synthetic.whl"
+        with zipfile.ZipFile(artifact, "w") as zf:
+            for name, data in members.items():
+                zf.writestr(name, data)
+    else:
+        artifact = tmp_path / "synthetic.tar.gz"
+        with tarfile.open(artifact, "w:gz") as tf:
+            for name, data in members.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tf.addfile(info, io.BytesIO(data))
+    findings = guard.scan_artifact(artifact)
+    by_member = {(member, pattern) for member, pattern, _matched in findings}
+    assert ("pkg/nested/.kube/config", "private_config_path") in by_member
+    assert ("pkg/identity.pfx", "private_key_file") in by_member
+    assert not any(member.endswith(("oauth_auth.py", "oauth.md")) for member, _pattern in by_member)
 
 
 @pytest.fixture(scope="module")

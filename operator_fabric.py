@@ -69,6 +69,15 @@ _URLISH_KEY_RE = re.compile(r"(?:url|uri|endpoint|host|hostname|proxy)", re.IGNO
 _AUTH_RANK = {"none": 0, "read_only": 1, "reversible_write": 2, "high_impact": 3}
 _TERMINAL_PEER = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "LOST_AMBIGUOUS", "BLOCKED"})
 _TERMINAL_COORD = frozenset({"COMPLETED", "FAILED", "CANCELLED", "BLOCKED"})
+_PEER_WRITE_CLAIM_STATES = frozenset(
+    {"NONE", "ACTIVE", "RELEASED", "SUPERSEDED", "UNKNOWN"}
+)
+_PEER_EXECUTION_UNIT_STATES = frozenset(
+    {
+        "active", "activating", "deactivating", "reloading", "inactive",
+        "failed", "dead", "not-found", "terminal", "unknown",
+    }
+)
 _SAFE_EVIDENCE_PROVENANCE = frozenset(
     {"coordinator_observed", "managed_peer_structured", "artifact_verified", "coordinator_local"}
 )
@@ -80,6 +89,19 @@ _DEFAULT_FEATURES = (
     "closed-schema-v1",
 )
 _EXPECTED_ERRORS = (OSError, RuntimeError, ValueError, TypeError, sqlite3.Error)
+
+
+def _bounded_coordinator_peer_values(data: dict[str, Any]) -> dict[str, Any]:
+    epoch = data.get("write_epoch")
+    claim = data.get("write_claim_state")
+    unit = data.get("execution_unit_state")
+    return {
+        "write_epoch": epoch
+        if isinstance(epoch, int) and not isinstance(epoch, bool)
+        else None,
+        "write_claim_state": claim if claim in _PEER_WRITE_CLAIM_STATES else "UNKNOWN",
+        "execution_unit_state": unit if unit in _PEER_EXECUTION_UNIT_STATES else "unknown",
+    }
 
 
 class FabricError(RuntimeError):
@@ -2013,10 +2035,21 @@ class FabricCoordinator:
             raise FabricError("FABRIC_PROTOCOL_ERROR", "peer accept response lineage mismatch")
         state = "SUBMITTED" if response["ok"] else "BLOCKED"
         with _connect(self.db_path) as db:
+            columns = {str(row["name"]) for row in db.execute("PRAGMA table_info(attempts)")}
+            peer_values = _bounded_coordinator_peer_values(data)
+            optional = [
+                key
+                for key in ("write_epoch", "write_claim_state", "execution_unit_state")
+                if key in columns and key in data and peer_values[key] is not None
+            ]
+            assignments = ",".join(f"{key}=?" for key in optional)
+            if assignments:
+                assignments += ","
             db.execute(
-                "UPDATE attempts SET state=?,remote_task_id=?,peer_policy_sha256=?,error_code=?,"
+                f"UPDATE attempts SET {assignments}state=?,remote_task_id=?,peer_policy_sha256=?,error_code=?,"
                 "updated_at=? WHERE attempt_id=?",
                 (
+                    *(peer_values[key] for key in optional),
                     state,
                     remote_task_id,
                     data.get("policy_sha256"),
@@ -2112,11 +2145,21 @@ class FabricCoordinator:
             "BLOCKED": "BLOCKED",
         }.get(peer_state, "BLOCKED")
         with _connect(self.db_path) as db:
+            columns = {str(row["name"]) for row in db.execute("PRAGMA table_info(attempts)")}
+            peer_values = _bounded_coordinator_peer_values(data)
+            optional = [
+                key
+                for key in ("write_epoch", "write_claim_state", "execution_unit_state")
+                if key in columns and key in data and peer_values[key] is not None
+            ]
+            assignments = ",".join(f"{key}=?" for key in optional)
+            if assignments:
+                assignments += ","
             db.execute(
-                "UPDATE attempts SET state=?,updated_at=? WHERE attempt_id=?",
-                (state, _now(), attempt_id),
+                f"UPDATE attempts SET {assignments}state=?,updated_at=? WHERE attempt_id=?",
+                (*(peer_values[key] for key in optional), state, _now(), attempt_id),
             )
-        return {
+        result = {
             "success": True,
             "backend": "fabric",
             "node": node.name,
@@ -2126,6 +2169,8 @@ class FabricCoordinator:
             "peer_state": peer_state,
             "task_id": dispatch["task_id"],
         }
+        result.update({key: peer_values[key] for key in optional})
+        return result
 
     def collect(self, attempt_id: str, *, timeout: int = 15) -> dict[str, Any]:
         attempt, _dispatch, node = self._attempt(attempt_id)
@@ -2221,9 +2266,19 @@ class FabricCoordinator:
             raise FabricError("FABRIC_PROTOCOL_ERROR", "peer cancel lineage mismatch")
         state = "CANCELLED" if data.get("state") == "CANCELLED" else "CANCEL_REQUESTED"
         with _connect(self.db_path) as db:
+            columns = {str(row["name"]) for row in db.execute("PRAGMA table_info(attempts)")}
+            peer_values = _bounded_coordinator_peer_values(data)
+            optional = [
+                key
+                for key in ("write_epoch", "write_claim_state", "execution_unit_state")
+                if key in columns and key in data and peer_values[key] is not None
+            ]
+            assignments = ",".join(f"{key}=?" for key in optional)
+            if assignments:
+                assignments += ","
             db.execute(
-                "UPDATE attempts SET state=?,updated_at=? WHERE attempt_id=?",
-                (state, _now(), attempt_id),
+                f"UPDATE attempts SET {assignments}state=?,updated_at=? WHERE attempt_id=?",
+                (*(peer_values[key] for key in optional), state, _now(), attempt_id),
             )
         return {
             "success": True,

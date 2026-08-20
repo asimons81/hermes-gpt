@@ -74,6 +74,22 @@ TEXT_SUFFIXES = {
     ".yaml", ".yml", ".csv", ".html", ".css", ".js", ".ps1", ".example",
     ".in", ".dist-info", ".pem",
 }
+
+PRIVATE_KEY_BASENAMES = {
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "identity",
+}
+PRIVATE_KEY_BUNDLE_SUFFIXES = (".p12", ".pfx", ".pkcs12", ".jks", ".keystore")
+PRIVATE_CONFIG_COMPONENTS = {
+    ".ssh",
+    ".aws",
+    ".azure",
+    ".gnupg",
+    ".kube",
+}
 KNOWN_BINARY_SUFFIXES = {
     ".pyc", ".so", ".dll", ".exe", ".png", ".jpg", ".jpeg", ".gif",
     ".ico", ".woff", ".woff2", ".ttf", ".whl", ".gz", ".zip",
@@ -83,13 +99,15 @@ KNOWN_BINARY_SUFFIXES = {
 def scan_member_name(name: str) -> list[tuple[str, str]]:
     """Flag high-confidence private/cache filenames inside an artifact."""
     path = PurePosixPath(name.replace("\\", "/"))
-    parts = path.parts
+    parts = tuple(part.lower() for part in path.parts)
     base = path.name.lower()
     findings: list[tuple[str, str]] = []
     if base == ".env" or base.startswith(".env."):
         findings.append(("private_env_file", name))
-    if base.endswith((".pem", ".key")):
+    if base in PRIVATE_KEY_BASENAMES or base.endswith((".pem", ".key", *PRIVATE_KEY_BUNDLE_SUFFIXES)):
         findings.append(("private_key_file", name))
+    if any(part in PRIVATE_CONFIG_COMPONENTS for part in parts[:-1]):
+        findings.append(("private_config_path", name))
     if base.endswith(".log"):
         findings.append(("private_log_file", name))
     if "__pycache__" in parts or ".pytest_cache" in parts:

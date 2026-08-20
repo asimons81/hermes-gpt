@@ -296,6 +296,33 @@ def test_cancel_releases_claim_only_after_exact_unit_is_quiescent(tmp_path, monk
     assert result["write_claim_state"] == "RELEASED"
 
 
+def test_cancel_ambiguity_keeps_claim_and_blocks_overlapping_writer(tmp_path, monkeypatch):
+    class UncertainStopUnitManager(FakeUnitManager):
+        def stop(self, unit):
+            self.stopped.append(unit)
+            value = {"known": False, "active": False, "quiescent": False, "state": "unknown"}
+            self.units[unit] = value
+            return dict(value)
+
+    unit = UncertainStopUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+    accept(svc, first)
+    cancelled = svc._cancel(
+        first["dispatch_id"], first["attempt_id"], "coord-main", policy(tmp_path)
+    )
+    assert cancelled["state"] == "CANCEL_REQUESTED"
+    assert cancelled["write_claim_state"] == "ACTIVE"
+    assert cancelled["execution_unit_state"] == "unknown"
+
+    second = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
+    with pytest.raises(fabric.FabricError) as exc:
+        accept(svc, second)
+    assert exc.value.code == "FABRIC_WRITE_OWNERSHIP_BLOCKED"
+    assert claim_for(svc)["attempt_id"] == first["attempt_id"]
+
+
 
 def test_monotonic_epoch_prevents_stale_attempt_from_releasing_new_claim(tmp_path, monkeypatch):
     observed = []

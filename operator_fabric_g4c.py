@@ -33,6 +33,11 @@ FEATURE_EXECUTION_UNIT = write_guard.FEATURE_EXECUTION_UNIT
 FEATURE_WRITE_EPOCH = write_guard.FEATURE_WRITE_EPOCH
 FEATURE_RECONCILE = "reconcile-v1"
 
+_WRITE_CLAIM_STATES = frozenset({"NONE", "ACTIVE", "RELEASED", "SUPERSEDED", "UNKNOWN"})
+_EXECUTION_UNIT_STATES = frozenset(
+    {"active", "activating", "deactivating", "reloading", "inactive", "failed", "dead", "not-found", "terminal", "unknown"}
+)
+
 FabricError = base.FabricError
 FabricNode = base.FabricNode
 FabricPeerPolicy = base.FabricPeerPolicy
@@ -123,6 +128,12 @@ def _terminal_state(run: dict[str, Any] | None) -> str:
     if state in {"cancelled", "canceled"}:
         return "CANCELLED"
     return ""
+
+
+def _bounded_peer_observation(key: str, value: Any) -> str:
+    allowed = _WRITE_CLAIM_STATES if key == "write_claim_state" else _EXECUTION_UNIT_STATES
+    text = str(value or "")
+    return text if text in allowed else "UNKNOWN" if key == "write_claim_state" else "unknown"
 
 
 class FabricPeerService(base.FabricPeerService):
@@ -368,6 +379,11 @@ class FabricPeerService(base.FabricPeerService):
                         "local_task_id": existing["local_task_id"],
                         "policy_sha256": existing["policy_sha256"],
                         "write_epoch": existing["write_epoch"],
+                        "write_claim_state": self.claims.state(existing),
+                        "execution_unit_state": _bounded_peer_observation(
+                            "execution_unit_state",
+                            self.unit_manager.inspect(str(existing["execution_unit_id"] or "")).get("state"),
+                        ),
                     },
                 )
             epoch = None
@@ -501,6 +517,11 @@ class FabricPeerService(base.FabricPeerService):
                 "local_task_id": envelope["attempt_id"],
                 "policy_sha256": prestart.digest,
                 "write_epoch": row["write_epoch"],
+                "write_claim_state": self.claims.state(row),
+                "execution_unit_state": _bounded_peer_observation(
+                    "execution_unit_state",
+                    self.unit_manager.inspect(str(row["execution_unit_id"] or "")).get("state"),
+                ),
             },
         )
 
@@ -614,6 +635,9 @@ class FabricPeerService(base.FabricPeerService):
             "changed": changed,
             "write_epoch": refreshed["write_epoch"],
             "write_claim_state": self.claims.state(refreshed),
+            "execution_unit_state": _bounded_peer_observation(
+                "execution_unit_state", unit.get("state")
+            ),
         }
 
     def _artifact_manifest(
@@ -831,34 +855,6 @@ class FabricCoordinator(base.FabricCoordinator):
                 "state": state,
                 "code": exc.code,
             }
-        attempt, _dispatch, node = self._attempt(attempt_id)
-        try:
-            _, response = self.rpc(
-                node,
-                base._request(
-                    "status",
-                    node.coordinator_principal,
-                    data={},
-                    dispatch_id=attempt["dispatch_id"],
-                    attempt_id=attempt_id,
-                ),
-                timeout,
-            )
-            response = base._validate_response(response, operation="status")
-            data = response.get("data") or {}
-            epoch = data.get("write_epoch")
-            if isinstance(epoch, int) and not isinstance(epoch, bool):
-                with base._connect(self.db_path) as db:
-                    db.execute(
-                        "UPDATE attempts SET write_epoch=? WHERE attempt_id=?",
-                        (epoch, attempt_id),
-                    )
-                result["write_epoch"] = epoch
-            for key in ("write_claim_state", "execution_unit_state"):
-                if isinstance(data.get(key), str):
-                    result[key] = data[key]
-        except FabricError:
-            pass
         return result
 
     def cancel(self, attempt_id: str, *, timeout: int = 15) -> dict[str, Any]:
@@ -1108,16 +1104,30 @@ class FabricCoordinator(base.FabricCoordinator):
         if data.get("dispatch_id") != prior["dispatch_id"] or data.get("attempt_id") != attempt_id:
             raise FabricError("FABRIC_PROTOCOL_ERROR", "peer retry accept lineage mismatch")
         state = "SUBMITTED" if response["ok"] else "BLOCKED"
-        epoch = data.get("write_epoch") if isinstance(data.get("write_epoch"), int) else None
+        epoch_value = data.get("write_epoch")
+        epoch = (
+            epoch_value
+            if isinstance(epoch_value, int) and not isinstance(epoch_value, bool)
+            else None
+        )
+        claim_state = _bounded_peer_observation(
+            "write_claim_state", data.get("write_claim_state")
+        )
+        unit_state = _bounded_peer_observation(
+            "execution_unit_state", data.get("execution_unit_state")
+        )
         with base._connect(self.db_path) as db:
             db.execute(
-                "UPDATE attempts SET state=?,remote_task_id=?,peer_policy_sha256=?,write_epoch=?,error_code=?,updated_at=?"
+                "UPDATE attempts SET state=?,remote_task_id=?,peer_policy_sha256=?,write_epoch=?,"
+                "write_claim_state=?,execution_unit_state=?,error_code=?,updated_at=?"
                 " WHERE attempt_id=?",
                 (
                     state,
                     remote_task_id,
                     data.get("policy_sha256"),
                     epoch,
+                    claim_state,
+                    unit_state,
                     None if response["ok"] else response["code"],
                     base._now(),
                     attempt_id,
@@ -1141,6 +1151,8 @@ class FabricCoordinator(base.FabricCoordinator):
             "retry_parent_attempt_id": prior_attempt_id,
             "state": state,
             "write_epoch": epoch,
+            "write_claim_state": claim_state,
+            "execution_unit_state": unit_state,
             "code": response["code"],
         }
 

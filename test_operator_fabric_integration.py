@@ -13,6 +13,7 @@ import operator_fabric_router as router
 import operator_fabric_view as view
 import operator_runners as runners
 from test_operator_fabric_g4c import (
+    FakeUnitManager,
     auto_contract,
     claim_for,
     contract,
@@ -88,7 +89,10 @@ def _bind_view(tmp_path, coord, monkeypatch):
 
 
 def _validate_with_coordinator(canonical: str, coord, tmp_path):
-    previous = runners.get_backend("fabric")
+    try:
+        previous = runners.get_backend("fabric")
+    except LookupError:
+        previous = None
     runners.register_backend(
         base.FabricBackend(coordinator_factory=lambda **_kwargs: coord),
         replace=True,
@@ -101,7 +105,11 @@ def _validate_with_coordinator(canonical: str, coord, tmp_path):
             )
         )
     finally:
-        runners.register_backend(previous, replace=True)
+        if previous is not None:
+            runners.register_backend(previous, replace=True)
+        else:
+            with runners._REGISTRY_LOCK:
+                runners._BACKENDS.pop("fabric", None)
 
 
 def test_auto_remote_dispatch_evidence_contract_and_flight_deck_compose(tmp_path, monkeypatch):
@@ -152,13 +160,51 @@ def test_auto_remote_dispatch_evidence_contract_and_flight_deck_compose(tmp_path
 
 
 def test_auto_read_only_runner_options_cannot_widen_remote_authority(tmp_path, monkeypatch):
-    observed: list[dict[str, str]] = []
-    svc = make_service(tmp_path, monkeypatch, observed=observed)
-    coord = make_coordinator(tmp_path, svc)
-    backend, captured = _auto_backend(tmp_path, svc, coord, monkeypatch)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    marker = workspace / "must-not-change.txt"
+    marker.write_text("original", encoding="utf-8")
+    fake_pi = tmp_path / "fake-pi"
+    fake_pi.write_text("#!/bin/sh\nprintf mutated > must-not-change.txt\n", encoding="utf-8")
+    fake_pi.chmod(0o755)
 
-    value = auto_contract(tmp_path, auth="read_only")
-    value["execution"]["options"]["runner_options"] = {"sandbox": "workspace-write"}
+    monkeypatch.setenv("HERMES_GPT_PI_EXE", str(fake_pi))
+    monkeypatch.setenv("HERMES_GPT_OPERATOR_ENABLED", "1")
+    monkeypatch.setenv("HERMES_GPT_OPERATOR_LEVEL", "workspace")
+    monkeypatch.setenv("HERMES_GPT_OPERATOR_APPLY_MODE", "direct")
+    monkeypatch.setenv("HERMES_GPT_OPERATOR_ALLOWED_PATHS", str(workspace))
+    monkeypatch.setenv("HERMES_GPT_OPERATOR_ALLOWED_PROFILES", "default")
+    launched = False
+
+    def must_not_launch(*_args, **_kwargs):
+        nonlocal launched
+        launched = True
+        raise AssertionError("read-only Fabric work reached process launch")
+
+    monkeypatch.setattr(runners, "_popen_process_group", must_not_launch)
+
+    def must_not_confine(*_args, **_kwargs):
+        raise AssertionError("writable Pi request reached filesystem confinement")
+
+    monkeypatch.setattr(runners.confinement, "confinement_available", must_not_confine)
+    monkeypatch.setattr(runners.confinement, "wrap_argv", must_not_confine)
+
+    svc = fabric.FabricPeerService(
+        policy_loader=lambda: policy(workspace),
+        tokens={"coord-main": "0123456789abcdef0123456789abcdef"},
+        db_path=tmp_path / "peer.db",
+        observed_fn=lambda _task_id: [],
+        artifact_root=tmp_path / "snapshots",
+        hermes_root=tmp_path,
+    )
+    coord = make_coordinator(tmp_path, svc)
+    backend, captured = _auto_backend(workspace, svc, coord, monkeypatch)
+
+    value = auto_contract(workspace, auth="read_only")
+    value["execution"]["options"]["runner_options"] = {
+        "sandbox": "workspace-write",
+        "tools": "read,write",
+    }
     result = backend.dispatch(
         value,
         confirm=True,
@@ -166,18 +212,22 @@ def test_auto_read_only_runner_options_cannot_widen_remote_authority(tmp_path, m
         timeout=10,
         hermes_root=tmp_path,
     )
-    assert result["success"] is True
+
     placed = captured["contract"]
+    assert result["success"] is False
+    assert result["code"] == "RUNNER_DISPATCH_ERROR"
     assert placed["authorization"]["class"] == "read_only"
     assert placed["execution"]["options"]["remote_options"]["sandbox"] == "workspace-write"
+    assert launched is False
+    assert marker.read_text(encoding="utf-8") == "original"
 
-    peer_row = row_for(svc, result["attempt_id"])
+    with base._connect_readonly(svc.db_path) as db:
+        peer_row = db.execute("SELECT * FROM attempts").fetchone()
+    assert peer_row is not None
+    dispatch_result = json.loads(peer_row["dispatch_result_json"])
+    assert "read-only authorization" in dispatch_result["safe_message"]
     assert peer_row["write_epoch"] is None
     assert claim_for(svc) is None
-
-    _bind_view(tmp_path, coord, monkeypatch)
-    detail = view.attempt_detail(result["attempt_id"], hermes_root=tmp_path)
-    assert detail["attempt"]["authority"]["granted"] == "read_only_or_none"
 
 
 def test_timeout_after_accept_restart_reconciles_same_attempt_and_view(tmp_path, monkeypatch):
@@ -270,6 +320,57 @@ def test_write_retry_cannot_overlap_and_epoch_moves_only_after_cancel(tmp_path, 
     assert old_view["attempt"]["state"] == "CANCELLED"
     assert new_view["attempt"]["retry_parent_attempt_id"] == first["attempt_id"]
     assert new_view["attempt"]["authority"]["write_epoch"] == 2
+
+
+def test_restart_loss_observations_preserve_uncertain_writer_ownership(tmp_path, monkeypatch):
+    observed: list[dict[str, str]] = []
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, observed=observed, unit=unit)
+    first_coord = make_coordinator(tmp_path, svc)
+    value = contract(tmp_path, auth="reversible_write")
+    first = first_coord.dispatch(value, dry_run=False, confirm=True, timeout=10)
+    first_peer_row = row_for(svc, first["attempt_id"])
+    unit.activate(first_peer_row["execution_unit_id"])
+
+    with base._connect(first_coord.db_path) as db:
+        db.execute(
+            "UPDATE attempts SET write_epoch=999 WHERE attempt_id=?",
+            (first["attempt_id"],),
+        )
+
+    restarted = make_coordinator(tmp_path, svc)
+    active = restarted.poll(first["attempt_id"], reconcile=True)
+    assert active["write_epoch"] == 1
+    assert active["write_claim_state"] == "ACTIVE"
+    assert active["execution_unit_state"] == "active"
+
+    unit.quiesce(first_peer_row["execution_unit_id"])
+    lost = restarted.poll(first["attempt_id"], reconcile=True)
+    assert lost["peer_state"] == "LOST_AMBIGUOUS"
+    assert lost["state"] == "BLOCKED"
+    assert lost["write_claim_state"] == "RELEASED"
+    assert lost["execution_unit_state"] == "inactive"
+
+    second = restarted.retry(value, first["attempt_id"], confirm=True, timeout=10)
+    superseded = restarted.poll(first["attempt_id"], reconcile=True)
+    assert superseded["write_claim_state"] == "SUPERSEDED"
+    assert second["write_epoch"] == 2
+
+    second_peer_row = row_for(svc, second["attempt_id"])
+    unit.units[second_peer_row["execution_unit_id"]] = {
+        "known": False,
+        "active": False,
+        "quiescent": False,
+        "state": "unknown",
+    }
+    unknown = restarted.poll(second["attempt_id"], reconcile=True)
+    assert unknown["peer_state"] == "LOST_AMBIGUOUS"
+    assert unknown["write_claim_state"] == "ACTIVE"
+    assert unknown["execution_unit_state"] == "unknown"
+    with pytest.raises(base.FabricError) as exc:
+        restarted.retry(value, second["attempt_id"], confirm=True, timeout=10)
+    assert exc.value.code == "FABRIC_WRITE_OWNERSHIP_BLOCKED"
+    assert claim_for(svc)["attempt_id"] == second["attempt_id"]
 
 
 def test_remote_artifact_hash_is_admitted_and_active_content_stays_metadata_only(tmp_path, monkeypatch):
