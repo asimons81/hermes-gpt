@@ -11,12 +11,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 import sqlite3
 import ssl
-import stat
-import subprocess
-import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -26,7 +22,6 @@ import fabric_artifacts as artifacts
 import fabric_write_guard as write_guard
 import operator_fabric as base
 import operator_fabric_router as router
-import operator_policy as op
 import operator_runners as runners
 
 ARTIFACT_MANIFEST_SCHEMA = artifacts.ARTIFACT_MANIFEST_SCHEMA
@@ -1439,13 +1434,13 @@ def peer_main(argv: list[str] | None = None) -> None:
 __all__ = [
     "ARTIFACT_CHUNK_SCHEMA",
     "ARTIFACT_MANIFEST_SCHEMA",
-    "AutoRouter",
     "FEATURE_ARTIFACT",
     "FEATURE_ARTIFACT_SNAPSHOT",
     "FEATURE_EXECUTION_UNIT",
     "FEATURE_RECONCILE",
     "FEATURE_WRITE_EPOCH",
     "FEATURE_WRITE_OWNERSHIP",
+    "AutoRouter",
     "FabricCoordinator",
     "FabricError",
     "FabricNode",

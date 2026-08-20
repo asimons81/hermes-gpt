@@ -11,7 +11,6 @@ import operator_fabric_g4c as fabric
 import operator_fabric_router as base_router
 import operator_runners as runners
 
-
 TOKEN = "0123456789abcdef0123456789abcdef"
 
 
@@ -312,7 +311,7 @@ def test_monotonic_epoch_prevents_stale_attempt_from_releasing_new_claim(tmp_pat
     second = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
     response = accept(svc, second)
     assert response["data"]["write_epoch"] == 2
-    assert svc._release_claim(first_row, proof="stale-release") is False
+    assert svc.claims.release(first_row, proof="stale-release") is False
     claim = claim_for(svc)
     assert claim["attempt_id"] == second["attempt_id"]
     assert claim["state"] == "ACTIVE"
@@ -549,7 +548,7 @@ def test_auto_remote_write_unlock_requires_live_g4c_features(tmp_path, monkeypat
     common = {
         "registry_loader": lambda: {"node-a": node()},
         "routing_policy_loader": lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
-        "local_backends": lambda: [],
+        "local_backends": list,
         "now": lambda: now,
     }
     locked = fabric.AutoRouter(
@@ -578,7 +577,7 @@ def test_auto_remote_artifact_unlock_requires_snapshot_features(tmp_path, monkey
     router_obj = fabric.AutoRouter(
         registry_loader=lambda: {"node-a": node()},
         routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
-        local_backends=lambda: [],
+        local_backends=list,
         remote_probe=lambda _node, _timeout: {
             "healthy": True,
             "latency_ms": 5,
@@ -599,7 +598,7 @@ def test_local_auto_write_remains_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
     now = datetime.now(timezone.utc)
     route = fabric.AutoRouter(
-        registry_loader=lambda: {},
+        registry_loader=dict,
         routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"local": facts(now)}),
         local_backends=lambda: ["pi_rpc"],
         local_posture=lambda _dry: {"ready": True, "max_authorization": "high_impact"},

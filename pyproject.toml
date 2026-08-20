@@ -46,6 +46,8 @@ py-modules = [
   "operator_workspace",
   "operator_export",
   "operator_fleet",
+  "fabric_artifacts",
+  "fabric_write_guard",
   "operator_fabric",
   "operator_fabric_control",
   "operator_fabric_router",
