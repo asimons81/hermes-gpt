@@ -67,6 +67,9 @@ def node(name="node-a", max_authorization="high_impact", backends=("pi_rpc",)):
 
 
 def contract(tmp_path, *, auth="read_only", requirements=None, preferences=None, runner_options=None):
+    authorization = {"class": auth, "approved": auth == "high_impact"}
+    if auth == "high_impact":
+        authorization.update({"approved_by": "human-owner", "approval_reference": "approval-1"})
     return {
         "schema": "hermes.work-contract/v1",
         "task_id": "task-auto-1",
@@ -92,7 +95,7 @@ def contract(tmp_path, *, auth="read_only", requirements=None, preferences=None,
         },
         "inputs": [],
         "constraints": [],
-        "authorization": {"class": auth, "approved": auth == "high_impact"},
+        "authorization": authorization,
         "execution": {
             "backend": "auto",
             "options": {
@@ -139,10 +142,10 @@ def test_hard_constraints_run_before_gpu_preference(tmp_path, monkeypatch):
         "local": target_facts(runner_names=("codex",), gpu=False, cost_bucket=0, locality_bucket=0),
         "node-a": target_facts(gpu=True, gpu_memory_mb=24576, cost_bucket=9, locality_bucket=9),
     }
-    r = make_router(facts=facts, nodes={"node-a": node(max_authorization="read_only")})
+    r = make_router(facts=facts, nodes={"node-a": node(max_authorization="none")})
     value = contract(
         tmp_path,
-        auth="reversible_write",
+        auth="read_only",
         preferences={"prefer_local": False, "prefer_gpu": True},
     )
     decision = r.route(value)
@@ -219,6 +222,34 @@ def test_missing_gpu_tool_runtime_are_hard_exclusions(tmp_path, monkeypatch):
     } <= codes
 
 
+def test_write_capable_auto_fails_closed_until_g4c_guard(tmp_path, monkeypatch):
+    monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
+    facts = {
+        "local": target_facts(runner_names=("codex",)),
+        "node-a": target_facts(),
+    }
+    r = make_router(facts=facts, nodes={"node-a": node()})
+    decision = r.route(contract(tmp_path, auth="reversible_write"))
+    assert decision["selected"] is None
+    assert "WRITE_CONFLICT_GUARD_UNAVAILABLE" in exclusion_codes(candidate(decision, "local", "codex"))
+    assert "WRITE_CONFLICT_GUARD_UNAVAILABLE" in exclusion_codes(candidate(decision, "node-a", "pi_rpc"))
+
+
+def test_remote_required_artifacts_fail_closed_until_g4c_admission(tmp_path, monkeypatch):
+    monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
+    r = make_router(
+        facts={"node-a": target_facts()},
+        nodes={"node-a": node()},
+        local=(),
+    )
+    value = contract(tmp_path)
+    value["expected_artifacts"] = [{"path": "artifact.txt", "must_exist": True, "min_bytes": 1}]
+    decision = r.route(value)
+    item = candidate(decision, "node-a", "pi_rpc")
+    assert decision["selected"] is None
+    assert "REMOTE_ARTIFACT_ADMISSION_UNAVAILABLE" in exclusion_codes(item)
+
+
 def test_no_candidate_returns_explainable_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
     r = make_router(local=(), nodes={})
@@ -277,14 +308,14 @@ def test_remote_placement_preserves_authorization_and_uses_fabric(tmp_path, monk
         nodes={"node-a": node()},
         local=(),
     )
-    value = contract(tmp_path, auth="reversible_write", runner_options={"sandbox": "workspace-write"})
+    value = contract(tmp_path, auth="read_only")
     decision = r.route(value)
     placed = r.placed_contract(value, decision)
     assert placed["authorization"] == value["authorization"]
     assert placed["assigned_agent"] == "node-a"
     assert placed["execution"]["backend"] == "fabric"
     assert placed["execution"]["options"]["remote_backend"] == "pi_rpc"
-    assert placed["execution"]["options"]["remote_options"] == {"sandbox": "workspace-write"}
+    assert placed["execution"]["options"]["remote_options"] == {}
 
 
 def test_auto_backend_dispatches_only_the_selected_concrete_contract(tmp_path, monkeypatch):
