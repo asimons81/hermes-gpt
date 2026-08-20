@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Package-content hygiene guard for hermes-gpt public artifacts.
 
 Scans built wheel (.whl) and sdist (.tar.gz) artifacts for forbidden
@@ -31,10 +30,6 @@ import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-# ---------------------------------------------------------------------------
-# Forbidden patterns
-# ---------------------------------------------------------------------------
-
 PLACEHOLDER_HOME_USERS = {
     "user",
     "example",
@@ -60,15 +55,12 @@ RFC1918_RE = re.compile(
     rf"|172\.(?:1[6-9]|2[0-9]|3[01])\.{_OCTET}\.{_OCTET}"
     r")\b"
 )
-
 TAILSCALE_RE = re.compile(
     r"\b100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\."
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\."
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
 )
-
 MACHINE_HOSTNAMES_RE = re.compile(r"\b(?:TONY-GAMING-TOP|Hermex)\b")
-
 OPERATIONAL_METRIC_RE = re.compile(
     r"(?<![0-9.])[0-9][\d,]{0,6}\s+"
     r"(?:profiles?|actions?|records?|dispatches?|sessions?|messages?|"
@@ -78,42 +70,13 @@ OPERATIONAL_METRIC_RE = re.compile(
 )
 
 TEXT_SUFFIXES = {
-    ".md",
-    ".txt",
-    ".rst",
-    ".py",
-    ".toml",
-    ".cfg",
-    ".ini",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".csv",
-    ".html",
-    ".css",
-    ".js",
-    ".ps1",
-    ".example",
-    ".in",
-    ".dist-info",
-    ".pem",
+    ".md", ".txt", ".rst", ".py", ".toml", ".cfg", ".ini", ".json",
+    ".yaml", ".yml", ".csv", ".html", ".css", ".js", ".ps1", ".example",
+    ".in", ".dist-info", ".pem",
 }
 KNOWN_BINARY_SUFFIXES = {
-    ".pyc",
-    ".so",
-    ".dll",
-    ".exe",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".ico",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".whl",
-    ".gz",
-    ".zip",
+    ".pyc", ".so", ".dll", ".exe", ".png", ".jpg", ".jpeg", ".gif",
+    ".ico", ".woff", ".woff2", ".ttf", ".whl", ".gz", ".zip",
 }
 
 
@@ -123,12 +86,11 @@ def scan_member_name(name: str) -> list[tuple[str, str]]:
     parts = path.parts
     base = path.name.lower()
     findings: list[tuple[str, str]] = []
-
     if base == ".env" or base.startswith(".env."):
         findings.append(("private_env_file", name))
     if base.endswith((".pem", ".key")):
         findings.append(("private_key_file", name))
-    if base.endswith(".log") or base.endswith(".err.log"):
+    if base.endswith(".log"):
         findings.append(("private_log_file", name))
     if "__pycache__" in parts or ".pytest_cache" in parts:
         findings.append(("private_cache_path", name))
@@ -137,21 +99,19 @@ def scan_member_name(name: str) -> list[tuple[str, str]]:
 
 def iter_archive_members(path: Path):
     """Yield (member_name, bytes) for every regular file in an archive."""
-    if path.suffix == ".whl" or path.suffix == ".zip":
+    if path.suffix in {".whl", ".zip"}:
         with zipfile.ZipFile(path) as zf:
             for info in zf.infolist():
-                if info.is_dir():
-                    continue
-                yield info.filename, zf.read(info.filename)
+                if not info.is_dir():
+                    yield info.filename, zf.read(info.filename)
     elif path.suffix == ".gz" or path.name.endswith(".tar.gz"):
         with tarfile.open(path, "r:gz") as tf:
             for member in tf.getmembers():
                 if not member.isfile():
                     continue
                 f = tf.extractfile(member)
-                if f is None:
-                    continue
-                yield member.name, f.read()
+                if f is not None:
+                    yield member.name, f.read()
     else:
         raise ValueError(f"Unsupported artifact type: {path}")
 
@@ -175,24 +135,17 @@ def is_text_member(name: str, data: bytes) -> bool:
 def scan_text(text: str) -> list[tuple[str, str]]:
     """Return [(pattern_name, matched_text)] for forbidden patterns in text."""
     findings: list[tuple[str, str]] = []
-
     for m in HOME_PATH_RE.finditer(text):
-        user = m.group(1)
-        if user not in PLACEHOLDER_HOME_USERS:
+        if m.group(1) not in PLACEHOLDER_HOME_USERS:
             findings.append(("absolute_home_path", m.group(0)))
-
     for m in RFC1918_RE.finditer(text):
         findings.append(("rfc1918_ip", m.group(0)))
-
     for m in TAILSCALE_RE.finditer(text):
         findings.append(("tailscale_ip", m.group(0)))
-
     for m in MACHINE_HOSTNAMES_RE.finditer(text):
         findings.append(("machine_hostname", m.group(0)))
-
     for m in OPERATIONAL_METRIC_RE.finditer(text):
         findings.append(("operational_metric", m.group(0)))
-
     return findings
 
 
@@ -219,7 +172,7 @@ def collect_artifacts(paths: list[str]) -> list[Path]:
         p = Path(raw)
         if p.is_dir():
             for child in sorted(p.iterdir()):
-                if child.suffix in (".whl",) or child.name.endswith(".tar.gz"):
+                if child.suffix == ".whl" or child.name.endswith(".tar.gz"):
                     artifacts.append(child)
         elif p.exists():
             artifacts.append(p)
@@ -238,17 +191,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Artifact file(s) and/or a directory containing .whl / .tar.gz files",
     )
     args = parser.parse_args(argv)
-
     try:
         artifacts = collect_artifacts(args.paths)
     except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-
     if not artifacts:
         print("ERROR: no .whl or .tar.gz artifacts found", file=sys.stderr)
         return 2
-
     total: list[tuple[str, str, str, str]] = []
     for artifact in artifacts:
         try:
@@ -258,14 +208,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         for member, pattern, matched in findings:
             total.append((str(artifact), member, pattern, matched))
-
     if total:
         print("PACKAGE HYGIENE FAILURES:")
         for artifact, member, pattern, matched in total:
             print(f"  {artifact} :: {member} :: {pattern}: {matched!r}")
         print(f"\n{len(total)} finding(s) — release-blocking hygiene issue.")
         return 1
-
     print(f"CLEAN: {len(artifacts)} artifact(s) scanned, no forbidden private/operational patterns.")
     return 0
 
