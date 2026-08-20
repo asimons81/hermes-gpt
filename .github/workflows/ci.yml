@@ -70,6 +70,21 @@ jobs:
       - name: Check whitespace
         run: git diff --check
 
+  compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Prove v0.7 local-only contracts, swarms, and runners remain unchanged
+        run: >-
+          python -m pytest -q
+          test_operator_contract.py
+          test_operator_swarm.py
+          test_operator_runners.py
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -87,6 +102,7 @@ jobs:
           operator_runners.py test_operator_runners.py
           runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
           operator_export.py test_operator_export.py test_server_export.py
+          tools/check_package_hygiene.py test_package_hygiene.py
           ui_api.py ui_fabric.py
 
   web:
@@ -131,7 +147,7 @@ jobs:
           }
 
   build:
-    needs: [test, lint, web, windows-docs]
+    needs: [test, compatibility, lint, web, windows-docs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -141,7 +157,7 @@ jobs:
       - run: python -m pip install build twine
       - run: python -m build
       - run: python -m twine check dist/*
-      - name: Check package hygiene
+      - name: Check package content and private-file hygiene
         run: python tools/check_package_hygiene.py dist/*
       - uses: actions/upload-artifact@v4
         with:
