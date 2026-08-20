@@ -32,7 +32,7 @@ dev = [
 
 [project.scripts]
 hermes-gpt = "server:main"
-hermes-gpt-fabric-peer = "operator_fabric:peer_main"
+hermes-gpt-fabric-peer = "operator_fabric_g4c:peer_main"
 
 [tool.setuptools]
 include-package-data = true
@@ -46,9 +46,12 @@ py-modules = [
   "operator_workspace",
   "operator_export",
   "operator_fleet",
+  "fabric_artifacts",
+  "fabric_write_guard",
   "operator_fabric",
   "operator_fabric_control",
   "operator_fabric_router",
+  "operator_fabric_g4c",
   "operator_diagnostics",
   "operator_codex",
   "operator_session",
