@@ -481,7 +481,11 @@ def _append_decision(decision: dict[str, Any], *, placed_sha256: str, hermes_roo
         "task_id": decision["task_id"],
         "original_contract_sha256": decision["original_contract_sha256"],
         "placed_contract_sha256": placed_sha256,
+        "mode": "auto",
+        "requirements": decision.get("requirements") or {},
+        "preferences": decision.get("preferences") or {},
         "selected": decision["selected"],
+        "candidates": decision.get("candidates") or [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     with _ROUTER_LOG_LOCK, path.open("a", encoding="utf-8") as fh:

@@ -22,7 +22,7 @@ import ui_security
 
 
 def _root() -> Any:
-    return op_mission._resolve_root(None)  # noqa: SLF001 - same-package UI adapter reuse
+    return op_mission._resolve_root(None)
 
 
 def _response(data: Any, status: int = 200) -> JSONResponse:
@@ -52,7 +52,7 @@ async def _attempts(request: Request) -> JSONResponse:
 
 async def _attempt_detail(request: Request) -> JSONResponse:
     attempt_id = request.path_params.get("attempt_id", "")
-    if not isinstance(attempt_id, str) or not fabric._ID_RE.fullmatch(attempt_id):  # noqa: SLF001
+    if not isinstance(attempt_id, str) or not fabric._ID_RE.fullmatch(attempt_id):
         return ui_security.err("FABRIC_ATTEMPT_INVALID", "Fabric attempt id is invalid.", status_code=400)
     data = await run_in_threadpool(view.attempt_detail, attempt_id, hermes_root=_root())
     status = 404 if data.get("code") == "FABRIC_ATTEMPT_NOT_FOUND" else 200
