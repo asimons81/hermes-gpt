@@ -8,8 +8,9 @@ private/operational patterns that must never ship publicly:
 - RFC1918 private-network IPs (10/8, 172.16/12, 192.168/16)
 - Tailscale-like CGNAT IPs (100.64/10)
 - known machine hostnames from this operator's fleet
-- live internal profile counts / operational metrics (e.g. "9 profiles",
-  "2,491 actions", "1,453 sessions") recorded from a real deployment
+- live internal profile counts / operational metrics
+- high-confidence private member names such as .env, *.pem, *.key, logs,
+  __pycache__, and .pytest_cache
 
 Generic localhost (127.0.0.1), placeholder Windows paths, and explicit
 placeholder usernames (e.g. ``/home/user``) are allowed and not flagged.
@@ -28,14 +29,12 @@ import re
 import sys
 import tarfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 # ---------------------------------------------------------------------------
 # Forbidden patterns
 # ---------------------------------------------------------------------------
 
-# Absolute home paths. A small allowlist of canonical placeholder usernames is
-# permitted (explicit placeholders only, per release hygiene scope).
 PLACEHOLDER_HOME_USERS = {
     "user",
     "example",
@@ -53,7 +52,6 @@ PLACEHOLDER_HOME_USERS = {
 }
 HOME_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./])/home/([A-Za-z0-9_.-]+)")
 
-# RFC1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
 _OCTET = r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
 RFC1918_RE = re.compile(
     r"\b(?:"
@@ -63,20 +61,14 @@ RFC1918_RE = re.compile(
     r")\b"
 )
 
-# Tailscale CGNAT: 100.64.0.0/10 -> 100.64.0.0 - 100.127.255.255
 TAILSCALE_RE = re.compile(
     r"\b100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\."
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\."
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
 )
 
-# Known machine hostnames from the operator fleet (scrubbed from release docs).
 MACHINE_HOSTNAMES_RE = re.compile(r"\b(?:TONY-GAMING-TOP|Hermex)\b")
 
-# Live internal profile counts / operational metrics. A number directly
-# followed by one of these operational nouns indicates a recorded real-world
-# metric rather than a generic example. The leading guard avoids matching
-# digits inside section numbers like "§6.4 fleet" or "v0.6 profiles".
 OPERATIONAL_METRIC_RE = re.compile(
     r"(?<![0-9.])[0-9][\d,]{0,6}\s+"
     r"(?:profiles?|actions?|records?|dispatches?|sessions?|messages?|"
@@ -85,7 +77,6 @@ OPERATIONAL_METRIC_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Binary-ish suffix heuristic: skip members that are clearly not text.
 TEXT_SUFFIXES = {
     ".md",
     ".txt",
@@ -124,6 +115,24 @@ KNOWN_BINARY_SUFFIXES = {
     ".gz",
     ".zip",
 }
+
+
+def scan_member_name(name: str) -> list[tuple[str, str]]:
+    """Flag high-confidence private/cache filenames inside an artifact."""
+    path = PurePosixPath(name.replace("\\", "/"))
+    parts = path.parts
+    base = path.name.lower()
+    findings: list[tuple[str, str]] = []
+
+    if base == ".env" or base.startswith(".env."):
+        findings.append(("private_env_file", name))
+    if base.endswith((".pem", ".key")):
+        findings.append(("private_key_file", name))
+    if base.endswith(".log") or base.endswith(".err.log"):
+        findings.append(("private_log_file", name))
+    if "__pycache__" in parts or ".pytest_cache" in parts:
+        findings.append(("private_cache_path", name))
+    return findings
 
 
 def iter_archive_members(path: Path):
@@ -191,6 +200,8 @@ def scan_artifact(path: Path) -> list[tuple[str, str, str]]:
     """Scan one artifact; return [(member_name, pattern, matched_text)]."""
     results: list[tuple[str, str, str]] = []
     for member, data in iter_archive_members(path):
+        for pattern, matched in scan_member_name(member):
+            results.append((member, pattern, matched))
         if not is_text_member(member, data):
             continue
         try:
@@ -238,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: no .whl or .tar.gz artifacts found", file=sys.stderr)
         return 2
 
-    total: list[tuple[str, str, str, str]] = []  # (artifact, member, pattern, match)
+    total: list[tuple[str, str, str, str]] = []
     for artifact in artifacts:
         try:
             findings = scan_artifact(artifact)
