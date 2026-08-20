@@ -47,6 +47,7 @@ py-modules = [
   "operator_export",
   "operator_fleet",
   "operator_fabric",
+  "operator_fabric_control",
   "operator_diagnostics",
   "operator_codex",
   "operator_session",
