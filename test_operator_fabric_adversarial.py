@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -10,7 +9,6 @@ import operator_fabric as fabric
 import operator_runners as op_runners
 from test_operator_fabric import (
     accept_request,
-    capability,
     contract,
     coordinator,
     envelope_for,
@@ -162,12 +160,25 @@ def test_timeout_after_remote_accept_recovers_same_attempt_after_coordinator_res
     assert submitted["submission_may_have_succeeded"] is True
     assert calls["accept"] == 1
 
+    # Reconciliation is allowed to recover only when the peer can still
+    # observe the accepted runner. No observation would correctly fail closed
+    # as LOST_AMBIGUOUS/BLOCKED rather than inventing a running state.
+    observed.append(
+        {
+            "status": "running",
+            "outcome": "running",
+            "started_at": "2026-01-01T00:00:00Z",
+            "ended_at": "",
+            "error": "",
+        }
+    )
     restarted = coordinator(tmp_path, svc)
     status = restarted.poll(submitted["attempt_id"], reconcile=True)
     assert status["state"] == "RUNNING"
     assert status["attempt_id"] == submitted["attempt_id"]
     assert calls["accept"] == 1
 
+    observed.clear()
     observed.append(
         {
             "status": "completed",
