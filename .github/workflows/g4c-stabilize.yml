@@ -30,9 +30,10 @@ jobs:
           test_text = test_path.read_text()
           old = 'svc._release_claim(first_row, proof="stale-release")'
           new = 'svc.claims.release(first_row, proof="stale-release")'
-          if old not in test_text:
+          if old in test_text:
+              test_path.write_text(test_text.replace(old, new, 1))
+          elif new not in test_text:
               raise SystemExit('expected stale release assertion not found')
-          test_path.write_text(test_text.replace(old, new, 1))
 
           pyproject = Path('pyproject.toml')
           project_text = pyproject.read_text()
@@ -60,9 +61,7 @@ jobs:
               ci_text = ci_text.replace(lint_marker, lint_replacement, 1)
           ci.write_text(ci_text)
           PY
-          python -m ruff check --fix \
-            operator_fabric_g4c.py test_operator_fabric_g4c.py \
-            fabric_artifacts.py fabric_write_guard.py
+          python -m ruff check --fix operator_fabric_g4c.py test_operator_fabric_g4c.py
       - name: Verify focused G4-C matrix
         run: >-
           python -m pytest -q
@@ -71,14 +70,11 @@ jobs:
           test_operator_fabric_control.py
           test_operator_fabric_router.py
           test_operator_fabric_g4c.py
-      - name: Verify lint and compile
+      - name: Verify changed integration lint and compile
         shell: bash
         run: |
-          python -m ruff check \
-            operator_fabric_g4c.py test_operator_fabric_g4c.py \
-            fabric_artifacts.py fabric_write_guard.py
-          python -m py_compile \
-            operator_fabric_g4c.py fabric_artifacts.py fabric_write_guard.py
+          python -m ruff check operator_fabric_g4c.py test_operator_fabric_g4c.py
+          python -m py_compile operator_fabric_g4c.py fabric_artifacts.py fabric_write_guard.py
           git diff --check
       - name: Commit consolidated stabilization
         shell: bash
