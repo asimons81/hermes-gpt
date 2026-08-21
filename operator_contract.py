@@ -875,7 +875,57 @@ def _attributable_identities(contract: dict[str, Any]) -> set[str]:
     return identities
 
 
-def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, Any]:
+def _auto_fabric_lineage(
+    contract: dict[str, Any],
+    contract_sha256: str,
+    hermes_root: Path,
+) -> bool | None:
+    """Return whether an auto contract has durable remote Fabric placement lineage.
+
+    ``True`` means at least one matching routing decision selected remote Fabric.
+    ``False`` means matching durable routing evidence exists and is local-only.
+    ``None`` means placement provenance cannot be proven, which callers must treat
+    as unverified rather than assuming local execution.
+    """
+    execution = contract.get("execution")
+    if not isinstance(execution, dict) or str(execution.get("backend") or "").strip().lower() != "auto":
+        return False
+
+    journal = _resolve_root(hermes_root) / "fabric" / "routing-decisions.jsonl"
+    matched = False
+    try:
+        with journal.open("rb") as fh:
+            for raw_line in fh:
+                if not raw_line or len(raw_line) > 128_000:
+                    continue
+                try:
+                    record = json.loads(raw_line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                if (
+                    record.get("schema") != "hermes.fabric-routing-decision/v1"
+                    or record.get("task_id") != contract.get("task_id")
+                    or record.get("original_contract_sha256") != contract_sha256
+                ):
+                    continue
+                selected = record.get("selected")
+                if not isinstance(selected, dict):
+                    continue
+                matched = True
+                if selected.get("remote") is True and selected.get("transport_backend") == "fabric":
+                    return True
+    except OSError:
+        return None
+    return False if matched else None
+
+
+def _check_forbidden(
+    contract: dict[str, Any],
+    hermes_root: Path,
+    contract_sha256: str = "",
+) -> dict[str, Any]:
     forbidden = contract["forbidden_actions"]
     if not forbidden:
         return {"kind": "forbidden", "status": "PASS", "detail": "no forbidden actions declared"}
@@ -935,9 +985,42 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
 
     # Fabric v1 admits bounded remote run-state evidence but does not admit a
     # coordinator-verifiable forbidden-action audit trail. New dispatches with
-    # non-empty forbidden_actions are rejected at the Fabric boundary; this
-    # guard keeps historical admitted Fabric runs from being certified merely
-    # because no coordinator-local violation signal exists. Absence is not proof.
+    # non-empty forbidden_actions are rejected at the Fabric boundary. Historical
+    # explicit-Fabric contracts therefore remain unverified regardless of whether
+    # the observer is currently healthy: absence of remote evidence is not proof.
+    execution = contract.get("execution")
+    execution_backend = (
+        str(execution.get("backend") or "").strip().lower()
+        if isinstance(execution, dict)
+        else ""
+    )
+    if execution_backend == "fabric":
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "remote Fabric execution has no coordinator-verifiable forbidden-action evidence",
+        }
+
+    # Auto contracts need durable placement lineage before absence can be trusted.
+    # A missing/unreadable journal is itself unverified; a competing local runner
+    # record for the same task_id must never launder unknown Fabric provenance.
+    auto_lineage = _auto_fabric_lineage(contract, contract_sha256, hermes_root)
+    if auto_lineage is True:
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "remote Fabric auto placement has no coordinator-verifiable forbidden-action evidence",
+        }
+    if auto_lineage is None:
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "auto placement provenance is unavailable for forbidden-action verification",
+        }
+
+    # Legacy/non-auto callers may still have Fabric history discoverable by the
+    # registered backend. Observation failure does not prove Fabric involvement,
+    # but any positively observed Fabric run remains fail-closed.
     try:
         fabric_backend = op_runners.get_backend("fabric")
         observer = getattr(fabric_backend, "observed_runs", None)
@@ -1132,7 +1215,7 @@ def _validate_impl(contract: dict[str, Any], sha: str, runner: Callable[..., tup
         _check_artifacts(contract, sha, hermes_root),
         _check_tests(contract, runner, hermes_root),
         _check_review(contract, sha, hermes_root),
-        _check_forbidden(contract, hermes_root),
+        _check_forbidden(contract, hermes_root, sha),
         _check_authorization(contract),
     ]
 
