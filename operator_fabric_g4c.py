@@ -587,7 +587,7 @@ class FabricPeerService(base.FabricPeerService):
                         unit_id=unit_id,
                         timeout=30,
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001 - external runner boundary fails closed
                     # Once the external launcher has been invoked, an exception
                     # cannot prove that no write execution occurred. A unit that
                     # is already quiescent may still have run and mutated state.
@@ -798,29 +798,32 @@ class FabricPeerService(base.FabricPeerService):
                         "SELECT * FROM attempts WHERE attempt_id=? AND dispatch_id=?",
                         (attempt_id, dispatch_id),
                     ).fetchone()
-                    if current is not None and current["state"] == "ACCEPTED":
+                    if (
+                        current is not None
+                        and current["state"] == "ACCEPTED"
+                        and not self._invocation_in_flight(attempt_id)
+                    ):
                         # Recheck while serialized with insertion: launch is
                         # invoked only after durable LAUNCHING, so absence of
                         # this invocation marker positively proves that an
                         # ACCEPTED attempt never reached external execution.
-                        if not self._invocation_in_flight(attempt_id):
-                            db.execute(
-                                "UPDATE attempts SET state='BLOCKED',updated_at=?"
-                                " WHERE attempt_id=? AND state='ACCEPTED'",
-                                (base._now(), attempt_id),
-                            )
-                            db.execute(
-                                "UPDATE write_claims SET state='RELEASED',released_at=?,"
-                                "release_proof=? WHERE conflict_domain=? AND attempt_id=?"
-                                " AND epoch=? AND state='ACTIVE'",
-                                (
-                                    base._now(),
-                                    proof,
-                                    current["conflict_domain"],
-                                    current["attempt_id"],
-                                    int(current["write_epoch"]),
-                                ),
-                            )
+                        db.execute(
+                            "UPDATE attempts SET state='BLOCKED',updated_at=?"
+                            " WHERE attempt_id=? AND state='ACCEPTED'",
+                            (base._now(), attempt_id),
+                        )
+                        db.execute(
+                            "UPDATE write_claims SET state='RELEASED',released_at=?,"
+                            "release_proof=? WHERE conflict_domain=? AND attempt_id=?"
+                            " AND epoch=? AND state='ACTIVE'",
+                            (
+                                base._now(),
+                                proof,
+                                current["conflict_domain"],
+                                current["attempt_id"],
+                                int(current["write_epoch"]),
+                            ),
+                        )
                 row = self._row(dispatch_id, attempt_id)
             return {
                 "dispatch_id": dispatch_id,
@@ -986,10 +989,9 @@ class FabricPeerService(base.FabricPeerService):
                 "write_claim_state": self.claims.state(row),
             }
         if row["state"] in {"ACCEPTED", "LAUNCHING"}:
-            with self._lock:
-                with base._connect(self.db_path) as db:
-                    db.execute("BEGIN IMMEDIATE")
-                    changed = db.execute(
+            with self._lock, base._connect(self.db_path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                changed = db.execute(
                         "UPDATE attempts SET state=CASE"
                         " WHEN state='ACCEPTED' THEN 'PRELAUNCH_CANCEL_REQUESTED'"
                         " ELSE 'CANCEL_REQUESTED' END,updated_at=?"

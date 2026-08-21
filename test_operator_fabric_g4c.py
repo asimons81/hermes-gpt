@@ -271,7 +271,7 @@ def _blocked_prelaunch_accept(tmp_path, monkeypatch, *, available=True):
     def run_accept():
         try:
             accept(svc, first)
-        except BaseException as exc:  # surfaced by the caller after joining
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
             errors.append(exc)
 
     thread = threading.Thread(target=run_accept)
@@ -469,7 +469,7 @@ def test_launch_wins_first_and_cancel_returns_while_launch_call_is_in_flight(
     def run_accept():
         try:
             accept(svc, first)
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
             accept_errors.append(exc)
 
     accept_thread = threading.Thread(target=run_accept)
@@ -533,7 +533,7 @@ def test_slow_launch_does_not_hold_peer_lock_for_unrelated_conflict_domain(
     def run_accept():
         try:
             accept(svc, first)
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
             errors.append(exc)
 
     accept_thread = threading.Thread(target=run_accept)
@@ -558,7 +558,7 @@ def test_slow_launch_does_not_hold_peer_lock_for_unrelated_conflict_domain(
                     attempt_id="attempt-unrelated",
                     unit_id="unit-unrelated",
                 )
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
             errors.append(exc)
         finally:
             unrelated_finished.set()
@@ -627,7 +627,7 @@ def test_status_during_healthy_slow_launch_preserves_fence_and_reaches_running(
     def run_accept():
         try:
             responses.append(accept(svc, first))
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
             errors.append(exc)
 
     thread = threading.Thread(target=run_accept)
@@ -674,7 +674,7 @@ def test_secondary_accepts_do_not_clear_original_invocation_marker(tmp_path, mon
     def run_accept():
         try:
             responses.append(accept(svc, first))
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
             errors.append(exc)
 
     thread = threading.Thread(target=run_accept)
@@ -793,7 +793,7 @@ def test_definite_launch_failure_after_cancel_terminalizes_and_allows_retry(
     def run_accept():
         try:
             accept(svc, first)
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
             errors.append(exc)
 
     thread = threading.Thread(target=run_accept)
