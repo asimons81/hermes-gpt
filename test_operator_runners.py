@@ -262,7 +262,10 @@ def test_opencode_worker_pipes_prompt_and_uses_confinement(tmp_path: Path, monke
         "config = os.environ['OPENCODE_CONFIG_CONTENT']\n"
         "assert 'trusted-parent-only-value' not in config\n"
         "assert 'trusted-parent-only-value' not in repr(dict(os.environ))\n"
-        "assert 'hermes-gpt-local-relay' in config\n"
+        "cfg = json.loads(config)\n"
+        "relay_value = cfg['provider']['cliproxyapi']['options']['apiKey']\n"
+        "assert relay_value and relay_value != 'trusted-parent-only-value'\n"
+        "assert len(relay_value) >= 32\n"
         "assert prompt == 'Inspect the workspace and make the requested bounded change.'\n"
         "assert '--pure' in sys.argv and '--format' in sys.argv and 'json' in sys.argv\n"
         "assert prompt not in sys.argv\n"
@@ -319,17 +322,32 @@ def test_opencode_relay_replaces_child_authorization_without_serializing_parent_
     relay_thread = runners.threading.Thread(target=relay.serve_forever, daemon=True)
     relay_thread.start()
     try:
-        child_config_text = runners._opencode_child_config(material, relay.server_port)
+        child_config_text = runners._opencode_child_config(relay.material, relay.server_port)
         child_config = json.loads(child_config_text)
+        relay_value = child_config["provider"]["cliproxyapi"]["options"]["apiKey"]
         assert parent_value not in child_config_text
-        assert child_config["provider"]["cliproxyapi"]["options"]["apiKey"] == runners._OPENCODE_PROXY_DUMMY_KEY
+        assert relay_value == relay.material["relay_token"]
+        assert relay_value != parent_value
+
+        for supplied in (None, "wrong-local-capability"):
+            connection = runners.http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+            headers = {"Content-Type": "application/json"}
+            if supplied is not None:
+                headers["Authorization"] = f"Bearer {supplied}"
+            connection.request("POST", "/v1/chat/completions", body=b"{}", headers=headers)
+            response = connection.getresponse()
+            assert response.status == 401
+            response.read()
+            connection.close()
+        assert observed == {}
+
         connection = runners.http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
         connection.request(
             "POST",
             "/v1/chat/completions",
             body=b"{}",
             headers={
-                "Authorization": f"Bearer {runners._OPENCODE_PROXY_DUMMY_KEY}",
+                "Authorization": f"Bearer {relay_value}",
                 "Content-Type": "application/json",
             },
         )

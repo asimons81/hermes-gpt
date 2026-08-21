@@ -170,7 +170,7 @@ def test_ambiguous_dispatch_is_recorded_as_reconciling(tmp_path: Path, monkeypat
     assert out["delegation"]["state"] == "reconciling"
 
 
-def test_reconcile_uses_observed_runner_state_and_updates_mission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_reconcile_backend_success_without_contract_validation_stays_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     root = tmp_path / "hermes"
@@ -212,11 +212,124 @@ def test_reconcile_uses_observed_runner_state_and_updates_mission(tmp_path: Path
         delegations.hermes_delegation_reconcile("dlg-reconcile", apply=True, hermes_root=root)
     )
     assert reconciled["success"] is True
-    assert reconciled["delegation"]["state"] == "succeeded"
+    assert reconciled["delegation"]["state"] == "reconciling"
+    assert reconciled["delegation"]["validation_verdict"] == ""
     mission = json.loads(missions.hermes_mission_get(mission_id, hermes_root=root))
     attachment = next(item for item in mission["attachments"] if item["ref"] == "dlg-reconcile")
-    assert attachment["state"] == "succeeded"
+    assert attachment["state"] == "blocked"
+    assert not attachment["verified"]
 
+
+
+def test_reconcile_satisfied_contract_promotes_verified_mission_attachment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    mission_id = _mission(root)
+    monkeypatch.setattr(
+        delegations.contract_mod,
+        "hermes_contract_dispatch",
+        lambda *args, **kwargs: json.dumps({"success": True, "changed": True, "backend": "pi_rpc", "state": "queued"}),
+    )
+    contract = _contract(workspace, task_id="delegation-task-satisfied")
+    assert json.loads(
+        delegations.hermes_delegation_dispatch(
+            json.dumps(contract),
+            mission_id=mission_id,
+            delegation_id="dlg-satisfied",
+            confirm=True,
+            dry_run=False,
+            hermes_root=root,
+        )
+    )["success"] is True
+    meta_path, _, _ = runners._job_paths("delegation-task-satisfied", root)
+    runners._atomic_json(
+        meta_path,
+        {
+            "schema_version": runners.SCHEMA_VERSION,
+            "task_id": "delegation-task-satisfied",
+            "backend": "pi_rpc",
+            "state": "completed",
+            "outcome": "completed",
+            "created_at": "2026-08-21T00:00:00+00:00",
+            "started_at": "2026-08-21T00:00:01+00:00",
+            "ended_at": "2026-08-21T00:00:02+00:00",
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        delegations.contract_mod,
+        "hermes_contract_validate",
+        lambda *args, **kwargs: json.dumps({"success": True, "verdict": "SATISFIED"}),
+    )
+    reconciled = json.loads(
+        delegations.hermes_delegation_reconcile(
+            "dlg-satisfied",
+            contract_json=json.dumps(contract),
+            apply=True,
+            hermes_root=root,
+        )
+    )
+    assert reconciled["success"] is True
+    assert reconciled["delegation"]["state"] == "succeeded"
+    assert reconciled["delegation"]["validation_verdict"] == "SATISFIED"
+    mission = json.loads(missions.hermes_mission_get(mission_id, hermes_root=root))
+    attachment = next(item for item in mission["attachments"] if item["ref"] == "dlg-satisfied")
+    assert attachment["state"] == "succeeded"
+    assert bool(attachment["verified"]) is True
+    assert attachment["evidence_ref"].startswith("contract:")
+
+
+def test_dispatch_immediate_backend_success_does_not_self_certify(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    monkeypatch.setattr(
+        delegations.contract_mod,
+        "hermes_contract_dispatch",
+        lambda *args, **kwargs: json.dumps({"success": True, "changed": True, "backend": "pi_rpc", "state": "completed"}),
+    )
+    out = json.loads(
+        delegations.hermes_delegation_dispatch(
+            json.dumps(_contract(workspace, task_id="delegation-task-immediate")),
+            delegation_id="dlg-immediate",
+            confirm=True,
+            dry_run=False,
+            hermes_root=root,
+        )
+    )
+    assert out["success"] is True
+    assert out["delegation"]["state"] == "reconciling"
+
+
+def test_dispatch_rejects_nonexistent_mission_even_when_store_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    called = False
+
+    def dispatch(*args, **kwargs):
+        nonlocal called
+        called = True
+        return json.dumps({"success": True})
+
+    monkeypatch.setattr(delegations.contract_mod, "hermes_contract_dispatch", dispatch)
+    out = json.loads(
+        delegations.hermes_delegation_dispatch(
+            json.dumps(_contract(workspace, task_id="delegation-task-ghost")),
+            mission_id="msn-does-not-exist",
+            delegation_id="dlg-ghost",
+            confirm=True,
+            dry_run=False,
+            hermes_root=root,
+        )
+    )
+    assert out["success"] is False
+    assert out["code"] == "DELEGATION_DISPATCH_REJECTED"
+    assert called is False
 
 def test_reconcile_contract_lineage_mismatch_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     workspace = tmp_path / "ws"
