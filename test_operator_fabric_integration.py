@@ -11,7 +11,9 @@ import operator_fabric as base
 import operator_fabric_g4c as fabric
 import operator_fabric_router as router
 import operator_fabric_view as view
+import operator_policy as op
 import operator_runners as runners
+import operator_swarm as swarm
 from test_operator_fabric_g4c import (
     FakeUnitManager,
     auto_contract,
@@ -35,6 +37,49 @@ def _completed_observation() -> dict[str, str]:
         "ended_at": "2026-08-20T15:01:00Z",
         "error": "",
     }
+
+
+class _ImmediateBackend:
+    name = "pi_rpc"
+
+    def __init__(self) -> None:
+        self.runs: dict[str, dict[str, str]] = {}
+
+    def availability(self, *, hermes_root=None):
+        return {"available": True, "enabled": True, "write_enabled": False}
+
+    def dispatch(self, contract, *, confirm, dry_run, timeout, hermes_root=None, **_kwargs):
+        task_id = str(contract["task_id"])
+        if not dry_run:
+            self.runs[task_id] = {
+                "task_id": task_id,
+                "status": "completed",
+                "outcome": "completed",
+                "error": "",
+                "started_at": "2026-08-20T15:00:00Z",
+                "ended_at": "2026-08-20T15:01:00Z",
+                "scope": "runner:pi_rpc",
+            }
+        return {
+            "success": True,
+            "ok": True,
+            "changed": not dry_run,
+            "dry_run": dry_run,
+            "backend": self.name,
+            "task_id": task_id,
+        }
+
+    def observed_runs(self, task_id, *, hermes_root=None):
+        value = self.runs.get(task_id)
+        return [dict(value)] if value else []
+
+    def cancel(self, task_id, *, hermes_root=None):
+        return {
+            "success": True,
+            "changed": False,
+            "backend": self.name,
+            "task_id": task_id,
+        }
 
 
 def _router_for_service(tmp_path, svc, monkeypatch):
@@ -157,6 +202,75 @@ def test_auto_remote_dispatch_evidence_contract_and_flight_deck_compose(tmp_path
     assert verdict["verdict"] == "SATISFIED"
     assert verdict["satisfied"] is True
     assert any(item.get("scope") == "fabric:node-a" for item in verdict["evidence"]["run"])
+
+
+def test_auto_local_dispatch_composes_while_remote_candidate_is_available(tmp_path, monkeypatch):
+    real_get_backend = runners.get_backend
+    svc = make_service(tmp_path, monkeypatch)
+    monkeypatch.setattr(runners, "get_backend", real_get_backend)
+    monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
+    now = datetime.now(timezone.utc)
+
+    def probe(_node, _timeout):
+        snapshot = svc.capabilities(policy(tmp_path))
+        return {
+            "healthy": True,
+            "latency_ms": 5.0,
+            "snapshot_sha256": snapshot["snapshot_sha256"],
+            "features": list(snapshot.get("features") or []),
+        }
+
+    route = fabric.AutoRouter(
+        registry_loader=lambda: {"node-a": node()},
+        routing_policy_loader=lambda: router.RoutingPolicy(
+            targets={"local": facts(now), "node-a": facts(now)}
+        ),
+        local_backends=lambda: ["pi_rpc"],
+        local_posture=lambda _dry: {"ready": True, "max_authorization": "high_impact"},
+        remote_probe=probe,
+        now=lambda: now,
+        hermes_root=tmp_path,
+    )
+    captured: dict[str, dict] = {}
+
+    def downstream(placed, *, confirm, dry_run, timeout, hermes_root=None, **_kwargs):
+        captured["contract"] = placed
+        return {
+            "success": True,
+            "ok": True,
+            "changed": not dry_run,
+            "dry_run": dry_run,
+            "backend": "pi_rpc",
+            "task_id": placed["task_id"],
+        }
+
+    backend = router.AutoBackend(
+        router_factory=lambda **_kwargs: route,
+        dispatch_fn=downstream,
+    )
+    value = auto_contract(tmp_path)
+    value["execution"]["options"]["preferences"]["prefer_local"] = True
+
+    result = backend.dispatch(
+        value,
+        confirm=True,
+        dry_run=False,
+        timeout=10,
+        hermes_root=tmp_path,
+    )
+
+    assert result["success"] is True
+    assert result["selected_node"] == "local"
+    assert result["selected_backend"] == "pi_rpc"
+    assert result["placement"]["selected"]["remote"] is False
+    assert captured["contract"]["execution"]["backend"] == "pi_rpc"
+    assert captured["contract"]["authorization"] == value["authorization"]
+    remote = next(
+        item
+        for item in result["placement"]["candidates"]
+        if item["node"] == "node-a" and item["backend"] == "pi_rpc"
+    )
+    assert remote["eligible"] is True
 
 
 def test_auto_read_only_runner_options_cannot_widen_remote_authority(tmp_path, monkeypatch):
@@ -427,3 +541,304 @@ def test_remote_completion_cannot_self_satisfy_required_human_review(tmp_path, m
     assert by_kind["review"] != "PASS"
     assert verdict["verdict"] == "NOT_SATISFIED"
     assert verdict["satisfied"] is False
+
+
+def test_mixed_local_remote_swarm_fan_out_fan_in_and_owner_approval_compose(tmp_path, monkeypatch):
+    hermes_root = tmp_path / "hermes"
+    workspace = tmp_path / "workspace"
+    hermes_root.mkdir()
+    workspace.mkdir()
+    op.set_audit_log_override(tmp_path / "audit.jsonl")
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
+
+    real_get_backend = runners.get_backend
+    remote_observed: list[dict[str, str]] = []
+    svc = make_service(workspace, monkeypatch, observed=remote_observed)
+    coord = make_coordinator(workspace, svc)
+    monkeypatch.setattr(runners, "get_backend", real_get_backend)
+
+    now = datetime.now(timezone.utc)
+
+    def probe(_node, _timeout):
+        snapshot = svc.capabilities(policy(workspace))
+        return {
+            "healthy": True,
+            "latency_ms": 5.0,
+            "snapshot_sha256": snapshot["snapshot_sha256"],
+            "features": list(snapshot.get("features") or []),
+        }
+
+    route = fabric.AutoRouter(
+        registry_loader=lambda: {"node-a": node()},
+        routing_policy_loader=lambda: router.RoutingPolicy(
+            targets={"local": facts(now), "node-a": facts(now)}
+        ),
+        local_backends=lambda: ["pi_rpc"],
+        local_posture=lambda _dry: {"ready": True, "max_authorization": "high_impact"},
+        remote_probe=probe,
+        now=lambda: now,
+        hermes_root=hermes_root,
+    )
+    local_backend = _ImmediateBackend()
+    auto_backend = router.AutoBackend(router_factory=lambda **_kwargs: route)
+    fabric_backend = base.FabricBackend(coordinator_factory=lambda **_kwargs: coord)
+
+    previous: dict[str, object | None] = {}
+    for name in ("pi_rpc", "auto", "fabric"):
+        try:
+            previous[name] = runners.get_backend(name)
+        except LookupError:
+            previous[name] = None
+    runners.register_backend(local_backend, replace=True)
+    runners.register_backend(auto_backend, replace=True)
+    runners.register_backend(fabric_backend, replace=True)
+
+    def stage(stage_id, kind, parents, execution, *, owner="default"):
+        approval = kind == "approval"
+        return {
+            "id": stage_id,
+            "kind": kind,
+            "owner": "owner" if approval else owner,
+            "parents": list(parents),
+            "objective": f"G5 integration {stage_id}",
+            "expected_artifacts": [],
+            "tests": [],
+            "review_requirements": {
+                "required": False,
+                "reviewer": "",
+                "evidence": "",
+                "approval_required": False,
+            },
+            "completion_criteria": {
+                "run_state": {"terminal": True, "outcome_ok": ["completed", "done"]},
+                "artifacts_present": False,
+                "tests_pass": False,
+                "review_satisfied": approval,
+                "no_forbidden_actions": True,
+            },
+            "authorization": {
+                "class": "high_impact" if approval else "read_only",
+                "approved": True,
+                "approved_by": "owner",
+                "approval_reference": "g5-integration",
+            },
+            **({"execution": execution} if execution is not None else {}),
+        }
+
+    local_auto = {
+        "backend": "auto",
+        "options": {
+            "requirements": {"location": "local", "runners": ["pi_rpc"]},
+            "preferences": {"prefer_local": True},
+            "logical_workspace": "repo",
+            "runner_options": {},
+        },
+    }
+    remote_auto = {
+        "backend": "auto",
+        "options": {
+            "requirements": {"location": "remote", "runners": ["pi_rpc"]},
+            "preferences": {"prefer_local": False},
+            "logical_workspace": "repo",
+            "runner_options": {},
+            "evidence_provenance": {"run_state": ["managed_peer_structured"]},
+        },
+    }
+    explicit_local = {"backend": "pi_rpc", "options": {}}
+    workflow = {
+        "schema": "hermes.swarm-workflow/v1",
+        "workflow_id": "sw-g5-mixed-001",
+        "title": "G5 mixed Fabric integration",
+        "workspace": str(workspace),
+        "max_parallel": 2,
+        "board_cap": 4,
+        "stages": [
+            stage("root", "single", [], explicit_local),
+            stage("local_child", "parallel", ["root"], local_auto),
+            stage("remote_child", "parallel", ["root"], remote_auto),
+            stage("join", "single", ["local_child", "remote_child"], explicit_local),
+            stage("human_approval", "approval", ["join"], None),
+        ],
+    }
+
+    try:
+        created = json.loads(
+            swarm.hermes_swarm_workflow_create(
+                json.dumps(workflow),
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert created["success"] is True
+
+        root_dispatch = json.loads(
+            swarm.hermes_swarm_stage_dispatch(
+                workflow["workflow_id"],
+                "root",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert root_dispatch["success"] is True
+        assert root_dispatch["backend"] == "pi_rpc"
+        root_advance = json.loads(
+            swarm.hermes_swarm_stage_advance(
+                workflow["workflow_id"],
+                "root",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert root_advance["success"] is True
+
+        local_dispatch = json.loads(
+            swarm.hermes_swarm_stage_dispatch(
+                workflow["workflow_id"],
+                "local_child",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        remote_dispatch = json.loads(
+            swarm.hermes_swarm_stage_dispatch(
+                workflow["workflow_id"],
+                "remote_child",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        if not local_dispatch["success"]:
+            raise AssertionError(json.dumps(local_dispatch, indent=2))
+        assert local_dispatch["requested_backend"] == "auto"
+        assert local_dispatch["selected_node"] == "local"
+        assert remote_dispatch["success"] is True
+        assert remote_dispatch["requested_backend"] == "auto"
+        assert remote_dispatch["selected_node"] == "node-a"
+        assert remote_dispatch["selected_backend"] == "pi_rpc"
+
+        blocked_join = json.loads(
+            swarm.hermes_swarm_stage_dispatch(
+                workflow["workflow_id"],
+                "join",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert blocked_join["success"] is False
+        assert blocked_join["code"] == "STAGE_NOT_READY"
+
+        local_advance = json.loads(
+            swarm.hermes_swarm_stage_advance(
+                workflow["workflow_id"],
+                "local_child",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert local_advance["success"] is True
+
+        still_blocked = json.loads(
+            swarm.hermes_swarm_stage_dispatch(
+                workflow["workflow_id"],
+                "join",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert still_blocked["success"] is False
+        assert still_blocked["code"] == "STAGE_NOT_READY"
+
+        remote_observed.append(_completed_observation())
+        remote_status = coord.poll(remote_dispatch["attempt_id"], reconcile=True)
+        assert remote_status["peer_state"] == "SUCCEEDED"
+        remote_evidence = coord.collect(remote_dispatch["attempt_id"])
+        assert remote_evidence["state"] == "COMPLETED"
+
+        remote_advance = json.loads(
+            swarm.hermes_swarm_stage_advance(
+                workflow["workflow_id"],
+                "remote_child",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert remote_advance["success"] is True
+
+        join_dispatch = json.loads(
+            swarm.hermes_swarm_stage_dispatch(
+                workflow["workflow_id"],
+                "join",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+         )
+        assert join_dispatch["success"] is True
+        join_advance = json.loads(
+            swarm.hermes_swarm_stage_advance(
+                workflow["workflow_id"],
+                "join",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert join_advance["success"] is True
+        assert join_advance["workflow_status"] == "awaiting_approval"
+
+        approval_dispatch = json.loads(
+            swarm.hermes_swarm_stage_dispatch(
+                workflow["workflow_id"],
+                "human_approval",
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert approval_dispatch["success"] is False
+        assert approval_dispatch["code"] == "APPROVAL_GATE"
+
+        denied = json.loads(
+            swarm.hermes_swarm_approve(
+                workflow["workflow_id"],
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+         )
+        assert denied["success"] is False
+        assert denied["code"] == "SWARM_POLICY_DENIED"
+
+        monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "owner")
+        monkeypatch.setenv(op.OWNER_ACTIVE_ENV, "1")
+        monkeypatch.setenv(op.OWNER_ACK_ENV, op.OWNER_ACK_REQUIRED_VALUE)
+        approved = json.loads(
+            swarm.hermes_swarm_approve(
+                workflow["workflow_id"],
+                confirm=True,
+                dry_run=False,
+                hermes_root=hermes_root,
+            )
+        )
+        assert approved["success"] is True
+        assert approved["workflow_status"] == "done"
+        assert approved["approval"]["approved"] is True
+    finally:
+        for name, backend in previous.items():
+            if backend is None:
+                with runners._REGISTRY_LOCK:
+                    runners._BACKENDS.pop(name, None)
+            else:
+                runners.register_backend(backend, replace=True)
