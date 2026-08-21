@@ -14,7 +14,7 @@ A Mission can contain:
 - an explicit skills manifest;
 - attachments to Swarm workflows and delegation/run identifiers;
 - lifecycle state and audit history;
-- an optional final Owner approval requirement.
+- a final Owner approval requirement that defaults on; disabling it is an Owner-only creation-time decision and cannot be weakened later.
 
 The implementation lives in `operator_mission_runtime.py`. Existing `hermes_mission_*` Mission Control overview tools remain available and backward compatible; the new lifecycle tools are additional surfaces.
 
@@ -24,9 +24,9 @@ Mission states are durable and restart-safe. The normal progression is:
 
 `draft -> running -> awaiting_approval -> completed`
 
-A Mission can also be paused or blocked when attached execution state requires it. Reconciliation observes attached Swarm workflow state; it does not trust worker self-report as proof of completion.
+A Mission can also be paused or blocked when attached execution state requires it. Reconciliation observes attached Swarm workflow state and only accepts non-workflow success from lifecycle adapters that mark the attachment as verified with an evidence reference. Public attachment calls cannot assert `succeeded`.
 
-If `final_approval_required` is true, completion is Owner-gated. A Mission cannot bypass the existing Operator/Owner authority model.
+`final_approval_required` defaults to true and is immutable after creation. Creating a Mission with that boundary disabled requires Owner authority. Approval-required Missions enter `awaiting_approval` through reconciliation and can complete only through `hermes_mission_approve`. A Mission cannot bypass the existing Operator/Owner authority model.
 
 ## Tool surface
 
@@ -37,12 +37,11 @@ The v0.9 Mission lifecycle tools are:
 - `hermes_mission_list`
 - `hermes_mission_update`
 - `hermes_mission_attach`
-- `hermes_mission_start`
-- `hermes_mission_pause`
+- `hermes_mission_transition`
 - `hermes_mission_reconcile`
 - `hermes_mission_approve`
 
-Read operations are read-only. Mutating operations preserve Hermes GPT's normal workspace/direct/confirm gates, and final approval uses Owner authority when required.
+Read operations are read-only. Mutating operations preserve Hermes GPT's normal workspace/direct/confirm gates. Direct completion is Owner-gated, and approval-required Missions complete only through explicit Owner approval. Workflow references use the canonical `sw-*` identifier grammar and are confined to the durable workflow directory.
 
 ## Context and skills
 
@@ -60,4 +59,4 @@ Missions do not replace Work Contracts, Swarms, runners, or Fabric. They provide
 
 `Mission -> Swarm/work -> Work Contract -> runner/Fabric -> observed evidence -> Mission reconciliation`
 
-Completion remains based on coordinator-observed evidence and explicit approval boundaries, preserving the v0.8 Fabric safety model.
+Completion remains based on coordinator-observed evidence and explicit approval boundaries, preserving the v0.8 Fabric safety model. A terminal backend self-report is not sufficient: Mission-facing success must come from a verified lifecycle adapter, and unverified legacy success is reconciled fail-closed to `blocked`.

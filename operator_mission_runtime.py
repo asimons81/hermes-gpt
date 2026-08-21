@@ -27,13 +27,14 @@ from typing import Any
 
 import operator_policy as op
 
-SCHEMA_VERSION = "0.9-mission.1"
+SCHEMA_VERSION = "0.9-mission.2"
 MISSION_SPEC_SCHEMA = "hermes.mission-spec/v1"
 MISSION_SCHEMA = "hermes.mission/v1"
 MISSION_EVENT_SCHEMA = "hermes.mission-event/v1"
 
 MISSION_ID_RE = re.compile(r"^msn-[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$")
+WORKFLOW_REF_RE = re.compile(r"^sw-[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
 STATUSES = (
@@ -49,6 +50,13 @@ STATUSES = (
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 ATTACHMENT_KINDS = {"workflow", "contract", "delegation", "evidence", "artifact"}
 ATTACHMENT_STATES = {"unknown", "pending", "running", "blocked", "succeeded", "failed", "cancelled"}
+MISSION_TRANSITIONS = {
+    "draft": {"running", "paused", "blocked", "failed", "cancelled"},
+    "running": {"paused", "blocked", "failed", "cancelled"},
+    "paused": {"running", "blocked", "failed", "cancelled"},
+    "blocked": {"running", "paused", "failed", "cancelled"},
+    "awaiting_approval": {"running", "blocked", "failed", "cancelled"},
+}
 
 MAX_TITLE = 200
 MAX_OBJECTIVE = 8_000
@@ -77,7 +85,6 @@ _ALLOWED_PATCH_KEYS = {
     "acceptance_criteria",
     "context_refs",
     "skills",
-    "final_approval_required",
 }
 _ALLOWED_CONTEXT_KEYS = {"kind", "ref", "label", "sha256"}
 _ALLOWED_SKILL_KEYS = {"name", "version", "ref", "sha256"}
@@ -136,6 +143,7 @@ def _init_db(db: sqlite3.Connection) -> None:
             relationship TEXT NOT NULL,
             state TEXT NOT NULL,
             evidence_ref TEXT NOT NULL DEFAULT '',
+            verified INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (mission_id, kind, ref),
@@ -157,7 +165,14 @@ def _init_db(db: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_events_mission ON mission_events(mission_id, seq);
         """
     )
+    columns = {str(row[1]) for row in db.execute("PRAGMA table_info(attachments)").fetchall()}
+    if "verified" not in columns:
+        db.execute("ALTER TABLE attachments ADD COLUMN verified INTEGER NOT NULL DEFAULT 0")
     db.commit()
+
+
+def _begin_write(db: sqlite3.Connection) -> None:
+    db.execute("BEGIN IMMEDIATE")
 
 
 def _closed(value: dict[str, Any], allowed: set[str], name: str) -> None:
@@ -276,7 +291,7 @@ def _row_to_mission(db: sqlite3.Connection, row: sqlite3.Row, *, include_events:
     attachments = [
         dict(r)
         for r in db.execute(
-            "SELECT kind,ref,relationship,state,evidence_ref,created_at,updated_at "
+            "SELECT kind,ref,relationship,state,evidence_ref,verified,created_at,updated_at "
             "FROM attachments WHERE mission_id=? ORDER BY kind,ref",
             (row["mission_id"],),
         ).fetchall()
@@ -370,6 +385,8 @@ def hermes_mission_create(
         if not isinstance(raw, dict):
             raise TypeError("mission_json must contain an object")
         spec = _normalize_spec(raw)
+        if not spec["final_approval_required"]:
+            policy.require_owner(dry_run)
         effective_dry = policy.effective_dry_run(dry_run)
         if not effective_dry and not confirm:
             raise PermissionError("direct mission creation requires confirm=true")
@@ -387,6 +404,7 @@ def hermes_mission_create(
             return json.dumps(plan)
         path = _db_path(hermes_root)
         with _connect(path, write=True) as db:
+            _begin_write(db)
             if db.execute("SELECT 1 FROM missions WHERE mission_id=?", (spec["mission_id"],)).fetchone():
                 raise ValueError("mission already exists")
             now = _now()
@@ -401,7 +419,6 @@ def hermes_mission_create(
     except (ValueError, TypeError, json.JSONDecodeError, PermissionError, OSError, sqlite3.Error) as exc:
         _audit("hermes_mission_create", policy, dry_run=dry_run, success=False, changed=False, summary="mission create rejected")
         return _error(exc, "MISSION_CREATE_REJECTED", "Check mission schema and Operator workspace/direct policy.")
-
 
 def hermes_mission_get(mission_id: str, hermes_root: Path | None = None) -> str:
     policy = op.OperatorPolicy()
@@ -457,28 +474,37 @@ def hermes_mission_update(
         if not effective_dry and not confirm:
             raise PermissionError("direct mission update requires confirm=true")
         path = _db_path(hermes_root)
-        with _connect(path, write=False) as db:
-            row = _get_row(db, mission_id)
+
+        def validate(row: sqlite3.Row, db: sqlite3.Connection) -> dict[str, Any]:
             if row["status"] in TERMINAL_STATUSES:
                 raise ValueError("terminal missions cannot be edited")
+            if any(key in patch for key in ("acceptance_criteria", "owner_profile")):
+                attached = db.execute("SELECT 1 FROM attachments WHERE mission_id=? LIMIT 1", (mission_id,)).fetchone()
+                if row["status"] != "draft" or attached:
+                    raise ValueError("acceptance criteria and owner_profile freeze once mission work is attached or started")
             old_spec = json.loads(row["spec_json"])
-        candidate = dict(old_spec)
-        candidate.update(patch)
-        candidate["mission_id"] = mission_id
-        spec = _normalize_spec(candidate, mission_id=mission_id)
+            candidate = dict(old_spec)
+            candidate.update(patch)
+            candidate["mission_id"] = mission_id
+            return _normalize_spec(candidate, mission_id=mission_id)
+
         if effective_dry:
-            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_update", "mission_id": mission_id, "changed": False, "dry_run": True})
+            with _connect(path, write=False) as db:
+                spec = validate(_get_row(db, mission_id), db)
+            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_update", "mission_id": mission_id, "changed": False, "dry_run": True, "spec": spec})
         with _connect(path, write=True) as db:
+            _begin_write(db)
             row = _get_row(db, mission_id)
+            spec = validate(row, db)
             version = int(row["version"]) + 1
-            db.execute("UPDATE missions SET spec_json=?,version=?,updated_at=? WHERE mission_id=?", (json.dumps(spec, sort_keys=True), version, _now(), mission_id))
+            now = _now()
+            db.execute("UPDATE missions SET spec_json=?,version=?,updated_at=? WHERE mission_id=?", (json.dumps(spec, sort_keys=True), version, now, mission_id))
             _event(db, mission_id, "mission.updated", details={"version": version, "fields": sorted(patch)})
             db.commit()
         _audit("hermes_mission_update", policy, dry_run=False, success=True, changed=True, mission_id=mission_id, summary="mission updated")
         return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_update", "mission_id": mission_id, "version": version, "changed": True})
     except (ValueError, LookupError, TypeError, json.JSONDecodeError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "MISSION_UPDATE_REJECTED", "Check patch schema and mission lifecycle state.")
-
 
 def hermes_mission_attach(
     mission_id: str,
@@ -500,37 +526,48 @@ def hermes_mission_attach(
         ref = _bounded_text(ref, "attachment ref", 256, required=True)
         if not REF_RE.fullmatch(ref):
             raise ValueError("attachment ref contains unsupported characters")
+        if kind == "workflow" and not WORKFLOW_REF_RE.fullmatch(ref):
+            raise ValueError("workflow attachment ref must be a canonical workflow id")
         relationship = _bounded_text(relationship, "relationship", 64, required=True)
         if state not in ATTACHMENT_STATES:
             raise ValueError("attachment state is invalid")
+        if state == "succeeded":
+            raise PermissionError("public mission attachment cannot assert succeeded state")
         evidence_ref = _bounded_text(evidence_ref, "evidence_ref", 256)
         effective_dry = policy.effective_dry_run(dry_run)
         if not effective_dry and not confirm:
             raise PermissionError("direct mission attachment requires confirm=true")
         path = _db_path(hermes_root)
-        with _connect(path, write=False) as db:
-            _get_row(db, mission_id)
+
+        def validate(db: sqlite3.Connection) -> None:
+            mission_row = _get_row(db, mission_id)
+            if mission_row["status"] in TERMINAL_STATUSES:
+                raise ValueError("terminal missions cannot be modified")
             count = int(db.execute("SELECT COUNT(*) FROM attachments WHERE mission_id=?", (mission_id,)).fetchone()[0])
-            if count >= MAX_ATTACHMENTS and not db.execute("SELECT 1 FROM attachments WHERE mission_id=? AND kind=? AND ref=?", (mission_id, kind, ref)).fetchone():
+            exists = db.execute("SELECT 1 FROM attachments WHERE mission_id=? AND kind=? AND ref=?", (mission_id, kind, ref)).fetchone()
+            if count >= MAX_ATTACHMENTS and not exists:
                 raise ValueError("mission attachment cap reached")
+
         if effective_dry:
+            with _connect(path, write=False) as db:
+                validate(db)
             return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_attach", "mission_id": mission_id, "kind": kind, "ref": ref, "changed": False, "dry_run": True})
         now = _now()
         with _connect(path, write=True) as db:
-            _get_row(db, mission_id)
+            _begin_write(db)
+            validate(db)
             db.execute(
-                "INSERT INTO attachments(mission_id,kind,ref,relationship,state,evidence_ref,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(mission_id,kind,ref) DO UPDATE SET relationship=excluded.relationship,state=excluded.state,evidence_ref=excluded.evidence_ref,updated_at=excluded.updated_at",
-                (mission_id, kind, ref, relationship, state, evidence_ref, now, now),
+                "INSERT INTO attachments(mission_id,kind,ref,relationship,state,evidence_ref,verified,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(mission_id,kind,ref) DO UPDATE SET relationship=excluded.relationship,state=excluded.state,evidence_ref=excluded.evidence_ref,verified=0,updated_at=excluded.updated_at",
+                (mission_id, kind, ref, relationship, state, evidence_ref, 0, now, now),
             )
             db.execute("UPDATE missions SET version=version+1,updated_at=? WHERE mission_id=?", (now, mission_id))
             _event(db, mission_id, "mission.attachment", details={"kind": kind, "ref": ref, "relationship": relationship, "state": state})
             db.commit()
-        _audit("hermes_mission_attach", policy, dry_run=False, success=True, changed=True, mission_id=mission_id, summary=f"attached {kind}")
+        _audit("hermes_mission_attach", policy, dry_run=False, success=True, changed=True, mission_id=mission_id, summary="mission attachment updated")
         return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_attach", "mission_id": mission_id, "kind": kind, "ref": ref, "changed": True})
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "MISSION_ATTACH_REJECTED", "Check attachment kind/ref, cap, and mutation policy.")
-
 
 def record_attachment_state(
     mission_id: str,
@@ -539,36 +576,42 @@ def record_attachment_state(
     state: str,
     *,
     evidence_ref: str = "",
+    verified: bool = False,
     hermes_root: Path | None = None,
 ) -> bool:
-    """Internal trusted bridge used by lifecycle adapters.
-
-    This helper deliberately does not bypass public authority: callers must have
-    already passed their own mutation gate.  It only updates an existing link.
-    """
+    """Internal lifecycle bridge; successful state requires verified evidence."""
     if kind not in ATTACHMENT_KINDS or state not in ATTACHMENT_STATES:
+        return False
+    if kind == "workflow" and not WORKFLOW_REF_RE.fullmatch(ref):
+        return False
+    evidence_ref = evidence_ref[:256]
+    if state == "succeeded" and (not verified or not evidence_ref):
         return False
     path = _db_path(hermes_root)
     if not path.is_file():
         return False
     try:
         with _connect(path, write=True) as db:
+            _begin_write(db)
             row = db.execute("SELECT 1 FROM attachments WHERE mission_id=? AND kind=? AND ref=?", (mission_id, kind, ref)).fetchone()
             if row is None:
                 return False
             now = _now()
-            db.execute("UPDATE attachments SET state=?,evidence_ref=?,updated_at=? WHERE mission_id=? AND kind=? AND ref=?", (state, evidence_ref[:256], now, mission_id, kind, ref))
-            db.execute("UPDATE missions SET updated_at=? WHERE mission_id=?", (now, mission_id))
-            _event(db, mission_id, "mission.attachment_state", details={"kind": kind, "ref": ref, "state": state})
+            verified_value = 1 if verified and state == "succeeded" else 0
+            db.execute("UPDATE attachments SET state=?,evidence_ref=?,verified=?,updated_at=? WHERE mission_id=? AND kind=? AND ref=?", (state, evidence_ref, verified_value, now, mission_id, kind, ref))
+            db.execute("UPDATE missions SET version=version+1,updated_at=? WHERE mission_id=?", (now, mission_id))
+            _event(db, mission_id, "mission.attachment_state", details={"kind": kind, "ref": ref, "state": state, "verified": bool(verified_value)})
             db.commit()
         return True
     except (OSError, sqlite3.Error):
         return False
 
-
 def _workflow_state(root: Path, ref: str) -> str:
-    path = root / "swarm-workflows" / f"{ref}.json"
-    if not path.is_file():
+    if not WORKFLOW_REF_RE.fullmatch(ref):
+        return "unknown"
+    base = (root / "swarm-workflows").resolve()
+    path = (base / f"{ref}.json").resolve()
+    if path.parent != base or not path.is_file():
         return "unknown"
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -582,6 +625,37 @@ def _workflow_state(root: Path, ref: str) -> str:
         "done": "succeeded",
     }.get(status, "unknown")
 
+
+def _observe_attachments(root: Path, mission: dict[str, Any]) -> list[dict[str, Any]]:
+    observed: list[dict[str, Any]] = []
+    for att in mission["attachments"]:
+        state = str(att["state"])
+        verified = bool(att.get("verified"))
+        if att["kind"] == "workflow":
+            state = _workflow_state(root, str(att["ref"]))
+            verified = state == "succeeded"
+        elif state == "succeeded" and not verified:
+            state = "blocked"
+        observed.append({"kind": att["kind"], "ref": att["ref"], "state": state, "verified": verified})
+    return observed
+
+
+def _desired_mission_status(mission: dict[str, Any], observed: list[dict[str, Any]]) -> str:
+    current = str(mission["status"])
+    if current in TERMINAL_STATUSES:
+        return current
+    states = {str(item["state"]) for item in observed}
+    if "failed" in states:
+        return "failed"
+    if "blocked" in states or "unknown" in states:
+        return "blocked"
+    if "running" in states or "pending" in states:
+        return "running"
+    if observed and states <= {"succeeded", "cancelled"} and "succeeded" in states:
+        if mission["final_approval_required"] and not mission["approval"].get("approved"):
+            return "awaiting_approval"
+        return "completed"
+    return current
 
 def hermes_mission_reconcile(
     mission_id: str,
@@ -598,44 +672,34 @@ def hermes_mission_reconcile(
             raise PermissionError("direct mission reconciliation requires confirm=true")
         path = _db_path(hermes_root)
         root = _root(hermes_root)
-        with _connect(path, write=False) as db:
-            row = _get_row(db, mission_id)
-            mission = _row_to_mission(db, row)
-        observed: list[dict[str, str]] = []
-        for att in mission["attachments"]:
-            state = att["state"]
-            if att["kind"] == "workflow":
-                state = _workflow_state(root, att["ref"])
-            observed.append({"kind": att["kind"], "ref": att["ref"], "state": state})
-        states = {item["state"] for item in observed}
-        current = mission["status"]
-        desired = current
-        if current not in TERMINAL_STATUSES:
-            if "failed" in states:
-                desired = "failed"
-            elif "blocked" in states:
-                desired = "blocked"
-            elif "running" in states or "pending" in states:
-                desired = "running"
-            elif observed and states <= {"succeeded", "cancelled"} and "succeeded" in states:
-                desired = "awaiting_approval" if mission["final_approval_required"] and not mission["approval"].get("approved") else "completed"
         if effective_dry:
-            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_reconcile", "mission_id": mission_id, "status": current, "desired_status": desired, "observed": observed, "changed": False, "dry_run": True})
+            with _connect(path, write=False) as db:
+                mission = _row_to_mission(db, _get_row(db, mission_id))
+            observed = _observe_attachments(root, mission)
+            desired = _desired_mission_status(mission, observed)
+            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_reconcile", "mission_id": mission_id, "status": mission["status"], "desired_status": desired, "observed": observed, "changed": False, "dry_run": True})
+
         with _connect(path, write=True) as db:
-            _get_row(db, mission_id)
-            for item in observed:
-                db.execute("UPDATE attachments SET state=?,updated_at=? WHERE mission_id=? AND kind=? AND ref=?", (item["state"], _now(), mission_id, item["kind"], item["ref"]))
-            if desired != current:
-                db.execute("UPDATE missions SET status=?,version=version+1,updated_at=? WHERE mission_id=?", (desired, _now(), mission_id))
+            _begin_write(db)
+            mission = _row_to_mission(db, _get_row(db, mission_id))
+            current = str(mission["status"])
+            observed = _observe_attachments(root, mission)
+            desired = _desired_mission_status(mission, observed)
+            original = {(a["kind"], a["ref"]): (a["state"], bool(a.get("verified"))) for a in mission["attachments"]}
+            attachment_changed = any(original.get((item["kind"], item["ref"])) != (item["state"], bool(item["verified"])) for item in observed)
+            status_changed = desired != current
+            changed = attachment_changed or status_changed
+            if changed:
+                now = _now()
+                for item in observed:
+                    db.execute("UPDATE attachments SET state=?,verified=?,updated_at=? WHERE mission_id=? AND kind=? AND ref=?", (item["state"], 1 if item["verified"] else 0, now, mission_id, item["kind"], item["ref"]))
+                db.execute("UPDATE missions SET status=?,version=version+1,updated_at=? WHERE mission_id=?", (desired, now, mission_id))
                 _event(db, mission_id, "mission.reconciled", from_status=current, to_status=desired, details={"observed": observed})
-            else:
-                _event(db, mission_id, "mission.reconciled", from_status=current, to_status=current, details={"observed": observed})
             db.commit()
-        _audit("hermes_mission_reconcile", policy, dry_run=False, success=True, changed=desired != current, mission_id=mission_id, summary=f"mission reconciled {current}->{desired}")
-        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_reconcile", "mission_id": mission_id, "status": desired, "observed": observed, "changed": desired != current})
+        _audit("hermes_mission_reconcile", policy, dry_run=False, success=True, changed=changed, mission_id=mission_id, summary=f"mission reconciled {current}->{desired}")
+        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_reconcile", "mission_id": mission_id, "status": desired, "observed": observed, "changed": changed})
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "MISSION_RECONCILE_FAILED", "Check mission attachments and lifecycle state.")
-
 
 def hermes_mission_transition(
     mission_id: str,
@@ -653,30 +717,49 @@ def hermes_mission_transition(
         policy.require_mutation(dry_run)
         reason = _bounded_text(reason, "reason", 1000)
         effective_dry = policy.effective_dry_run(dry_run)
+        if status == "completed":
+            policy.require_owner(dry_run)
+        if status == "awaiting_approval":
+            raise ValueError("awaiting_approval is entered only by reconciliation")
         if not effective_dry and not confirm:
             raise PermissionError("direct mission transition requires confirm=true")
         path = _db_path(hermes_root)
-        with _connect(path, write=False) as db:
-            row = _get_row(db, mission_id)
-            mission = _row_to_mission(db, row)
-        current = mission["status"]
-        if current in TERMINAL_STATUSES:
-            raise ValueError("terminal mission status cannot transition")
-        if status == "completed" and mission["final_approval_required"]:
-            policy.require_owner(dry_run)
-            if not mission["approval"].get("approved") and not effective_dry:
-                raise PermissionError("mission requires explicit Owner approval before completion")
+
+        def validate(mission: dict[str, Any]) -> tuple[str, bool]:
+            current = str(mission["status"])
+            if current in TERMINAL_STATUSES:
+                raise ValueError("terminal mission status cannot transition")
+            if status == current:
+                return current, False
+            allowed = MISSION_TRANSITIONS.get(current, set())
+            if status != "completed" and status not in allowed:
+                raise ValueError(f"mission transition {current}->{status} is not allowed")
+            if status == "completed":
+                if mission["final_approval_required"]:
+                    raise PermissionError("approval-required missions complete only through hermes_mission_approve")
+                observed = _observe_attachments(_root(hermes_root), mission)
+                if _desired_mission_status(mission, observed) != "completed":
+                    raise ValueError("mission children do not justify completion")
+            return current, True
+
         if effective_dry:
-            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_transition", "mission_id": mission_id, "from_status": current, "to_status": status, "changed": False, "dry_run": True})
+            with _connect(path, write=False) as db:
+                mission = _row_to_mission(db, _get_row(db, mission_id))
+            current, would_change = validate(mission)
+            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_transition", "mission_id": mission_id, "from_status": current, "to_status": status, "changed": False, "would_change": would_change, "dry_run": True})
         with _connect(path, write=True) as db:
-            db.execute("UPDATE missions SET status=?,version=version+1,updated_at=? WHERE mission_id=?", (status, _now(), mission_id))
-            _event(db, mission_id, "mission.transition", from_status=current, to_status=status, reason=reason)
+            _begin_write(db)
+            mission = _row_to_mission(db, _get_row(db, mission_id))
+            current, changed = validate(mission)
+            if changed:
+                now = _now()
+                db.execute("UPDATE missions SET status=?,version=version+1,updated_at=? WHERE mission_id=?", (status, now, mission_id))
+                _event(db, mission_id, "mission.transition", from_status=current, to_status=status, reason=reason)
             db.commit()
-        _audit("hermes_mission_transition", policy, dry_run=False, success=True, changed=current != status, mission_id=mission_id, summary=f"mission {current}->{status}")
-        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_transition", "mission_id": mission_id, "from_status": current, "to_status": status, "changed": current != status})
+        _audit("hermes_mission_transition", policy, dry_run=False, success=True, changed=changed, mission_id=mission_id, summary=f"mission {current}->{status}")
+        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_transition", "mission_id": mission_id, "from_status": current, "to_status": status, "changed": changed})
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "MISSION_TRANSITION_REJECTED", "Check mission lifecycle and Owner approval requirements.")
-
 
 def hermes_mission_approve(
     mission_id: str,
@@ -693,24 +776,33 @@ def hermes_mission_approve(
         if not effective_dry and not confirm:
             raise PermissionError("direct mission approval requires confirm=true")
         path = _db_path(hermes_root)
-        with _connect(path, write=False) as db:
-            row = _get_row(db, mission_id)
-            mission = _row_to_mission(db, row)
-        if mission["status"] in TERMINAL_STATUSES:
-            raise ValueError("terminal mission cannot be approved")
-        nonterminal_children = [a for a in mission["attachments"] if a["state"] in {"unknown", "pending", "running", "blocked"}]
-        if nonterminal_children:
-            raise ValueError("mission has nonterminal child attachments; reconcile them before approval")
+
+        def validate(mission: dict[str, Any]) -> None:
+            if mission["status"] != "awaiting_approval":
+                raise ValueError("mission must be awaiting_approval before Owner approval")
+            attachments = mission["attachments"]
+            succeeded = [a for a in attachments if a["state"] == "succeeded" and bool(a.get("verified"))]
+            invalid = [a for a in attachments if a["state"] not in {"succeeded", "cancelled"} or (a["state"] == "succeeded" and not bool(a.get("verified")))]
+            if invalid or not succeeded:
+                raise ValueError("mission children are not all terminal with at least one verified success")
+
         approval = {"approved": True, "approved_by": "owner", "approval_reference": approval_reference, "approved_at": _now()}
         target = "completed"
         if effective_dry:
+            with _connect(path, write=False) as db:
+                mission = _row_to_mission(db, _get_row(db, mission_id))
+            validate(mission)
             return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_approve", "mission_id": mission_id, "status": target, "approval": approval, "changed": False, "dry_run": True})
         with _connect(path, write=True) as db:
-            current = _get_row(db, mission_id)["status"]
-            db.execute("UPDATE missions SET status=?,approval_json=?,version=version+1,updated_at=? WHERE mission_id=?", (target, json.dumps(approval, sort_keys=True), _now(), mission_id))
+            _begin_write(db)
+            mission = _row_to_mission(db, _get_row(db, mission_id))
+            validate(mission)
+            current = str(mission["status"])
+            now = _now()
+            db.execute("UPDATE missions SET status=?,approval_json=?,version=version+1,updated_at=? WHERE mission_id=?", (target, json.dumps(approval, sort_keys=True), now, mission_id))
             _event(db, mission_id, "mission.approved", from_status=current, to_status=target, details={"approval_reference": approval_reference})
             db.commit()
         _audit("hermes_mission_approve", policy, dry_run=False, success=True, changed=True, mission_id=mission_id, summary="mission Owner-approved")
         return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_approve", "mission_id": mission_id, "status": target, "approval": approval, "changed": True})
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
-        return _error(exc, "MISSION_APPROVAL_REJECTED", "Reconcile child work and use Owner direct mode with confirm=true.")
+        return _error(exc, "MISSION_APPROVAL_REJECTED", "Reconcile verified child work and use Owner direct mode with confirm=true.")
