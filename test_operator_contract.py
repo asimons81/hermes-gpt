@@ -407,6 +407,42 @@ def test_validate_satisfied_via_delegation(hermes_root):
     assert out["checks"][0]["status"] == "PASS"
 
 
+def test_validate_accepts_coordinator_verified_fabric_artifact_without_workspace_copy(
+    hermes_root, monkeypatch
+):
+    ws = hermes_root.parent / "ws"
+    ws.mkdir(parents=True, exist_ok=True)
+    c = _contract_for_ws(ws, task_id="t-done")
+    _add_review_evidence(c, reviewer="default")
+
+    class FabricEvidenceBackend:
+        def observed_artifacts(self, task_id, *, contract_sha256, hermes_root=None):
+            assert task_id == "t-done"
+            assert len(contract_sha256) == 64
+            return [
+                {
+                    "logical_name": "src/nexusos/cache.py",
+                    "size_bytes": 42,
+                    "sha256": "a" * 64,
+                    "provenance": "coordinator_verified_artifact",
+                }
+            ]
+
+    original_get_backend = contract_mod.op_runners.get_backend
+    monkeypatch.setattr(
+        contract_mod.op_runners,
+        "get_backend",
+        lambda name: FabricEvidenceBackend() if name == "fabric" else original_get_backend(name),
+    )
+
+    out = _run_validate(c, hermes_root)
+    assert out["verdict"] == "SATISFIED"
+    artifacts = next(check for check in out["checks"] if check["kind"] == "artifacts")
+    assert artifacts["status"] == "PASS"
+    assert artifacts["detail"] == "1 artifact(s) present"
+    assert not (ws / "src" / "nexusos" / "cache.py").exists()
+
+
 # ---------------------------------------------------------------------------
 # 4. False-"done" rejection (S2 exit criterion, design §7.4 cases 1-6)
 # ---------------------------------------------------------------------------
@@ -489,6 +525,63 @@ def test_false_done_rejected_self_review(hermes_root):
     assert by_kind["review"] == "FAIL"
 
 
+def test_auto_assignee_uses_profile_for_review_distinctness(hermes_root):
+    """Auto placement must not let the stage owner satisfy its own review gate."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="auto",
+        assigned_profile="hermes-dev",
+        authorization={"class": "reversible_write", "approved": True},
+    )
+    _add_review_evidence(c, reviewer="hermes-dev")
+    _, _, sha = contract_mod._parse_contract(json.dumps(c))
+
+    out = contract_mod._check_review(c, sha, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "distinct from the assignee" in out["detail"]
+
+
+def test_remote_assignee_uses_profile_for_review_distinctness(hermes_root):
+    """Remote placement must not let the executing profile review itself."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="rza",
+        assigned_profile="hermes-dev",
+        authorization={"class": "reversible_write", "approved": True},
+    )
+    _add_review_evidence(c, reviewer="hermes-dev")
+    _, _, sha = contract_mod._parse_contract(json.dumps(c))
+
+    out = contract_mod._check_review(c, sha, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "distinct from the assignee" in out["detail"]
+
+
+def test_remote_placement_identity_cannot_review_its_own_execution(hermes_root):
+    """The selected Fabric node is part of the assignee identity boundary."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="rza",
+        assigned_profile="hermes-dev",
+        authorization={"class": "reversible_write", "approved": True},
+    )
+    _add_review_evidence(c, reviewer="rza")
+    _, _, sha = contract_mod._parse_contract(json.dumps(c))
+
+    out = contract_mod._check_review(c, sha, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "distinct from the assignee" in out["detail"]
+
+
 def test_false_done_rejected_no_review_evidence(hermes_root):
     """Review required but no evidence by a distinct reviewer or human approval."""
     ws = hermes_root.parent / "ws"
@@ -521,6 +614,113 @@ def test_false_done_rejected_forbidden_action(hermes_root):
     by_kind = {ch["kind"]: ch["status"] for ch in out["checks"]}
     assert by_kind["forbidden"] == "FAIL"
     assert any("forbidden" in r for r in out["rejected_reasons"])
+
+
+def test_auto_assignee_uses_profile_for_forbidden_audit_attribution(hermes_root):
+    """Auto placement must attribute task-scoped audit evidence to the stage owner."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="auto",
+        assigned_profile="hermes-dev",
+    )
+    _add_forbidden_evidence(c, profile="hermes-dev")
+
+    out = contract_mod._check_forbidden(c, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "public_publish" in out["detail"]
+
+
+def test_remote_assignee_uses_profile_for_forbidden_audit_attribution(hermes_root):
+    """Remote placement must attribute audit evidence to the executing profile."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="rza",
+        assigned_profile="hermes-dev",
+    )
+    _add_forbidden_evidence(c, profile="hermes-dev")
+
+    out = contract_mod._check_forbidden(c, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "public_publish" in out["detail"]
+
+
+def test_remote_dispatcher_identity_is_attributed_for_forbidden_actions(hermes_root):
+    """A dispatcher/peer placement identity executing remotely stays attributable."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="node-a",
+        assigned_profile="hermes-dev",
+    )
+    _add_forbidden_evidence(c, profile="node-a")
+
+    out = contract_mod._check_forbidden(c, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "public_publish" in out["detail"]
+
+
+def test_on_behalf_record_is_attributed_to_effective_assignee(hermes_root):
+    """Dispatcher records naming the assignee as source stay attributable."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="node-a",
+        assigned_profile="hermes-dev",
+    )
+    op.audit_record(
+        tool="hermes_workspace_write_file",
+        level="workspace",
+        apply_mode="direct",
+        dry_run=False,
+        success=True,
+        changed=True,
+        summary="wrote public_publish file",
+        profile="dispatch-peer",
+        source_profile="hermes-dev",
+        extra={"forbidden_action": "public_publish", "task_id": c["task_id"]},
+    )
+
+    out = contract_mod._check_forbidden(c, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "public_publish" in out["detail"]
+
+
+def test_unrelated_profile_is_not_attributed_for_forbidden_actions(hermes_root):
+    """Fail-closed attribution must not sweep in unrelated concurrent actors."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="node-a",
+        assigned_profile="hermes-dev",
+    )
+    _add_forbidden_evidence(c, profile="somebody-else")
+    op.audit_record(
+        tool="hermes_workspace_write_file",
+        level="workspace",
+        apply_mode="direct",
+        dry_run=False,
+        success=True,
+        changed=True,
+        summary="wrote public_publish file",
+        profile="dispatch-peer",
+        source_profile="somebody-else",
+        extra={"forbidden_action": "public_publish", "task_id": c["task_id"]},
+    )
+
+    out = contract_mod._check_forbidden(c, hermes_root)
+
+    assert out["status"] == "PASS"
 
 
 def test_false_done_rejected_no_observed_run_is_inconclusive(hermes_root):

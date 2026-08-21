@@ -26,8 +26,11 @@ The current policy contract remains [Operator Mode](operator-mode.md).
 - [x] Fabric remote attempt list/detail through `GET /api/ops/fabric/attempts`
   and `GET /api/ops/fabric/attempts/:attempt_id`, including node/backend,
   explicit-vs-auto placement, retry lineage, blocker/error state, write-epoch
-  authority summary, admitted evidence provenance, admitted artifact metadata,
-  and bounded Fabric audit history.
+  authority summary, bounded durable/reconciled peer observations of write-claim
+  and execution-unit state, admitted evidence provenance, admitted artifact
+  metadata, and bounded Fabric audit history. Peer observations are labeled as
+  observations rather than coordinator authority or completion verdicts;
+  `LOST_AMBIGUOUS` is always presented as a blocker.
 - [x] Durable auto-placement receipts through `GET /api/ops/fabric/routing`.
   G4-D receipts persist hard requirements, bounded candidate exclusions,
   selected target, and deterministic rank. Older G4-B/G4-C receipts remain

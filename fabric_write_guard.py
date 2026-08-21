@@ -54,6 +54,8 @@ def migrate_coordinator(path: Path) -> None:
     with base._connect(path) as db:
         _add_column(db, "attempts", "write_epoch", "INTEGER")
         _add_column(db, "attempts", "retry_parent_attempt_id", "TEXT")
+        _add_column(db, "attempts", "write_claim_state", "TEXT")
+        _add_column(db, "attempts", "execution_unit_state", "TEXT")
 
 
 class SystemdUserUnitManager:

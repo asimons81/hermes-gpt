@@ -326,6 +326,24 @@ def _authority_summary(row: sqlite3.Row, columns: set[str]) -> dict[str, Any]:
     }
 
 
+def _peer_observations(row: sqlite3.Row, columns: set[str]) -> dict[str, str]:
+    claim = _safe_token(row["write_claim_state"], 32) if "write_claim_state" in columns else ""
+    unit = _safe_token(row["execution_unit_state"], 32) if "execution_unit_state" in columns else ""
+    if claim not in {"NONE", "ACTIVE", "RELEASED", "SUPERSEDED", "UNKNOWN"}:
+        claim = "UNKNOWN"
+    if unit not in {
+        "active", "activating", "deactivating", "reloading", "inactive", "failed",
+        "dead", "not-found", "terminal", "unknown",
+    }:
+        unit = "unknown"
+    return {
+        "basis": "durable_reconciled_peer_observation",
+        "label": "Peer observations; not coordinator authority or a completion verdict.",
+        "write_claim_state": claim,
+        "execution_unit_state": unit,
+    }
+
+
 def _attempt_row(
     row: sqlite3.Row,
     *,
@@ -342,7 +360,7 @@ def _attempt_row(
     )
     state = _safe_token(row["state"], 64)
     code = _safe_token(row["error_code"], 128)
-    blocker = code if code else (state if state in {"BLOCKED", "RECONCILING", "SUBMISSION_AMBIGUOUS", "CANCEL_AMBIGUOUS", "EVIDENCE_PENDING"} else "")
+    blocker = code if code else (state if state in {"BLOCKED", "RECONCILING", "SUBMISSION_AMBIGUOUS", "CANCEL_AMBIGUOUS", "EVIDENCE_PENDING", "LOST_AMBIGUOUS"} else "")
     return {
         "attempt_id": _safe_token(row["attempt_id"], 128),
         "dispatch_id": _safe_token(row["dispatch_id"], 128),
@@ -366,6 +384,7 @@ def _attempt_row(
             else ""
         ),
         "authority": _authority_summary(row, attempt_columns),
+        "peer_observations": _peer_observations(row, attempt_columns),
         "authority_ceiling": node_ceiling,
     }
 

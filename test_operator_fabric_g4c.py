@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -239,6 +241,650 @@ def test_write_claim_blocks_overlapping_conflict_domain_and_is_idempotent(tmp_pa
     assert exc.value.code == "FABRIC_WRITE_OWNERSHIP_BLOCKED"
 
 
+def _blocked_prelaunch_accept(tmp_path, monkeypatch, *, available=True):
+    entered = threading.Event()
+    resume = threading.Event()
+    launches: list[str] = []
+    errors: list[BaseException] = []
+
+    def availability(_self, **_kwargs):
+        entered.set()
+        assert resume.wait(5), "test did not release pre-launch validation"
+        return {"available": available}
+
+    monkeypatch.setattr(FakeLocalBackend, "availability", availability)
+    svc = make_service(
+        tmp_path,
+        monkeypatch,
+        write_result={"success": True, "changed": True, "backend": "pi_rpc"},
+    )
+    original_dispatch = svc.write_dispatch_fn
+
+    def record_launch(contract, **kwargs):
+        launches.append(kwargs["unit_id"])
+        return original_dispatch(contract, **kwargs)
+
+    svc.write_dispatch_fn = record_launch
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+
+    def run_accept():
+        try:
+            accept(svc, first)
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
+            errors.append(exc)
+
+    thread = threading.Thread(target=run_accept)
+    thread.start()
+    assert entered.wait(5), "accept did not reach the durable pre-launch window"
+    return svc, value, first, launches, errors, resume, thread
+
+
+def test_reconcile_during_prelaunch_keeps_claim_and_blocks_retry(tmp_path, monkeypatch):
+    svc, value, first, launches, errors, resume, thread = _blocked_prelaunch_accept(tmp_path, monkeypatch)
+    assert svc._invocation_in_flight(first["attempt_id"]) is True
+    status = svc._status(first["dispatch_id"], first["attempt_id"], reconcile=True)
+    assert status["state"] == "ACCEPTED"
+    assert status["write_claim_state"] == "ACTIVE"
+
+    retry = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
+    with pytest.raises(fabric.FabricError) as exc:
+        accept(svc, retry)
+    assert exc.value.code == "FABRIC_WRITE_OWNERSHIP_BLOCKED"
+    assert launches == []
+
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert len(launches) == 1
+
+
+def test_restarted_service_reconciles_abandoned_accepted_and_retry_gets_next_epoch(
+    tmp_path, monkeypatch
+):
+    svc = make_service(tmp_path, monkeypatch)
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+    policy_loads = 0
+
+    def crash_after_durable_accept():
+        nonlocal policy_loads
+        policy_loads += 1
+        if policy_loads == 2:
+            raise RuntimeError("simulated service crash after durable ACCEPTED")
+        return policy(tmp_path)
+
+    svc.policy_loader = crash_after_durable_accept
+    with pytest.raises(RuntimeError, match="simulated service crash"):
+        accept(svc, first)
+
+    assert row_for(svc, first["attempt_id"])["state"] == "ACCEPTED"
+    assert claim_for(svc)["state"] == "ACTIVE"
+    assert svc._invocation_in_flight(first["attempt_id"]) is False
+
+    restarted = make_service(tmp_path, monkeypatch)
+    polled = restarted._status(first["dispatch_id"], first["attempt_id"], reconcile=False)
+    assert polled["state"] == "ACCEPTED"
+    assert polled["write_claim_state"] == "ACTIVE"
+
+    reconciled = restarted._status(first["dispatch_id"], first["attempt_id"], reconcile=True)
+    assert reconciled["state"] == "BLOCKED"
+    assert reconciled["write_claim_state"] == "RELEASED"
+    released = claim_for(restarted)
+    assert released["release_proof"] == "abandoned_accepted_prelaunch_no_execution"
+
+    retry = envelope(restarted, value, sequence=2, retry_parent=first["attempt_id"])
+    response = accept(restarted, retry)
+    assert response["data"]["write_epoch"] == 2
+    assert claim_for(restarted)["attempt_id"] == retry["attempt_id"]
+    assert claim_for(restarted)["state"] == "ACTIVE"
+
+
+def test_cancel_wins_before_final_launch_check_and_releases_unstarted_claim(
+    tmp_path, monkeypatch
+):
+    svc, value, first, launches, errors, resume, thread = _blocked_prelaunch_accept(
+        tmp_path, monkeypatch
+    )
+    assert row_for(svc, first["attempt_id"])["state"] == "ACCEPTED"
+    cancelled = svc._cancel(
+        first["dispatch_id"], first["attempt_id"], "coord-main", policy(tmp_path)
+    )
+    assert cancelled["state"] == "CANCEL_REQUESTED"
+    assert cancelled["write_claim_state"] == "ACTIVE"
+    assert launches == []
+
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert launches == []
+    assert row_for(svc, first["attempt_id"])["state"] == "CANCELLED"
+    released = claim_for(svc)
+    assert released["state"] == "RELEASED"
+    assert released["release_proof"] == "launch_fence_revoked_cancelled_no_execution"
+
+    retry = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
+    response = accept(svc, retry)
+    assert response["data"]["write_epoch"] == 2
+    assert claim_for(svc)["attempt_id"] == retry["attempt_id"]
+    assert launches == [svc.unit_manager.unit_name(retry["attempt_id"])]
+
+
+def test_cancelled_prelaunch_validation_failure_releases_definitely_unstarted_claim(
+    tmp_path, monkeypatch
+):
+    svc, value, first, launches, errors, resume, thread = _blocked_prelaunch_accept(
+        tmp_path, monkeypatch, available=False
+    )
+    cancelled = svc._cancel(
+        first["dispatch_id"], first["attempt_id"], "coord-main", policy(tmp_path)
+    )
+    assert cancelled["state"] == "CANCEL_REQUESTED"
+    assert claim_for(svc)["state"] == "ACTIVE"
+
+    resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], fabric.FabricError)
+    assert errors[0].code == "FABRIC_RUNNER_UNAVAILABLE"
+    assert launches == []
+    assert row_for(svc, first["attempt_id"])["state"] == "CANCELLED"
+    assert claim_for(svc)["state"] == "RELEASED"
+
+    monkeypatch.setattr(
+        FakeLocalBackend,
+        "availability",
+        lambda _self, **_kwargs: {"available": True},
+    )
+    retry = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
+    replay = accept(svc, retry)
+    assert replay["data"]["write_epoch"] == 2
+
+
+def test_cancel_lost_prelaunch_update_returns_concurrent_terminal_state(tmp_path, monkeypatch):
+    unit = FakeUnitManager()
+    cancel_calls = []
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+    svc.cancel_fn = lambda backend, task: cancel_calls.append((backend, task))
+    value = contract(tmp_path, auth="reversible_write")
+    env = envelope(svc, value)
+    accept(svc, env)
+    with base._connect(svc.db_path) as db:
+        db.execute(
+            "UPDATE attempts SET state='ACCEPTED' WHERE attempt_id=?",
+            (env["attempt_id"],),
+        )
+
+    original_row = svc._row
+    first_read = True
+
+    def stale_prelaunch_row(dispatch_id, attempt_id):
+        nonlocal first_read
+        row = original_row(dispatch_id, attempt_id)
+        if first_read:
+            first_read = False
+            with base._connect(svc.db_path) as db:
+                db.execute(
+                    "UPDATE attempts SET state='FAILED' WHERE attempt_id=?",
+                    (attempt_id,),
+                )
+        return row
+
+    svc._row = stale_prelaunch_row
+    cancelled = svc._cancel(env["dispatch_id"], env["attempt_id"], "coord-main", policy(tmp_path))
+
+    assert cancelled["state"] == "FAILED"
+    assert cancelled["idempotent"] is True
+    assert row_for(svc, env["attempt_id"])["state"] == "FAILED"
+    assert unit.stopped == []
+    assert cancel_calls == []
+
+
+def test_launch_wins_first_and_cancel_returns_while_launch_call_is_in_flight(
+    tmp_path, monkeypatch
+):
+    launch_entered = threading.Event()
+    launch_resume = threading.Event()
+    cancel_finished = threading.Event()
+    launches: list[str] = []
+    accept_errors: list[BaseException] = []
+    cancel_results: list[dict] = []
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+
+    def delayed_launch(_contract, **kwargs):
+        launches.append(kwargs["unit_id"])
+        launch_entered.set()
+        assert launch_resume.wait(10), "test did not release delayed writer launch"
+        unit.activate(kwargs["unit_id"])
+        return {"success": True, "changed": True, "backend": "pi_rpc"}
+
+    svc.write_dispatch_fn = delayed_launch
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+
+    def run_accept():
+        try:
+            accept(svc, first)
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
+            accept_errors.append(exc)
+
+    accept_thread = threading.Thread(target=run_accept)
+    accept_thread.start()
+    assert launch_entered.wait(5), "accept did not reach delayed writer launch"
+
+    def run_cancel():
+        cancel_results.append(
+            svc._cancel(first["dispatch_id"], first["attempt_id"], "coord-main", policy(tmp_path))
+        )
+        cancel_finished.set()
+
+    cancel_thread = threading.Thread(target=run_cancel)
+    cancel_thread.start()
+    assert cancel_finished.wait(2), "cancellation blocked behind the external launch"
+    assert claim_for(svc)["state"] == "ACTIVE"
+    assert launches == [unit.unit_name(first["attempt_id"])]
+    assert cancel_results[0]["state"] == "CANCEL_REQUESTED"
+    assert row_for(svc, first["attempt_id"])["state"] == "CANCEL_REQUESTED"
+    assert unit.stopped == []
+    repeated = svc._cancel(
+        first["dispatch_id"], first["attempt_id"], "coord-main", policy(tmp_path)
+    )
+    assert repeated["state"] == "CANCEL_REQUESTED"
+    assert repeated["changed"] is False
+    status = svc._status(first["dispatch_id"], first["attempt_id"], reconcile=True)
+    assert status["state"] == "CANCEL_REQUESTED"
+    assert status["write_claim_state"] == "ACTIVE"
+    assert unit.stopped == []
+
+    launch_resume.set()
+    accept_thread.join(5)
+    cancel_thread.join(5)
+    assert not accept_thread.is_alive()
+    assert not cancel_thread.is_alive()
+    assert accept_errors == []
+    assert cancel_results[0]["state"] in {"CANCEL_REQUESTED", "CANCELLED"}
+    assert row_for(svc, first["attempt_id"])["state"] == "CANCELLED"
+    assert claim_for(svc)["state"] == "RELEASED"
+    assert unit.stopped == [unit.unit_name(first["attempt_id"])]
+
+
+def test_slow_launch_does_not_hold_peer_lock_for_unrelated_conflict_domain(
+    tmp_path, monkeypatch
+):
+    launch_entered = threading.Event()
+    launch_resume = threading.Event()
+    unrelated_finished = threading.Event()
+    errors: list[BaseException] = []
+    svc = make_service(tmp_path, monkeypatch)
+
+    def delayed_launch(_contract, **_kwargs):
+        launch_entered.set()
+        assert launch_resume.wait(5), "test did not release delayed writer launch"
+        return {"success": True, "changed": True, "backend": "pi_rpc"}
+
+    svc.write_dispatch_fn = delayed_launch
+    first = envelope(svc, contract(tmp_path, auth="reversible_write"))
+    unrelated = envelope(svc, contract(tmp_path), sequence=2)
+
+    def run_accept():
+        try:
+            accept(svc, first)
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
+            errors.append(exc)
+
+    accept_thread = threading.Thread(target=run_accept)
+    accept_thread.start()
+    assert launch_entered.wait(5), "accept did not reach delayed writer launch"
+
+    def run_unrelated_operations():
+        try:
+            unrelated_accept = accept(svc, unrelated)
+            assert unrelated_accept["data"]["state"] == "RUNNING"
+            unrelated_cancel = svc._cancel(
+                unrelated["dispatch_id"],
+                unrelated["attempt_id"],
+                "coord-main",
+                policy(tmp_path),
+            )
+            assert unrelated_cancel["state"] == "CANCELLED"
+            with svc._lock, base._connect(svc.db_path) as db:
+                svc.claims.acquire(
+                    db,
+                    conflict_domain="workspace:unrelated",
+                    attempt_id="attempt-unrelated",
+                    unit_id="unit-unrelated",
+                )
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
+            errors.append(exc)
+        finally:
+            unrelated_finished.set()
+
+    unrelated_thread = threading.Thread(target=run_unrelated_operations)
+    unrelated_thread.start()
+    assert unrelated_finished.wait(2), "slow external launch held the peer-wide lock"
+    assert claim_for(svc, "workspace:unrelated")["state"] == "ACTIVE"
+
+    launch_resume.set()
+    accept_thread.join(5)
+    unrelated_thread.join(5)
+    assert not accept_thread.is_alive()
+    assert not unrelated_thread.is_alive()
+    assert errors == []
+
+
+def test_revoked_fence_with_unknown_unit_state_releases_without_execution(
+    tmp_path, monkeypatch
+):
+    svc, _value, first, launches, errors, resume, thread = _blocked_prelaunch_accept(
+        tmp_path, monkeypatch
+    )
+    cancelled = svc._cancel(
+        first["dispatch_id"], first["attempt_id"], "coord-main", policy(tmp_path)
+    )
+    assert cancelled["execution_unit_state"] == "unknown"
+
+    def unexpected_inspect(_unit_id):
+        raise AssertionError("revoked launch fence must not consult execution-unit state")
+
+    svc.unit_manager.inspect = unexpected_inspect
+
+    resume.set()
+    thread.join(5)
+
+    assert not thread.is_alive()
+    assert errors == []
+    assert launches == []
+    assert row_for(svc, first["attempt_id"])["state"] == "CANCELLED"
+    released = claim_for(svc)
+    assert released["state"] == "RELEASED"
+    assert released["release_proof"] == "launch_fence_revoked_cancelled_no_execution"
+
+
+def test_status_during_healthy_slow_launch_preserves_fence_and_reaches_running(
+    tmp_path, monkeypatch
+):
+    launch_entered = threading.Event()
+    launch_resume = threading.Event()
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+
+    def delayed_launch(_contract, **kwargs):
+        launch_entered.set()
+        assert launch_resume.wait(10), "test did not release delayed writer launch"
+        unit.activate(kwargs["unit_id"])
+        return {"success": True, "changed": True, "backend": "pi_rpc"}
+
+    svc.write_dispatch_fn = delayed_launch
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+    responses = []
+    errors = []
+
+    def run_accept():
+        try:
+            responses.append(accept(svc, first))
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
+            errors.append(exc)
+
+    thread = threading.Thread(target=run_accept)
+    thread.start()
+    assert launch_entered.wait(5), "accept did not reach delayed writer launch"
+
+    status = svc._status(first["dispatch_id"], first["attempt_id"], reconcile=False)
+    assert status["state"] == "LAUNCHING"
+    assert row_for(svc, first["attempt_id"])["state"] == "LAUNCHING"
+    assert claim_for(svc)["state"] == "ACTIVE"
+
+    launch_resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert responses[0]["data"]["state"] == "RUNNING"
+    assert row_for(svc, first["attempt_id"])["state"] == "RUNNING"
+    assert claim_for(svc)["state"] == "ACTIVE"
+
+    retry = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
+    with pytest.raises(fabric.FabricError) as exc:
+        accept(svc, retry)
+    assert exc.value.code == "FABRIC_WRITE_OWNERSHIP_BLOCKED"
+
+
+def test_secondary_accepts_do_not_clear_original_invocation_marker(tmp_path, monkeypatch):
+    launch_entered = threading.Event()
+    launch_resume = threading.Event()
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+
+    def delayed_launch(_contract, **kwargs):
+        launch_entered.set()
+        assert launch_resume.wait(10), "test did not release delayed writer launch"
+        unit.activate(kwargs["unit_id"])
+        return {"success": True, "changed": True, "backend": "pi_rpc"}
+
+    svc.write_dispatch_fn = delayed_launch
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+    responses = []
+    errors = []
+
+    def run_accept():
+        try:
+            responses.append(accept(svc, first))
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
+            errors.append(exc)
+
+    thread = threading.Thread(target=run_accept)
+    thread.start()
+    assert launch_entered.wait(5), "accept did not reach delayed writer launch"
+    assert svc._invocation_in_flight(first["attempt_id"]) is True
+
+    status = svc._status(first["dispatch_id"], first["attempt_id"], reconcile=True)
+    assert status["state"] == "LAUNCHING"
+    assert svc._invocation_in_flight(first["attempt_id"]) is True
+
+    launch_resume.set()
+    thread.join(5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert responses[0]["data"]["state"] == "RUNNING"
+    assert svc._invocation_in_flight(first["attempt_id"]) is False
+
+    replay = accept(svc, first)
+    assert replay["code"] == "FABRIC_IDEMPOTENT_REPLAY"
+
+    conflicting = dict(first, objective="Conflicting canonical envelope content.")
+    with pytest.raises(fabric.FabricError) as exc:
+        accept(svc, conflicting)
+    assert exc.value.code == "FABRIC_IDEMPOTENCY_CONFLICT"
+
+
+def test_post_launch_response_exception_clears_marker_and_keeps_durable_ownership(
+    tmp_path, monkeypatch
+):
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+    env = envelope(svc, contract(tmp_path, auth="reversible_write"))
+    original_response = base._response
+
+    def raising_response(operation, **kwargs):
+        if operation == "accept":
+            raise RuntimeError("deterministic response construction failure")
+        return original_response(operation, **kwargs)
+
+    monkeypatch.setattr(base, "_response", raising_response)
+
+    with pytest.raises(RuntimeError, match="response construction failure"):
+        accept(svc, env)
+
+    assert svc._invocation_in_flight(env["attempt_id"]) is False
+    assert row_for(svc, env["attempt_id"])["state"] == "RUNNING"
+    assert claim_for(svc)["state"] == "ACTIVE"
+
+
+def test_writer_launch_exception_clears_marker_and_preserves_uncertain_ownership(
+    tmp_path, monkeypatch
+):
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+
+    def raising_launch(_contract, **_kwargs):
+        raise RuntimeError("deterministic launch failure")
+
+    svc.write_dispatch_fn = raising_launch
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+
+    response = accept(svc, first)
+
+    assert response["ok"] is False
+    assert response["code"] == "FABRIC_WRITE_LAUNCH_EXCEPTION_AMBIGUOUS"
+    assert response["data"]["state"] == "LOST_AMBIGUOUS"
+    assert svc._invocation_in_flight(first["attempt_id"]) is False
+    persisted = row_for(svc, first["attempt_id"])
+    assert persisted["state"] == "LOST_AMBIGUOUS"
+    assert "FABRIC_WRITE_LAUNCH_EXCEPTION_AMBIGUOUS" in persisted["dispatch_result_json"]
+    assert claim_for(svc)["state"] == "ACTIVE"
+
+    reconciled = svc._status(first["dispatch_id"], first["attempt_id"], reconcile=True)
+    assert reconciled["state"] == "LOST_AMBIGUOUS"
+    assert reconciled["write_claim_state"] == "ACTIVE"
+
+    retry = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
+    with pytest.raises(fabric.FabricError) as exc:
+        accept(svc, retry)
+    assert exc.value.code == "FABRIC_WRITE_OWNERSHIP_BLOCKED"
+
+    cancelled = svc._cancel(
+        first["dispatch_id"], first["attempt_id"], "coord-main", policy(tmp_path)
+    )
+    assert cancelled["state"] == "CANCELLED"
+    assert cancelled["write_claim_state"] == "RELEASED"
+
+
+def test_definite_launch_failure_after_cancel_terminalizes_and_allows_retry(
+    tmp_path, monkeypatch
+):
+    launch_entered = threading.Event()
+    launch_resume = threading.Event()
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+
+    def failed_launch(_contract, **kwargs):
+        launch_entered.set()
+        assert launch_resume.wait(5), "test did not release failed launch"
+        unit.quiesce(kwargs["unit_id"])
+        return {
+            "success": False,
+            "changed": False,
+            "code": "FABRIC_EXECUTION_UNIT_START_FAILED",
+        }
+
+    svc.write_dispatch_fn = failed_launch
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+    errors = []
+    cancel_finished = threading.Event()
+    cancel_results = []
+
+    def run_accept():
+        try:
+            accept(svc, first)
+        except BaseException as exc:  # noqa: BLE001 - thread surfaces failures after join
+            errors.append(exc)
+
+    thread = threading.Thread(target=run_accept)
+    thread.start()
+    assert launch_entered.wait(5), "accept did not reach failed launch"
+
+    def run_cancel():
+        cancel_results.append(
+            svc._cancel(
+                first["dispatch_id"],
+                first["attempt_id"],
+                "coord-main",
+                policy(tmp_path),
+            )
+        )
+        cancel_finished.set()
+
+    cancel_thread = threading.Thread(target=run_cancel)
+    cancel_thread.start()
+    assert cancel_finished.wait(2), "cancellation blocked behind the failed launch callback"
+    assert claim_for(svc)["state"] == "ACTIVE"
+    assert cancel_results[0]["state"] == "CANCEL_REQUESTED"
+
+    launch_resume.set()
+    thread.join(5)
+    cancel_thread.join(5)
+    assert not thread.is_alive()
+    assert not cancel_thread.is_alive()
+    assert errors == []
+    assert cancel_results[0]["state"] in {"CANCEL_REQUESTED", "CANCELLED", "FAILED"}
+    assert row_for(svc, first["attempt_id"])["state"] in {"CANCELLED", "FAILED"}
+    assert claim_for(svc)["state"] == "RELEASED"
+
+    svc.write_dispatch_fn = lambda _contract, **_kwargs: {
+        "success": True,
+        "changed": True,
+        "backend": "pi_rpc",
+    }
+    retry = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
+    response = accept(svc, retry)
+    assert response["data"]["write_epoch"] == 2
+
+
+def test_cancel_between_launch_finalizer_read_and_write_is_preserved(tmp_path, monkeypatch):
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+    value = contract(tmp_path, auth="reversible_write")
+    env = envelope(svc, value)
+    original_connect = base._connect
+    cancellation = []
+    injected = False
+
+    class InterleavingConnection:
+        def __init__(self, db):
+            self.db = db
+
+        def __getattr__(self, name):
+            return getattr(self.db, name)
+
+        def execute(self, sql, parameters=()):
+            nonlocal injected
+            if (
+                not injected
+                and "dispatch_result_json" in sql
+                and "'LAUNCHING','CANCEL_REQUESTED'" in sql
+            ):
+                injected = True
+                assert row_for(svc, env["attempt_id"])["state"] == "LAUNCHING"
+                cancellation.append(
+                    svc._cancel(
+                        env["dispatch_id"], env["attempt_id"], "coord-main", policy(tmp_path)
+                    )
+                )
+            return self.db.execute(sql, parameters)
+
+    @contextmanager
+    def interleaving_connect(path):
+        with original_connect(path) as db:
+            yield InterleavingConnection(db)
+
+    monkeypatch.setattr(base, "_connect", interleaving_connect)
+    response = accept(svc, env)
+
+    assert injected is True
+    assert cancellation[0]["state"] == "CANCEL_REQUESTED"
+    assert response["data"]["state"] == "CANCELLED"
+    assert row_for(svc, env["attempt_id"])["state"] == "CANCELLED"
+    assert claim_for(svc)["state"] == "RELEASED"
+    assert unit.stopped == [unit.unit_name(env["attempt_id"])]
+
+
 
 def test_terminal_runner_does_not_release_while_descendant_unit_is_active(tmp_path, monkeypatch):
     observed = []
@@ -262,9 +908,26 @@ def test_quiescent_unit_with_missing_outcome_is_ambiguous_not_success(tmp_path, 
     accept(svc, env)
     row = row_for(svc, env["attempt_id"])
     unit.quiesce(row["execution_unit_id"])
+
+    polled = svc._status(env["dispatch_id"], env["attempt_id"], reconcile=False)
+    assert polled["state"] == "LOST_AMBIGUOUS"
+    assert polled["write_claim_state"] == "ACTIVE"
+
     status = svc._status(env["dispatch_id"], env["attempt_id"], reconcile=True)
     assert status["state"] == "LOST_AMBIGUOUS"
     assert status["write_claim_state"] == "RELEASED"
+
+
+def test_unknown_unit_with_missing_outcome_keeps_claim_during_reconcile(tmp_path, monkeypatch):
+    unit = FakeUnitManager()
+    svc = make_service(tmp_path, monkeypatch, observed=[], unit=unit)
+    env = envelope(svc, contract(tmp_path, auth="reversible_write"))
+    accept(svc, env)
+
+    status = svc._status(env["dispatch_id"], env["attempt_id"], reconcile=True)
+
+    assert status["state"] == "LOST_AMBIGUOUS"
+    assert status["write_claim_state"] == "ACTIVE"
 
 
 
@@ -283,6 +946,49 @@ def test_peer_restart_keeps_active_claim_when_execution_unit_is_active(tmp_path,
     assert status["write_claim_state"] == "ACTIVE"
 
 
+def test_peer_restart_reconciles_uncertain_launching_and_blocks_retry(tmp_path, monkeypatch):
+    first_unit = FakeUnitManager()
+    value = contract(tmp_path, auth="reversible_write")
+    first = make_service(tmp_path, monkeypatch, unit=first_unit)
+    env = envelope(first, value)
+    accept(first, env)
+    original = row_for(first, env["attempt_id"])
+    with base._connect(first.db_path) as db:
+        db.execute(
+            "UPDATE attempts SET state='LAUNCHING' WHERE attempt_id=?",
+            (env["attempt_id"],),
+        )
+
+    restarted_unit = FakeUnitManager()
+    inspected = []
+    original_inspect = restarted_unit.inspect
+
+    def inspect(unit_id):
+        inspected.append(unit_id)
+        return original_inspect(unit_id)
+
+    restarted_unit.inspect = inspect
+    restarted = make_service(tmp_path, monkeypatch, unit=restarted_unit)
+    status = restarted._status(env["dispatch_id"], env["attempt_id"], reconcile=True)
+
+    assert inspected == [original["execution_unit_id"]]
+    assert status["attempt_id"] == env["attempt_id"]
+    assert status["write_epoch"] == original["write_epoch"] == 1
+    assert status["state"] == "LOST_AMBIGUOUS"
+    assert status["write_claim_state"] == "ACTIVE"
+
+    repeated = restarted._status(env["dispatch_id"], env["attempt_id"], reconcile=True)
+    assert repeated["state"] == "LOST_AMBIGUOUS"
+    assert repeated["write_claim_state"] == "ACTIVE"
+
+    retry = envelope(restarted, value, sequence=2, retry_parent=env["attempt_id"])
+    with pytest.raises(fabric.FabricError) as exc:
+        accept(restarted, retry)
+    assert exc.value.code == "FABRIC_WRITE_OWNERSHIP_BLOCKED"
+    assert claim_for(restarted)["attempt_id"] == env["attempt_id"]
+    assert claim_for(restarted)["epoch"] == 1
+
+
 
 def test_cancel_releases_claim_only_after_exact_unit_is_quiescent(tmp_path, monkeypatch):
     unit = FakeUnitManager()
@@ -294,6 +1000,33 @@ def test_cancel_releases_claim_only_after_exact_unit_is_quiescent(tmp_path, monk
     assert unit.stopped == [row["execution_unit_id"]]
     assert result["state"] == "CANCELLED"
     assert result["write_claim_state"] == "RELEASED"
+
+
+def test_cancel_ambiguity_keeps_claim_and_blocks_overlapping_writer(tmp_path, monkeypatch):
+    class UncertainStopUnitManager(FakeUnitManager):
+        def stop(self, unit):
+            self.stopped.append(unit)
+            value = {"known": False, "active": False, "quiescent": False, "state": "unknown"}
+            self.units[unit] = value
+            return dict(value)
+
+    unit = UncertainStopUnitManager()
+    svc = make_service(tmp_path, monkeypatch, unit=unit)
+    value = contract(tmp_path, auth="reversible_write")
+    first = envelope(svc, value)
+    accept(svc, first)
+    cancelled = svc._cancel(
+        first["dispatch_id"], first["attempt_id"], "coord-main", policy(tmp_path)
+    )
+    assert cancelled["state"] == "CANCEL_REQUESTED"
+    assert cancelled["write_claim_state"] == "ACTIVE"
+    assert cancelled["execution_unit_state"] == "unknown"
+
+    second = envelope(svc, value, sequence=2, retry_parent=first["attempt_id"])
+    with pytest.raises(fabric.FabricError) as exc:
+        accept(svc, second)
+    assert exc.value.code == "FABRIC_WRITE_OWNERSHIP_BLOCKED"
+    assert claim_for(svc)["attempt_id"] == first["attempt_id"]
 
 
 
@@ -567,6 +1300,104 @@ def test_auto_remote_write_unlock_requires_live_g4c_features(tmp_path, monkeypat
     ).route(auto_contract(tmp_path, auth="reversible_write"))
     assert unlocked["selected"]["node"] == "node-a"
 
+
+def test_g4c_auto_route_audits_only_authoritative_post_unlock_decision(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
+    audits: list[dict[str, object]] = []
+
+    def capture_audit(decision, *, success, dry_run):
+        audits.append(
+            {
+                "success": success,
+                "dry_run": dry_run,
+                "selected": dict(decision.get("selected") or {}),
+            }
+        )
+
+    monkeypatch.setattr(base_router, "_audit_route", capture_audit)
+    now = datetime.now(timezone.utc)
+    decision = fabric.AutoRouter(
+        registry_loader=lambda: {"node-a": node()},
+        routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
+        local_backends=list,
+        remote_probe=lambda _node, _timeout: {
+            "healthy": True,
+            "latency_ms": 5,
+            "features": [
+                fabric.FEATURE_WRITE_OWNERSHIP,
+                fabric.FEATURE_EXECUTION_UNIT,
+                fabric.FEATURE_WRITE_EPOCH,
+            ],
+        },
+        now=lambda: now,
+    ).route(auto_contract(tmp_path, auth="reversible_write"), dry_run=False)
+
+    assert decision["selected"]["node"] == "node-a"
+    assert decision["selected"]["backend"] == "pi_rpc"
+    assert audits == [
+        {
+            "success": True,
+            "dry_run": False,
+            "selected": {
+                "node": "node-a",
+                "backend": "pi_rpc",
+                "transport_backend": "fabric",
+                "remote": True,
+                "rank": decision["selected"]["rank"],
+            },
+        }
+    ]
+
+
+def test_g4c_auto_route_audits_failure_when_feature_gate_raises(tmp_path, monkeypatch):
+    """A gate crash after the preliminary base route must still leave one audit
+    record, must not claim the preliminary winner, and must propagate."""
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
+    audits: list[dict[str, object]] = []
+
+    def capture_audit(decision, *, success, dry_run):
+        audits.append(
+            {
+                "success": success,
+                "dry_run": dry_run,
+                "selected": decision.get("selected"),
+            }
+        )
+
+    monkeypatch.setattr(base_router, "_audit_route", capture_audit)
+
+    class _BoomFeatures(dict):
+        def get(self, *_args, **_kwargs):
+            raise RuntimeError("g4c feature gate exploded")
+
+    now = datetime.now(timezone.utc)
+    router_obj = fabric.AutoRouter(
+        registry_loader=lambda: {"node-a": node()},
+        routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
+        local_backends=list,
+        remote_probe=lambda _node, _timeout: {
+            "healthy": True,
+            "latency_ms": 5,
+            "features": [],
+        },
+        now=lambda: now,
+    )
+    monkeypatch.setattr(router_obj, "_features", _BoomFeatures())
+
+    with pytest.raises(RuntimeError, match="feature gate exploded"):
+        router_obj.route(
+            auto_contract(
+                tmp_path,
+                artifacts=[{"path": "out.txt", "must_exist": True, "min_bytes": 1}],
+            ),
+            dry_run=False,
+        )
+
+    assert audits == [{"success": False, "dry_run": False, "selected": None}]
 
 
 def test_auto_remote_artifact_unlock_requires_snapshot_features(tmp_path, monkeypatch):

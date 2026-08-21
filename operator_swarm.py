@@ -686,10 +686,21 @@ def _stage_contract(workflow: dict[str, Any], stage: dict[str, Any], *, task_id:
         "approval_reference": "G4-swarm",
     }
 
+    execution = stage.get("execution")
+    assigned_agent = (
+        "auto"
+        if isinstance(execution, dict) and str(execution.get("backend") or "").strip().lower() == "auto"
+        else stage["owner"]
+    )
+
     contract = {
         "schema": CONTRACT_SCHEMA,
         "task_id": task_id,
-        "assigned_agent": stage["owner"],
+        # Auto placement owns the execution target while the stage owner remains
+        # the assigned profile/authority principal. Keeping these concepts
+        # separate lets Swarm compose with Fabric without silently pinning an
+        # auto-routed stage back to its orchestration owner.
+        "assigned_agent": assigned_agent,
         "assigned_profile": stage["owner"],
         "objective": stage["objective"],
         "allowed_scope": {
@@ -705,8 +716,8 @@ def _stage_contract(workflow: dict[str, Any], stage: dict[str, Any], *, task_id:
         "constraints": _string_list(stage.get("constraints") or [], field="constraints"),
         "authorization": auth,
     }
-    if stage.get("execution") is not None:
-        contract["execution"] = stage["execution"]
+    if execution is not None:
+        contract["execution"] = execution
     return contract
 
 

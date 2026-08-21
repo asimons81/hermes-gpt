@@ -69,6 +69,15 @@ _URLISH_KEY_RE = re.compile(r"(?:url|uri|endpoint|host|hostname|proxy)", re.IGNO
 _AUTH_RANK = {"none": 0, "read_only": 1, "reversible_write": 2, "high_impact": 3}
 _TERMINAL_PEER = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "LOST_AMBIGUOUS", "BLOCKED"})
 _TERMINAL_COORD = frozenset({"COMPLETED", "FAILED", "CANCELLED", "BLOCKED"})
+_PEER_WRITE_CLAIM_STATES = frozenset(
+    {"NONE", "ACTIVE", "RELEASED", "SUPERSEDED", "UNKNOWN"}
+)
+_PEER_EXECUTION_UNIT_STATES = frozenset(
+    {
+        "active", "activating", "deactivating", "reloading", "inactive",
+        "failed", "dead", "not-found", "terminal", "unknown",
+    }
+)
 _SAFE_EVIDENCE_PROVENANCE = frozenset(
     {"coordinator_observed", "managed_peer_structured", "artifact_verified", "coordinator_local"}
 )
@@ -80,6 +89,19 @@ _DEFAULT_FEATURES = (
     "closed-schema-v1",
 )
 _EXPECTED_ERRORS = (OSError, RuntimeError, ValueError, TypeError, sqlite3.Error)
+
+
+def _bounded_coordinator_peer_values(data: dict[str, Any]) -> dict[str, Any]:
+    epoch = data.get("write_epoch")
+    claim = data.get("write_claim_state")
+    unit = data.get("execution_unit_state")
+    return {
+        "write_epoch": epoch
+        if isinstance(epoch, int) and not isinstance(epoch, bool)
+        else None,
+        "write_claim_state": claim if claim in _PEER_WRITE_CLAIM_STATES else "UNKNOWN",
+        "execution_unit_state": unit if unit in _PEER_EXECUTION_UNIT_STATES else "unknown",
+    }
 
 
 class FabricError(RuntimeError):
@@ -895,6 +917,51 @@ def _dispatch_id(contract_sha: str, task_id: str, node_name: str) -> str:
 
 def _attempt_id(dispatch_id: str, sequence: int = 1) -> str:
     return "faba-" + hashlib.sha256(f"{dispatch_id}:{sequence}".encode()).hexdigest()[:32]
+
+
+def _contract_profile_scope(contract: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
+    """Fail closed if Fabric placement would widen Work Contract profile scope."""
+    scope = contract.get("allowed_scope")
+    if not isinstance(scope, dict):
+        raise FabricError(
+            "FABRIC_AUTHORITY_DENIED",
+            "contract allowed_scope must be an object",
+        )
+    profiles = tuple(
+        _bounded_strings(
+            scope.get("profiles"),
+            field="contract.allowed_scope.profiles",
+            maximum=16,
+            item_max=64,
+        )
+    )
+    if not profiles or any(not _PROFILE_RE.fullmatch(profile) for profile in profiles):
+        raise FabricError(
+            "FABRIC_AUTHORITY_DENIED",
+            "contract profile scope is invalid",
+        )
+    assigned_profile = _bounded_string(
+        contract.get("assigned_profile"),
+        field="contract.assigned_profile",
+        pattern=_PROFILE_RE,
+    )
+    if assigned_profile not in profiles:
+        raise FabricError(
+            "FABRIC_AUTHORITY_DENIED",
+            "assigned profile is outside the Work Contract profile scope",
+        )
+    return assigned_profile, profiles
+
+
+def _contract_forbidden_actions_present(contract: dict[str, Any]) -> bool:
+    """Return whether the contract declares checks Fabric v1 cannot yet prove."""
+    forbidden = contract.get("forbidden_actions", [])
+    if not isinstance(forbidden, list) or len(forbidden) > 32:
+        raise FabricError(
+            "FABRIC_SCHEMA_INVALID",
+            "contract forbidden_actions must be a bounded list",
+        )
+    return bool(forbidden)
 
 
 def _auth_object(value: Any) -> dict[str, Any]:
@@ -1848,12 +1915,18 @@ class FabricCoordinator:
             contract
         )
         node = self._node(node_name)
+        assigned_profile, _profile_scope = _contract_profile_scope(contract)
+        if _contract_forbidden_actions_present(contract):
+            raise FabricError(
+                "FABRIC_EVIDENCE_POLICY_INVALID",
+                "verified Fabric cannot prove non-empty forbidden-action checks",
+            )
         if contract.get("assigned_agent") != node.name:
             raise FabricError(
                 "FABRIC_AUTHORITY_DENIED",
                 "Fabric contract assigned_agent must match the managed node name",
             )
-        if contract.get("assigned_profile") not in node.allowed_profiles:
+        if assigned_profile not in node.allowed_profiles:
             raise FabricError(
                 "FABRIC_AUTHORITY_DENIED",
                 "contract profile is outside managed-node policy",
@@ -2013,10 +2086,21 @@ class FabricCoordinator:
             raise FabricError("FABRIC_PROTOCOL_ERROR", "peer accept response lineage mismatch")
         state = "SUBMITTED" if response["ok"] else "BLOCKED"
         with _connect(self.db_path) as db:
+            columns = {str(row["name"]) for row in db.execute("PRAGMA table_info(attempts)")}
+            peer_values = _bounded_coordinator_peer_values(data)
+            optional = [
+                key
+                for key in ("write_epoch", "write_claim_state", "execution_unit_state")
+                if key in columns and key in data and peer_values[key] is not None
+            ]
+            assignments = ",".join(f"{key}=?" for key in optional)
+            if assignments:
+                assignments += ","
             db.execute(
-                "UPDATE attempts SET state=?,remote_task_id=?,peer_policy_sha256=?,error_code=?,"
+                f"UPDATE attempts SET {assignments}state=?,remote_task_id=?,peer_policy_sha256=?,error_code=?,"
                 "updated_at=? WHERE attempt_id=?",
                 (
+                    *(peer_values[key] for key in optional),
                     state,
                     remote_task_id,
                     data.get("policy_sha256"),
@@ -2112,11 +2196,21 @@ class FabricCoordinator:
             "BLOCKED": "BLOCKED",
         }.get(peer_state, "BLOCKED")
         with _connect(self.db_path) as db:
+            columns = {str(row["name"]) for row in db.execute("PRAGMA table_info(attempts)")}
+            peer_values = _bounded_coordinator_peer_values(data)
+            optional = [
+                key
+                for key in ("write_epoch", "write_claim_state", "execution_unit_state")
+                if key in columns and key in data and peer_values[key] is not None
+            ]
+            assignments = ",".join(f"{key}=?" for key in optional)
+            if assignments:
+                assignments += ","
             db.execute(
-                "UPDATE attempts SET state=?,updated_at=? WHERE attempt_id=?",
-                (state, _now(), attempt_id),
+                f"UPDATE attempts SET {assignments}state=?,updated_at=? WHERE attempt_id=?",
+                (*(peer_values[key] for key in optional), state, _now(), attempt_id),
             )
-        return {
+        result = {
             "success": True,
             "backend": "fabric",
             "node": node.name,
@@ -2126,6 +2220,8 @@ class FabricCoordinator:
             "peer_state": peer_state,
             "task_id": dispatch["task_id"],
         }
+        result.update({key: peer_values[key] for key in optional})
+        return result
 
     def collect(self, attempt_id: str, *, timeout: int = 15) -> dict[str, Any]:
         attempt, _dispatch, node = self._attempt(attempt_id)
@@ -2221,9 +2317,19 @@ class FabricCoordinator:
             raise FabricError("FABRIC_PROTOCOL_ERROR", "peer cancel lineage mismatch")
         state = "CANCELLED" if data.get("state") == "CANCELLED" else "CANCEL_REQUESTED"
         with _connect(self.db_path) as db:
+            columns = {str(row["name"]) for row in db.execute("PRAGMA table_info(attempts)")}
+            peer_values = _bounded_coordinator_peer_values(data)
+            optional = [
+                key
+                for key in ("write_epoch", "write_claim_state", "execution_unit_state")
+                if key in columns and key in data and peer_values[key] is not None
+            ]
+            assignments = ",".join(f"{key}=?" for key in optional)
+            if assignments:
+                assignments += ","
             db.execute(
-                "UPDATE attempts SET state=?,updated_at=? WHERE attempt_id=?",
-                (state, _now(), attempt_id),
+                f"UPDATE attempts SET {assignments}state=?,updated_at=? WHERE attempt_id=?",
+                (*(peer_values[key] for key in optional), state, _now(), attempt_id),
             )
         return {
             "success": True,
@@ -2379,6 +2485,31 @@ class FabricBackend:
             task_id,
             refresh=False,
         )
+
+    def observed_artifacts(
+        self,
+        task_id: str,
+        *,
+        contract_sha256: str,
+        hermes_root: Path | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return coordinator-verified admitted artifact metadata, when supported.
+
+        The base G4-A coordinator has no artifact admission store. G4-C installs
+        an enhanced coordinator that exposes this read-only evidence surface.
+        Keeping the adapter here lets Work Contract validation consume admitted
+        artifacts without importing Fabric internals or materializing active
+        remote content into an allowed workspace.
+        """
+        coordinator = self.coordinator_factory(hermes_root=hermes_root)
+        observer = getattr(coordinator, "observed_artifacts", None)
+        if not callable(observer):
+            return []
+        try:
+            value = observer(task_id, contract_sha256=contract_sha256)
+        except FabricError:
+            return []
+        return value if isinstance(value, list) else []
 
     def cancel(self, task_id: str, *, hermes_root: Path | None = None) -> dict[str, Any]:
         try:

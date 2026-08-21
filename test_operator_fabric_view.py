@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 import fabric_artifacts
 import fabric_write_guard
 import operator_fabric as fabric
@@ -91,7 +93,14 @@ def test_attempts_view_does_not_create_missing_journal(tmp_path, monkeypatch):
     assert not (tmp_path / "coordinator.db").exists()
 
 
-def seed_attempt(root: Path, *, state: str = "BLOCKED", error_code: str = "FABRIC_PEER_UNAVAILABLE") -> tuple[Path, str]:
+def seed_attempt(
+    root: Path,
+    *,
+    state: str = "BLOCKED",
+    error_code: str = "FABRIC_PEER_UNAVAILABLE",
+    write_claim_state: str = "ACTIVE",
+    execution_unit_state: str = "active",
+) -> tuple[Path, str]:
     db_path = root / "fabric" / "coordinator.db"
     fabric._init_coordinator_db(db_path)
     fabric_write_guard.migrate_coordinator(db_path)
@@ -145,6 +154,10 @@ def seed_attempt(root: Path, *, state: str = "BLOCKED", error_code: str = "FABRI
             ),
         )
         db.execute(
+            "UPDATE attempts SET write_claim_state=?,execution_unit_state=? WHERE attempt_id=?",
+            (write_claim_state, execution_unit_state, attempt_id),
+        )
+        db.execute(
             "INSERT INTO artifact_admissions(artifact_id,attempt_id,dispatch_id,logical_name,admission_path,size_bytes,sha256,media_type,active_content,admitted_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
                 "fart-1234567890abcdef",
@@ -173,6 +186,12 @@ def test_attempt_detail_redacts_private_paths_and_isolates_active_artifacts(tmp_
     assert attempt["blocker"] == "FABRIC_PEER_UNAVAILABLE"
     assert attempt["authority"]["granted"] == "write_capable"
     assert attempt["authority"]["write_epoch"] == 7
+    assert attempt["peer_observations"] == {
+        "basis": "durable_reconciled_peer_observation",
+        "label": "Peer observations; not coordinator authority or a completion verdict.",
+        "write_claim_state": "ACTIVE",
+        "execution_unit_state": "active",
+    }
     artifact = attempt["artifacts"][0]
     assert artifact["logical_name"] == "reports/summary.html"
     assert artifact["active_content"] is True
@@ -182,6 +201,38 @@ def test_attempt_detail_redacts_private_paths_and_isolates_active_artifacts(tmp_
     assert "/home/tony/private" not in joined
     assert "very-secret-token-value" not in joined
     assert "coord-main" not in joined
+
+
+@pytest.mark.parametrize(
+    ("claim_state", "unit_state"),
+    [
+        ("ACTIVE", "active"),
+        ("RELEASED", "inactive"),
+        ("SUPERSEDED", "not-found"),
+        ("UNKNOWN", "unknown"),
+    ],
+)
+def test_attempt_view_exposes_bounded_durable_peer_observations(
+    tmp_path, monkeypatch, claim_state, unit_state
+):
+    db_path, attempt_id = seed_attempt(
+        tmp_path,
+        write_claim_state=claim_state,
+        execution_unit_state=unit_state,
+    )
+    monkeypatch.setenv(fabric.COORDINATOR_DB_ENV, str(db_path))
+    result = view.attempt_detail(attempt_id, hermes_root=tmp_path)
+    observations = result["attempt"]["peer_observations"]
+    assert observations["write_claim_state"] == claim_state
+    assert observations["execution_unit_state"] == unit_state
+    assert observations["basis"] == "durable_reconciled_peer_observation"
+
+
+def test_lost_ambiguous_is_a_flight_deck_blocker(tmp_path, monkeypatch):
+    db_path, attempt_id = seed_attempt(tmp_path, state="LOST_AMBIGUOUS", error_code="")
+    monkeypatch.setenv(fabric.COORDINATOR_DB_ENV, str(db_path))
+    result = view.attempt_detail(attempt_id, hermes_root=tmp_path)
+    assert result["attempt"]["blocker"] == "LOST_AMBIGUOUS"
 
 
 def test_routing_receipt_exposes_bounded_explanation(tmp_path):
