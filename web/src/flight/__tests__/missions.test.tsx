@@ -70,6 +70,28 @@ describe('Missions Flight Deck', () => {
     expect(screen.queryByRole('button', { name: /approve|cancel|run/i })).not.toBeInTheDocument();
   });
 
+  it('separates execution success from contract validation and warns on missing proof', async () => {
+    const unverifiedDelegation = { ...delegation, state: 'succeeded', backend_state: 'completed', validation_verdict: 'UNVERIFIED' };
+    const unverifiedMission = {
+      ...mission,
+      attachments: [{ kind: 'delegation', ref: 'dlg-v09', relationship: 'contains', state: 'succeeded', verified: 0, evidence_ref: 'delegation:dlg-v09' }],
+    };
+    vi.spyOn(api, 'get').mockImplementation((path: string) => {
+      if (path.includes('/events?')) return new Promise(() => undefined);
+      return Promise.resolve({ mission: unverifiedMission, delegations: [unverifiedDelegation], delegation_count: 1, live_cursor: 4, read_only: true });
+    });
+    render(
+      <MemoryRouter initialEntries={['/ops/missions/msn-ui-1']}>
+        <Routes><Route path="/ops/missions/:missionId" element={<MissionDetail />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('UNVERIFIED')).toHaveAttribute('data-status', 'warn');
+    expect(screen.getByText('verification missing')).toHaveAttribute('data-status', 'warn');
+    expect(screen.getByText('Execution')).toBeInTheDocument();
+    expect(screen.getByText('Validation')).toBeInTheDocument();
+  });
+
   it('refreshes the durable Mission snapshot after a live wake-up', async () => {
     let detailReads = 0;
     let eventReads = 0;
