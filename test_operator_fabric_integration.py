@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -513,6 +514,54 @@ def test_remote_artifact_hash_is_admitted_and_active_content_stays_metadata_only
     assert artifact["active_content"] is True
     assert artifact["render_policy"] == "isolated_metadata_only"
     assert "admission_path" not in artifact
+
+
+def test_auto_artifact_evidence_maps_original_contract_and_rehashes_admission(tmp_path, monkeypatch):
+    content = b"verified remote artifact"
+    (tmp_path / "out.txt").write_bytes(content)
+    observed = [_completed_observation()]
+    svc = make_service(tmp_path, monkeypatch, observed=observed)
+    coord = make_coordinator(tmp_path, svc)
+    backend, _captured = _auto_backend(tmp_path, svc, coord, monkeypatch)
+    value = auto_contract(
+        tmp_path,
+        artifacts=[{"path": "out.txt", "must_exist": True, "min_bytes": 1}],
+    )
+
+    result = backend.dispatch(
+        value,
+        confirm=True,
+        dry_run=False,
+        timeout=10,
+        hermes_root=tmp_path,
+    )
+    assert result["success"] is True
+    assert result["selected_node"] == "node-a"
+    coord.poll(result["attempt_id"], reconcile=True)
+    collected = coord.collect(result["attempt_id"], timeout=10)
+    assert collected["state"] == "COMPLETED"
+
+    admitted = coord.observed_artifacts(
+        value["task_id"],
+        contract_sha256=base.sha256_json(value),
+    )
+    assert len(admitted) == 1
+    assert admitted[0]["logical_name"] == "out.txt"
+    assert admitted[0]["sha256"] == hashlib.sha256(content).hexdigest()
+    assert admitted[0]["provenance"] == "coordinator_verified_artifact"
+    assert "admission_path" not in admitted[0]
+
+    with base._connect_readonly(coord.db_path) as db:
+        row = db.execute(
+            "SELECT admission_path FROM artifact_admissions WHERE attempt_id=?",
+            (result["attempt_id"],),
+        ).fetchone()
+    assert row is not None
+    Path(row["admission_path"]).write_bytes(b"tampered")
+    assert coord.observed_artifacts(
+        value["task_id"],
+        contract_sha256=base.sha256_json(value),
+    ) == []
 
 
 def test_remote_completion_cannot_self_satisfy_required_human_review(tmp_path, monkeypatch):

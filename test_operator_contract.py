@@ -407,6 +407,42 @@ def test_validate_satisfied_via_delegation(hermes_root):
     assert out["checks"][0]["status"] == "PASS"
 
 
+def test_validate_accepts_coordinator_verified_fabric_artifact_without_workspace_copy(
+    hermes_root, monkeypatch
+):
+    ws = hermes_root.parent / "ws"
+    ws.mkdir(parents=True, exist_ok=True)
+    c = _contract_for_ws(ws, task_id="t-done")
+    _add_review_evidence(c, reviewer="default")
+
+    class FabricEvidenceBackend:
+        def observed_artifacts(self, task_id, *, contract_sha256, hermes_root=None):
+            assert task_id == "t-done"
+            assert len(contract_sha256) == 64
+            return [
+                {
+                    "logical_name": "src/nexusos/cache.py",
+                    "size_bytes": 42,
+                    "sha256": "a" * 64,
+                    "provenance": "coordinator_verified_artifact",
+                }
+            ]
+
+    original_get_backend = contract_mod.op_runners.get_backend
+    monkeypatch.setattr(
+        contract_mod.op_runners,
+        "get_backend",
+        lambda name: FabricEvidenceBackend() if name == "fabric" else original_get_backend(name),
+    )
+
+    out = _run_validate(c, hermes_root)
+    assert out["verdict"] == "SATISFIED"
+    artifacts = next(check for check in out["checks"] if check["kind"] == "artifacts")
+    assert artifacts["status"] == "PASS"
+    assert artifacts["detail"] == "1 artifact(s) present"
+    assert not (ws / "src" / "nexusos" / "cache.py").exists()
+
+
 # ---------------------------------------------------------------------------
 # 4. False-"done" rejection (S2 exit criterion, design §7.4 cases 1-6)
 # ---------------------------------------------------------------------------

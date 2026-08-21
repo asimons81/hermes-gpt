@@ -1629,6 +1629,120 @@ class FabricCoordinator(base.FabricCoordinator):
                 )
         return out
 
+    def observed_artifacts(
+        self,
+        task_id: str,
+        *,
+        contract_sha256: str,
+    ) -> list[dict[str, Any]]:
+        """Return re-verified coordinator-admitted artifacts for one contract lineage.
+
+        Auto placement changes the canonical contract before Fabric dispatch. The
+        routing journal is coordinator-local evidence linking the original Work
+        Contract hash to that placed hash. Only completed attempts with admitted
+        run evidence are eligible, and the admission bytes are re-hashed before
+        they are returned as completion evidence.
+        """
+        if not base._ID_RE.fullmatch(task_id or "") or not base._SHA_RE.fullmatch(contract_sha256 or ""):
+            return []
+        # Observation must remain strictly read-only. Ordinary Work Contract
+        # validation may construct the Fabric backend even when Fabric has never
+        # run; do not migrate/create a coordinator journal merely to look for
+        # artifact evidence.
+        if not self.db_path.is_file():
+            return []
+        try:
+            with base._connect_readonly(self.db_path) as db:
+                tables = {
+                    str(row["name"])
+                    for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                }
+        except sqlite3.Error:
+            return []
+        if not {"attempts", "dispatches", "artifact_admissions"} <= tables:
+            return []
+
+        allowed_shas = {contract_sha256}
+        journal = router._journal_path(self.hermes_root)
+        try:
+            size = journal.stat().st_size
+            with journal.open("rb") as fh:
+                if size > 4_000_000:
+                    fh.seek(size - 4_000_000)
+                    fh.readline()
+                for raw_line in fh:
+                    if not raw_line or len(raw_line) > 128_000:
+                        continue
+                    try:
+                        record = base.strict_json_loads(raw_line, maximum=128_000)
+                    except FabricError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    selected = record.get("selected")
+                    if (
+                        record.get("schema") != router.ROUTING_DECISION_SCHEMA
+                        or record.get("task_id") != task_id
+                        or record.get("original_contract_sha256") != contract_sha256
+                        or not isinstance(selected, dict)
+                        or selected.get("remote") is not True
+                        or selected.get("transport_backend") != "fabric"
+                    ):
+                        continue
+                    placed_sha = record.get("placed_contract_sha256")
+                    if isinstance(placed_sha, str) and base._SHA_RE.fullmatch(placed_sha):
+                        allowed_shas.add(placed_sha)
+        except OSError:
+            pass
+
+        placeholders = ",".join("?" for _ in allowed_shas)
+        with base._connect_readonly(self.db_path) as db:
+            rows = db.execute(
+                "SELECT aa.*,d.contract_sha256,a.state,a.evidence_json,a.created_at "
+                "FROM artifact_admissions aa "
+                "JOIN dispatches d ON d.dispatch_id=aa.dispatch_id "
+                "JOIN attempts a ON a.attempt_id=aa.attempt_id "
+                f"WHERE d.task_id=? AND d.contract_sha256 IN ({placeholders}) "
+                "AND a.state='COMPLETED' AND a.evidence_json IS NOT NULL "
+                "ORDER BY a.created_at,aa.logical_name",
+                (task_id, *sorted(allowed_shas)),
+            ).fetchall()
+
+        admission_root = (base._root(self.hermes_root) / "fabric" / "admitted").resolve()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                candidate = Path(str(row["admission_path"]))
+                if candidate.is_symlink():
+                    continue
+                resolved = candidate.resolve(strict=True)
+                if not resolved.is_relative_to(admission_root) or not resolved.is_file():
+                    continue
+                expected_size = int(row["size_bytes"])
+                if resolved.stat().st_size != expected_size:
+                    continue
+                digest = hashlib.sha256()
+                with resolved.open("rb") as fh:
+                    while chunk := fh.read(1024 * 1024):
+                        digest.update(chunk)
+                if digest.hexdigest() != row["sha256"]:
+                    continue
+            except (OSError, TypeError, ValueError):
+                continue
+            out.append(
+                {
+                    "logical_name": row["logical_name"],
+                    "size_bytes": expected_size,
+                    "sha256": row["sha256"],
+                    "media_type": row["media_type"],
+                    "active_content": bool(row["active_content"]),
+                    "attempt_id": row["attempt_id"],
+                    "dispatch_id": row["dispatch_id"],
+                    "provenance": "coordinator_verified_artifact",
+                }
+            )
+        return out
+
 
 class AutoRouter(router.AutoRouter):
     """Unlock only remote G4-B bridge exclusions proven by live G4-C features."""

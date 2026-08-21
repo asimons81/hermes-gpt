@@ -2435,6 +2435,31 @@ class FabricBackend:
             refresh=False,
         )
 
+    def observed_artifacts(
+        self,
+        task_id: str,
+        *,
+        contract_sha256: str,
+        hermes_root: Path | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return coordinator-verified admitted artifact metadata, when supported.
+
+        The base G4-A coordinator has no artifact admission store. G4-C installs
+        an enhanced coordinator that exposes this read-only evidence surface.
+        Keeping the adapter here lets Work Contract validation consume admitted
+        artifacts without importing Fabric internals or materializing active
+        remote content into an allowed workspace.
+        """
+        coordinator = self.coordinator_factory(hermes_root=hermes_root)
+        observer = getattr(coordinator, "observed_artifacts", None)
+        if not callable(observer):
+            return []
+        try:
+            value = observer(task_id, contract_sha256=contract_sha256)
+        except FabricError:
+            return []
+        return value if isinstance(value, list) else []
+
     def cancel(self, task_id: str, *, hermes_root: Path | None = None) -> dict[str, Any]:
         try:
             return self.coordinator_factory(hermes_root=hermes_root).cancel(task_id)

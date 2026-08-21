@@ -600,13 +600,56 @@ def _check_run_state(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
     }
 
 
-def _check_artifacts(contract: dict[str, Any]) -> dict[str, Any]:
+def _admitted_artifact_evidence(
+    contract: dict[str, Any],
+    contract_sha256: str,
+    hermes_root: Path,
+) -> list[dict[str, Any]]:
+    """Read coordinator-verified remote artifact metadata from capable runners.
+
+    This is intentionally metadata-only. Active remote content remains in the
+    Fabric admission store and is never copied into the Work Contract workspace
+    merely to make the artifact check pass.
+    """
+    task_id = str(contract.get("task_id") or "")
+    try:
+        backend = op_runners.get_backend("fabric")
+    except LookupError:
+        return []
+    observer = getattr(backend, "observed_artifacts", None)
+    if not callable(observer):
+        return []
+    try:
+        value = observer(
+            task_id,
+            contract_sha256=contract_sha256,
+            hermes_root=hermes_root,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _check_artifacts(
+    contract: dict[str, Any],
+    contract_sha256: str,
+    hermes_root: Path,
+) -> dict[str, Any]:
     workspaces = [Path(w) for w in contract["allowed_scope"]["workspaces"]]
     artifacts = contract["expected_artifacts"]
     if not artifacts:
         return {"kind": "artifacts", "status": "PASS", "detail": "no artifacts required"}
     if not workspaces:
         return {"kind": "artifacts", "status": "UNVERIFIED", "detail": "no allowed workspace"}
+
+    admitted = _admitted_artifact_evidence(contract, contract_sha256, hermes_root)
+    admitted_by_name: dict[str, list[dict[str, Any]]] = {}
+    for item in admitted:
+        name = item.get("logical_name")
+        if isinstance(name, str):
+            admitted_by_name.setdefault(name, []).append(item)
 
     missing: list[str] = []
     evidence: list[dict[str, Any]] = []
@@ -629,6 +672,27 @@ def _check_artifacts(contract: dict[str, Any]) -> dict[str, Any]:
                 continue
         if found is not None:
             evidence.append({"basename": found.name, "size": found.stat().st_size})
+            continue
+
+        remote = next(
+            (
+                item
+                for item in admitted_by_name.get(art["path"], [])
+                if isinstance(item.get("size_bytes"), int)
+                and item["size_bytes"] >= art["min_bytes"]
+                and item.get("provenance") == "coordinator_verified_artifact"
+            ),
+            None,
+        )
+        if remote is not None:
+            evidence.append(
+                {
+                    "basename": Path(art["path"]).name,
+                    "size": remote["size_bytes"],
+                    "sha256": remote.get("sha256", ""),
+                    "provenance": "coordinator_verified_artifact",
+                }
+            )
         else:
             missing.append(art["path"])
     if missing:
@@ -1014,7 +1078,7 @@ def _validate_impl(contract: dict[str, Any], sha: str, runner: Callable[..., tup
     """Run the six checks and aggregate a deterministic verdict (D7)."""
     checks: list[dict[str, Any]] = [
         _check_run_state(contract, hermes_root),
-        _check_artifacts(contract),
+        _check_artifacts(contract, sha, hermes_root),
         _check_tests(contract, runner, hermes_root),
         _check_review(contract, sha, hermes_root),
         _check_forbidden(contract, hermes_root),
