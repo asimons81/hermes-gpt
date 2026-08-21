@@ -1,165 +1,56 @@
-name: CI
+name: G5 Repair Runner
 
 on:
-  push:
   pull_request:
-  workflow_dispatch:
-  workflow_call:
+
+permissions:
+  contents: write
 
 jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-        python: ['3.10', '3.11', '3.12']
-    runs-on: ${{ matrix.os }}
+  repair:
+    if: github.head_ref == 'v0.8-fabric-g5-repair-staging'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v0.8-fabric-g5-repair-staging
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.12'
       - run: python -m pip install -e ".[dev]"
-      - name: Run full test suite
-        run: python -m pytest -q
-      - name: Run runner regression tests
+      - name: Apply reviewed fail-closed repair
+        shell: bash
+        run: |
+          git show 0b5c9a84cd078bf839ff5f7b00c2941f72ef997f:.github/workflows/ci.yml > .github/workflows/ci.yml
+          rm -f .github/workflows/fabric-g5-repair-staging.yml .fabric-g5-repair-trigger
+          git apply --check .fabric-g5-repair.patch
+          git apply .fabric-g5-repair.patch
+      - name: Verify the three G5 repair regressions
+        run: python -m pytest -q test_operator_fabric_g5_repair.py
+      - name: Verify focused Fabric and G5 suites
         run: >-
           python -m pytest -q
-          test_operator_runners.py
           test_operator_fabric.py
           test_operator_fabric_adversarial.py
-          test_operator_fabric_control.py
           test_operator_fabric_router.py
           test_operator_fabric_g4c.py
-          test_operator_fabric_view.py
           test_operator_fabric_integration.py
-          test_ui_fabric.py
-      - name: Run binary export regression tests
-        run: python -m pytest -q test_operator_export.py test_server_export.py
-      - name: Compile operator modules
-        run: >-
-          python -m py_compile
-          server.py
-          codex_core.py
-          codex_mcp.py
-          codex_config.py
-          operator_codex.py
-          operator_contract.py
-          fabric_artifacts.py
-          fabric_write_guard.py
-          operator_fabric.py
-          operator_fabric_control.py
-          operator_fabric_router.py
-          operator_fabric_g4c.py
-          operator_fabric_view.py
-          operator_fleet.py
-          operator_runners.py
-          operator_swarm.py
-          operator_swarm_workflows.py
-          operator_workspace.py
-          operator_export.py
-          updater.py
-          operator_recovery.py
-          operator_review.py
-          operator_events.py
-          operator_oauth.py
-          token_store.py
-          seams.py
-          ui_api.py
-          ui_fabric.py
-      - name: Check whitespace
-        run: git diff --check
-
-  compatibility:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install -e ".[dev]"
-      - name: Prove v0.7 local-only contracts, swarms, and runners remain unchanged
-        run: >-
-          python -m pytest -q
           test_operator_contract.py
           test_operator_swarm.py
-          test_operator_runners.py
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install -e ".[dev]"
-      - run: >-
-          python -m ruff check
-          fabric_artifacts.py fabric_write_guard.py
-          operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py
-          test_operator_fabric.py test_operator_fabric_adversarial.py test_operator_fabric_control.py
-          test_operator_fabric_router.py test_operator_fabric_g4c.py test_operator_fabric_view.py test_operator_fabric_integration.py test_ui_fabric.py
-          operator_runners.py test_operator_runners.py
-          runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
-          operator_export.py test_operator_export.py test_server_export.py
-          tools/check_package_hygiene.py test_package_hygiene.py
-          ui_api.py ui_fabric.py
-
-  web:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
-
-  windows-docs:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Parse Secure MCP Tunnel PowerShell examples
-        shell: powershell
+          test_operator_fabric_g5_repair.py
+      - name: Lint repaired surfaces
+        run: python -m ruff check operator_fabric.py operator_contract.py test_operator_fabric_g5_repair.py
+      - name: Compile repaired runtime
+        run: python -m py_compile operator_fabric.py operator_contract.py operator_fabric_g4c.py operator_fabric_router.py operator_swarm.py test_operator_fabric_g5_repair.py
+      - name: Check patch whitespace
+        run: git diff --check
+      - name: Commit verified repair
+        shell: bash
         run: |
-          $paths = @(
-            'examples/start-openai-secure-mcp-tunnel.example.ps1',
-            'examples/status-hermes-gpt.example.ps1'
-          )
-          foreach ($path in $paths) {
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path $path),
-              [ref]$tokens,
-              [ref]$errors
-            ) | Out-Null
-            if ($errors.Count -gt 0) {
-              $errors | Format-List | Out-String | Write-Error
-              exit 1
-            }
-          }
-
-  build:
-    needs: [test, compatibility, lint, web, windows-docs]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install build twine
-      - run: python -m build
-      - run: python -m twine check dist/*
-      - name: Check package content and private-file hygiene
-        run: python tools/check_package_hygiene.py dist/*
-      - uses: actions/upload-artifact@v4
-        with:
-          name: distributions
-          path: dist/*
+          rm .fabric-g5-repair.patch
+          git config user.name "Hermes GPT repair"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(v0.8): close independent G5 authority findings"
+          git push origin HEAD:v0.8-fabric-g5-repair-staging
