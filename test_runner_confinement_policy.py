@@ -73,6 +73,37 @@ def test_read_only_pi_rejected_without_confinement(tmp_path: Path, monkeypatch: 
         runners._pi_tools(raw_default)
 
 
+def test_worker_pi_read_only_unusable_real_confinement_refuses_before_popen(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Exercise the production _worker_pi -> _pi_tools -> probe wiring."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    root = tmp_path / "hermes"
+    root.mkdir()
+    _enable_workspace(monkeypatch, ws)
+    monkeypatch.setenv(confinement.CONFINEMENT_ENABLE_ENV, "1")
+    # /bin/false is discoverable but cannot satisfy the real bounded posture
+    # probe.  Do not replace confinement_available, _probe_confinement,
+    # wrap_argv, _pi_tools, or _worker_pi in this regression.
+    monkeypatch.setattr(confinement, "confinement_tool", lambda: "/bin/false")
+    launched = False
+
+    def must_not_launch(*_args, **_kwargs):
+        nonlocal launched
+        launched = True
+        raise AssertionError("unconfined Pi child reached process launch")
+
+    monkeypatch.setattr(runners, "_popen_process_group", must_not_launch)
+    raw = _contract(ws, backend="pi_rpc", options={"tools": "read"})
+    raw["authorization"] = {"class": "read_only", "approved": True}
+
+    with pytest.raises(PermissionError, match="read-only.*confinement"):
+        runners._worker_pi("/bin/true", raw, 1, tmp_path / "log.jsonl", root)
+    assert launched is False
+
+
 def test_read_only_default_still_rejects_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _confinement_active(monkeypatch, True)
     raw = _contract(tmp_path, backend="pi_rpc", options={"tools": "read,bash"})

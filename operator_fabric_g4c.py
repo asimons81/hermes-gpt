@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import sqlite3
 import ssl
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -153,8 +154,18 @@ class FabricPeerService(base.FabricPeerService):
         self.claims = write_guard.WriteClaims(self.db_path)
         self.unit_manager = unit_manager or SystemdUserUnitManager()
         self.write_dispatch_fn = write_dispatch_fn or self._dispatch_contained_write
+        self._invocations_in_flight: dict[str, object] = {}
+        self._invocations_in_flight_lock = threading.Lock()
         snapshot_root = artifact_root or base._root(self.hermes_root) / "fabric" / "artifacts"
         self.artifact_store = artifacts.PeerArtifactStore(self.db_path, snapshot_root)
+
+    def _invocation_in_flight(self, attempt_id: str) -> bool:
+        with self._invocations_in_flight_lock:
+            return attempt_id in self._invocations_in_flight
+
+    def _owns_invocation(self, attempt_id: str, marker: object) -> bool:
+        with self._invocations_in_flight_lock:
+            return self._invocations_in_flight.get(attempt_id) is marker
 
     def capabilities(self, policy: FabricPeerPolicy) -> dict[str, Any]:
         payload = super().capabilities(policy)
@@ -334,6 +345,31 @@ class FabricPeerService(base.FabricPeerService):
         principal: str,
         policy: FabricPeerPolicy,
     ) -> dict[str, Any]:
+        invocation_marker = object()
+        invocation_markers_owned: set[str] = set()
+        try:
+            return self._accept_impl(
+                request,
+                principal,
+                policy,
+                invocation_marker,
+                invocation_markers_owned,
+            )
+        finally:
+            if invocation_markers_owned:
+                with self._invocations_in_flight_lock:
+                    for attempt_id in invocation_markers_owned:
+                        if self._invocations_in_flight.get(attempt_id) is invocation_marker:
+                            del self._invocations_in_flight[attempt_id]
+
+    def _accept_impl(
+        self,
+        request: dict[str, Any],
+        principal: str,
+        policy: FabricPeerPolicy,
+        invocation_marker: object,
+        invocation_markers_owned: set[str],
+    ) -> dict[str, Any]:
         data = base._closed(request["data"], required={"envelope"}, name="accept data")
         envelope = _validate_envelope(data["envelope"])
         if request.get("dispatch_id") and request["dispatch_id"] != envelope["dispatch_id"]:
@@ -424,6 +460,14 @@ class FabricPeerService(base.FabricPeerService):
                     envelope.get("retry_parent_attempt_id"),
                 ),
             )
+            if is_write:
+                # Install the process-local marker before ACCEPTED can become
+                # visible outside this transaction.  Only this inserting
+                # invocation owns the token and may clear it in _accept's
+                # finally block.
+                with self._invocations_in_flight_lock:
+                    self._invocations_in_flight[envelope["attempt_id"]] = invocation_marker
+                invocation_markers_owned.add(envelope["attempt_id"])
 
         try:
             prestart = self.policy_loader()
@@ -447,26 +491,208 @@ class FabricPeerService(base.FabricPeerService):
             if is_write:
                 self._write_backend_eligible(envelope["remote_backend"])
         except (FabricError, LookupError) as exc:
-            with base._connect(self.db_path) as db:
-                db.execute(
-                    "UPDATE attempts SET state='BLOCKED',updated_at=? WHERE attempt_id=?",
-                    (base._now(), envelope["attempt_id"]),
+            with self._lock, base._connect(self.db_path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute(
+                    "SELECT state FROM attempts WHERE attempt_id=?",
+                    (envelope["attempt_id"],),
+                ).fetchone()
+                terminal_state = (
+                    "CANCELLED"
+                    if current is not None
+                    and current["state"] == "PRELAUNCH_CANCEL_REQUESTED"
+                    else "BLOCKED"
+                )
+                changed = db.execute(
+                    "UPDATE attempts SET state=?,updated_at=?"
+                    " WHERE attempt_id=?"
+                    " AND state IN ('ACCEPTED','PRELAUNCH_CANCEL_REQUESTED')",
+                    (terminal_state, base._now(), envelope["attempt_id"]),
                 )
             row = self._row(envelope["dispatch_id"], envelope["attempt_id"])
-            if is_write:
-                self.claims.release(row, proof="prestart_blocked_no_execution")
+            if is_write and changed.rowcount:
+                self.claims.release(
+                    row,
+                    proof=(
+                        "prelaunch_cancelled_no_execution"
+                        if terminal_state == "CANCELLED"
+                        else "prestart_blocked_no_execution"
+                    ),
+                )
             if isinstance(exc, FabricError):
                 raise
             raise FabricError("FABRIC_RUNNER_UNAVAILABLE", "remote runner is not registered") from exc
 
         local_contract = self._local_contract(envelope, prestart_mapping)
+        state_persisted = False
         if is_write:
-            result = self.write_dispatch_fn(
-                local_contract,
-                backend_name=envelope["remote_backend"],
-                unit_id=unit_id,
-                timeout=30,
+            # ACCEPTED is the only prelaunch-cancellable state.  Commit launch
+            # permission durably while serialized with cancellation, then use
+            # one short final fence check before calling external code.  Never
+            # hold the process lock or a SQLite transaction across dispatch.
+            with self._lock, base._connect(self.db_path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                launch_row = db.execute(
+                    "SELECT * FROM attempts WHERE attempt_id=?",
+                    (envelope["attempt_id"],),
+                ).fetchone()
+                claim = db.execute(
+                    "SELECT * FROM write_claims WHERE conflict_domain=?",
+                    (mapping.conflict_domain,),
+                ).fetchone()
+                owns_claim = bool(
+                    launch_row is not None
+                    and launch_row["state"] == "ACCEPTED"
+                    and claim is not None
+                    and claim["state"] == "ACTIVE"
+                    and claim["attempt_id"] == envelope["attempt_id"]
+                    and int(claim["epoch"] or 0) == int(launch_row["write_epoch"] or 0)
+                    and self._owns_invocation(envelope["attempt_id"], invocation_marker)
+                )
+                if owns_claim:
+                    db.execute(
+                        "UPDATE attempts SET state='LAUNCHING',updated_at=?"
+                        " WHERE attempt_id=? AND state='ACCEPTED'",
+                        (base._now(), envelope["attempt_id"]),
+                    )
+            with self._lock:
+                owns_invocation = self._owns_invocation(
+                    envelope["attempt_id"], invocation_marker
+                )
+                with base._connect(self.db_path) as db:
+                    launch_row = db.execute(
+                        "SELECT * FROM attempts WHERE attempt_id=?",
+                        (envelope["attempt_id"],),
+                    ).fetchone()
+                    claim = db.execute(
+                        "SELECT * FROM write_claims WHERE conflict_domain=?",
+                        (mapping.conflict_domain,),
+                    ).fetchone()
+                    owns_launch_fence = bool(
+                        owns_claim
+                        and launch_row is not None
+                        and launch_row["state"] in {"LAUNCHING", "CANCEL_REQUESTED"}
+                        and owns_invocation
+                        and claim is not None
+                        and claim["state"] == "ACTIVE"
+                        and claim["attempt_id"] == envelope["attempt_id"]
+                        and int(claim["epoch"] or 0)
+                        == int(launch_row["write_epoch"] or 0)
+                    )
+            if owns_launch_fence:
+                try:
+                    result = self.write_dispatch_fn(
+                        local_contract,
+                        backend_name=envelope["remote_backend"],
+                        unit_id=unit_id,
+                        timeout=30,
+                    )
+                except Exception:
+                    # Once the external launcher has been invoked, an exception
+                    # cannot prove that no write execution occurred. A unit that
+                    # is already quiescent may still have run and mutated state.
+                    # Preserve durable ownership and force reconciliation.
+                    result = {
+                        "success": False,
+                        "changed": False,
+                        "ambiguous": True,
+                        "code": "FABRIC_WRITE_LAUNCH_EXCEPTION_AMBIGUOUS",
+                    }
+            else:
+                result = {
+                    "success": False,
+                    "changed": False,
+                    "code": "FABRIC_LAUNCH_FENCE_REVOKED",
+                }
+            if not isinstance(result, dict):
+                result = {"success": False, "code": "FABRIC_RUNNER_INVALID_RESULT"}
+            launch_state = (
+                "LOST_AMBIGUOUS"
+                if result.get("ambiguous")
+                else "RUNNING"
+                if result.get("success")
+                else "FAILED"
             )
+            release_cancelled_launch = False
+            with base._connect(self.db_path) as db:
+                persisted_state = launch_state
+                changed = db.execute(
+                    "UPDATE attempts SET state=CASE WHEN state='CANCEL_REQUESTED'"
+                    " THEN state ELSE ? END,dispatch_result_json=?,policy_sha256=?,updated_at=?"
+                    " WHERE attempt_id=? AND state IN ('LAUNCHING','CANCEL_REQUESTED')",
+                    (
+                        persisted_state,
+                        canonical_json(base._bounded_json(result, field="dispatch_result")),
+                        prestart.digest,
+                        base._now(),
+                        envelope["attempt_id"],
+                    ),
+                )
+                if changed.rowcount:
+                    current = db.execute(
+                        "SELECT state FROM attempts WHERE attempt_id=?",
+                        (envelope["attempt_id"],),
+                    ).fetchone()
+                    persisted_state = str(current["state"])
+                if not changed.rowcount:
+                    current = db.execute(
+                        "SELECT state FROM attempts WHERE attempt_id=?",
+                        (envelope["attempt_id"],),
+                    ).fetchone()
+                    cancel_during_launch = bool(
+                        current is not None
+                        and current["state"] == "PRELAUNCH_CANCEL_REQUESTED"
+                    )
+                    if cancel_during_launch and (
+                        result.get("success") or result.get("ambiguous")
+                    ):
+                        persisted_state = "CANCEL_REQUESTED"
+                        db.execute(
+                            "UPDATE attempts SET state='CANCEL_REQUESTED',"
+                            "dispatch_result_json=?,policy_sha256=?,updated_at=?"
+                            " WHERE attempt_id=? AND state='PRELAUNCH_CANCEL_REQUESTED'",
+                            (
+                                canonical_json(
+                                    base._bounded_json(result, field="dispatch_result")
+                                ),
+                                prestart.digest,
+                                base._now(),
+                                envelope["attempt_id"],
+                            ),
+                        )
+                    elif cancel_during_launch:
+                        if result.get("code") == "FABRIC_LAUNCH_FENCE_REVOKED":
+                            persisted_state = "CANCELLED"
+                            release_cancelled_launch = True
+                        else:
+                            persisted_state = "LOST_AMBIGUOUS"
+                        db.execute(
+                            "UPDATE attempts SET state=?,dispatch_result_json=?,"
+                            "policy_sha256=?,updated_at=?"
+                            " WHERE attempt_id=? AND state='PRELAUNCH_CANCEL_REQUESTED'",
+                            (
+                                persisted_state,
+                                canonical_json(
+                                    base._bounded_json(result, field="dispatch_result")
+                                ),
+                                prestart.digest,
+                                base._now(),
+                                envelope["attempt_id"],
+                            ),
+                        )
+                    elif current is not None:
+                        persisted_state = str(current["state"])
+            if release_cancelled_launch:
+                self.claims.release(
+                    self._row(envelope["dispatch_id"], envelope["attempt_id"]),
+                    proof=(
+                        "launch_fence_revoked_cancelled_no_execution"
+                        if result.get("code") == "FABRIC_LAUNCH_FENCE_REVOKED"
+                        else "cancelled_launch_failure_unit_quiescent"
+                    ),
+                )
+            launch_state = persisted_state
+            state_persisted = True
         else:
             result = self.dispatch_fn(local_contract, timeout=30)
         if not isinstance(result, dict):
@@ -478,30 +704,53 @@ class FabricPeerService(base.FabricPeerService):
             if result.get("success")
             else "FAILED"
         )
-        with base._connect(self.db_path) as db:
-            db.execute(
-                "UPDATE attempts SET state=?,dispatch_result_json=?,policy_sha256=?,updated_at=?"
-                " WHERE attempt_id=?",
-                (
-                    state,
-                    canonical_json(base._bounded_json(result, field="dispatch_result")),
-                    prestart.digest,
-                    base._now(),
-                    envelope["attempt_id"],
-                ),
-            )
+        if is_write and state_persisted:
+            state = launch_state
+        if not state_persisted:
+            with base._connect(self.db_path) as db:
+                db.execute(
+                    "UPDATE attempts SET state=?,dispatch_result_json=?,policy_sha256=?,updated_at=?"
+                    " WHERE attempt_id=?",
+                    (
+                        state,
+                        canonical_json(base._bounded_json(result, field="dispatch_result")),
+                        prestart.digest,
+                        base._now(),
+                        envelope["attempt_id"],
+                    ),
+                )
         row = self._row(envelope["dispatch_id"], envelope["attempt_id"])
-        if is_write and state == "FAILED":
-            unit_state = self.unit_manager.inspect(unit_id)
+        if is_write and state == "CANCEL_REQUESTED":
+            unit_state = self.unit_manager.stop(unit_id)
             if unit_state.get("quiescent"):
-                self.claims.release(row, proof="known_start_failure_unit_quiescent")
-            else:
-                state = "LOST_AMBIGUOUS"
+                cancel_result = self.cancel_fn(row["remote_backend"], row["local_task_id"])
+                terminal = _terminal_state(base._latest_run(self.observed_fn(row["local_task_id"])))
+                state = terminal or "CANCELLED"
+                self.claims.release(row, proof="cancel_execution_unit_quiescent")
                 with base._connect(self.db_path) as db:
                     db.execute(
                         "UPDATE attempts SET state=?,updated_at=? WHERE attempt_id=?",
                         (state, base._now(), envelope["attempt_id"]),
                     )
+                result = dict(result)
+                result["cancel_changed"] = bool(cancel_result.get("changed", True))
+        if is_write and state == "FAILED":
+            if result.get("code") == "FABRIC_LAUNCH_FENCE_REVOKED":
+                # The transactional ownership check proved launch was never
+                # invoked.  Release only now, after the accepting call has
+                # observed and persisted the revoked fence.
+                self.claims.release(row, proof="launch_fence_revoked_no_execution")
+            else:
+                unit_state = self.unit_manager.inspect(unit_id)
+                if unit_state.get("quiescent"):
+                    self.claims.release(row, proof="known_start_failure_unit_quiescent")
+                else:
+                    state = "LOST_AMBIGUOUS"
+                    with base._connect(self.db_path) as db:
+                        db.execute(
+                            "UPDATE attempts SET state=?,updated_at=? WHERE attempt_id=?",
+                            (state, base._now(), envelope["attempt_id"]),
+                        )
         return base._response(
             "accept",
             ok=bool(result.get("success")),
@@ -520,7 +769,11 @@ class FabricPeerService(base.FabricPeerService):
                 "write_claim_state": self.claims.state(row),
                 "execution_unit_state": _bounded_peer_observation(
                     "execution_unit_state",
-                    self.unit_manager.inspect(str(row["execution_unit_id"] or "")).get("state"),
+                    "unknown"
+                    if result.get("code") == "FABRIC_LAUNCH_FENCE_REVOKED"
+                    else self.unit_manager.inspect(
+                        str(row["execution_unit_id"] or "")
+                    ).get("state"),
                 ),
             },
         )
@@ -535,6 +788,128 @@ class FabricPeerService(base.FabricPeerService):
         row = self._row(dispatch_id, attempt_id)
         if row["authorization_class"] not in write_guard.WRITE_AUTH:
             return super()._status(dispatch_id, attempt_id, reconcile=reconcile)
+        if row["state"] == "ACCEPTED":
+            invocation_in_flight = self._invocation_in_flight(attempt_id)
+            if reconcile and not invocation_in_flight:
+                proof = "abandoned_accepted_prelaunch_no_execution"
+                with self._lock, base._connect(self.db_path) as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    current = db.execute(
+                        "SELECT * FROM attempts WHERE attempt_id=? AND dispatch_id=?",
+                        (attempt_id, dispatch_id),
+                    ).fetchone()
+                    if current is not None and current["state"] == "ACCEPTED":
+                        # Recheck while serialized with insertion: launch is
+                        # invoked only after durable LAUNCHING, so absence of
+                        # this invocation marker positively proves that an
+                        # ACCEPTED attempt never reached external execution.
+                        if not self._invocation_in_flight(attempt_id):
+                            db.execute(
+                                "UPDATE attempts SET state='BLOCKED',updated_at=?"
+                                " WHERE attempt_id=? AND state='ACCEPTED'",
+                                (base._now(), attempt_id),
+                            )
+                            db.execute(
+                                "UPDATE write_claims SET state='RELEASED',released_at=?,"
+                                "release_proof=? WHERE conflict_domain=? AND attempt_id=?"
+                                " AND epoch=? AND state='ACTIVE'",
+                                (
+                                    base._now(),
+                                    proof,
+                                    current["conflict_domain"],
+                                    current["attempt_id"],
+                                    int(current["write_epoch"]),
+                                ),
+                            )
+                row = self._row(dispatch_id, attempt_id)
+            return {
+                "dispatch_id": dispatch_id,
+                "attempt_id": attempt_id,
+                "state": row["state"],
+                "local_task_id": row["local_task_id"],
+                "policy_sha256": row["policy_sha256"],
+                "write_epoch": row["write_epoch"],
+                "write_claim_state": self.claims.state(row),
+                "execution_unit_state": _bounded_peer_observation(
+                    "execution_unit_state",
+                    self.unit_manager.inspect(str(row["execution_unit_id"] or "")).get("state"),
+                ),
+            }
+        if row["state"] == "CANCEL_REQUESTED" and self._invocation_in_flight(attempt_id):
+            unit = self.unit_manager.inspect(str(row["execution_unit_id"] or ""))
+            return {
+                "dispatch_id": dispatch_id,
+                "attempt_id": attempt_id,
+                "state": "CANCEL_REQUESTED",
+                "local_task_id": row["local_task_id"],
+                "policy_sha256": row["policy_sha256"],
+                "write_epoch": row["write_epoch"],
+                "write_claim_state": self.claims.state(row),
+                "execution_unit_state": _bounded_peer_observation(
+                    "execution_unit_state", unit.get("state")
+                ),
+            }
+        if row["state"] in {"LAUNCHING", "PRELAUNCH_CANCEL_REQUESTED"}:
+            unit_id = str(row["execution_unit_id"] or "")
+            run = base._latest_run(self.observed_fn(row["local_task_id"]))
+            terminal = _terminal_state(run)
+            unit = self.unit_manager.inspect(unit_id)
+            invocation_in_flight = self._invocation_in_flight(attempt_id)
+            if invocation_in_flight or (row["state"] == "LAUNCHING" and not reconcile):
+                state = (
+                    "CANCEL_REQUESTED"
+                    if row["state"] == "PRELAUNCH_CANCEL_REQUESTED"
+                    else "LAUNCHING"
+                )
+                return {
+                    "dispatch_id": dispatch_id,
+                    "attempt_id": attempt_id,
+                    "state": state,
+                    "local_task_id": row["local_task_id"],
+                    "policy_sha256": row["policy_sha256"],
+                    "write_epoch": row["write_epoch"],
+                    "write_claim_state": self.claims.state(row),
+                    "execution_unit_state": _bounded_peer_observation(
+                        "execution_unit_state", unit.get("state")
+                    ),
+                }
+            if row["state"] == "PRELAUNCH_CANCEL_REQUESTED" and unit.get("active") and reconcile:
+                unit = self.unit_manager.stop(unit_id)
+            if terminal and unit.get("quiescent"):
+                state = terminal
+                self.claims.release(row, proof="launching_unit_terminal_and_quiescent")
+            elif row["state"] == "PRELAUNCH_CANCEL_REQUESTED" and unit.get("quiescent"):
+                state = "CANCELLED"
+                self.claims.release(row, proof="cancelled_launch_unit_quiescent")
+            elif unit.get("active"):
+                state = (
+                    "CANCEL_REQUESTED"
+                    if row["state"] == "PRELAUNCH_CANCEL_REQUESTED"
+                    else "RUNNING"
+                )
+            else:
+                # A persisted launch fence with neither a durable terminal
+                # outcome nor a provably quiescent cancellation has uncertain
+                # execution history.  Keep the non-expiring claim.
+                state = "LOST_AMBIGUOUS"
+            with base._connect(self.db_path) as db:
+                db.execute(
+                    "UPDATE attempts SET state=?,updated_at=? WHERE attempt_id=?",
+                    (state, base._now(), attempt_id),
+                )
+            refreshed = self._row(dispatch_id, attempt_id)
+            return {
+                "dispatch_id": dispatch_id,
+                "attempt_id": attempt_id,
+                "state": state,
+                "local_task_id": refreshed["local_task_id"],
+                "policy_sha256": refreshed["policy_sha256"],
+                "write_epoch": refreshed["write_epoch"],
+                "write_claim_state": self.claims.state(refreshed),
+                "execution_unit_state": _bounded_peer_observation(
+                    "execution_unit_state", unit.get("state")
+                ),
+            }
         if row["state"] in {"SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED"}:
             return {
                 "dispatch_id": dispatch_id,
@@ -561,7 +936,10 @@ class FabricPeerService(base.FabricPeerService):
         elif unit.get("quiescent"):
             state = "LOST_AMBIGUOUS"
             if reconcile:
-                self.claims.release(row, proof="execution_unit_quiescent_outcome_ambiguous")
+                self.claims.release(
+                    row,
+                    proof="execution_unit_quiescent_without_terminal_observation",
+                )
         elif reconcile:
             state = "LOST_AMBIGUOUS"
         else:
@@ -606,6 +984,76 @@ class FabricPeerService(base.FabricPeerService):
                 "idempotent": True,
                 "write_epoch": row["write_epoch"],
                 "write_claim_state": self.claims.state(row),
+            }
+        if row["state"] in {"ACCEPTED", "LAUNCHING"}:
+            with self._lock:
+                with base._connect(self.db_path) as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    changed = db.execute(
+                        "UPDATE attempts SET state=CASE"
+                        " WHEN state='ACCEPTED' THEN 'PRELAUNCH_CANCEL_REQUESTED'"
+                        " ELSE 'CANCEL_REQUESTED' END,updated_at=?"
+                        " WHERE attempt_id=? AND state IN ('ACCEPTED','LAUNCHING')",
+                        (base._now(), attempt_id),
+                    )
+            if changed.rowcount:
+                refreshed = self._row(dispatch_id, attempt_id)
+                invocation_in_flight = self._invocation_in_flight(attempt_id)
+                if (
+                    refreshed["state"] == "CANCEL_REQUESTED"
+                    and not invocation_in_flight
+                ):
+                    row = refreshed
+                else:
+                    return {
+                        "dispatch_id": dispatch_id,
+                        "attempt_id": attempt_id,
+                        "state": "CANCEL_REQUESTED",
+                        "changed": True,
+                        "write_epoch": refreshed["write_epoch"],
+                        "write_claim_state": self.claims.state(refreshed),
+                        "execution_unit_state": _bounded_peer_observation(
+                            "execution_unit_state",
+                            self.unit_manager.inspect(
+                                str(refreshed["execution_unit_id"] or "")
+                            ).get("state"),
+                        ),
+                    }
+            row = self._row(dispatch_id, attempt_id)
+            if row["state"] in {"SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED"}:
+                return {
+                    "dispatch_id": dispatch_id,
+                    "attempt_id": attempt_id,
+                    "state": row["state"],
+                    "idempotent": True,
+                    "write_epoch": row["write_epoch"],
+                    "write_claim_state": self.claims.state(row),
+                }
+        if row["state"] == "PRELAUNCH_CANCEL_REQUESTED":
+            return {
+                "dispatch_id": dispatch_id,
+                "attempt_id": attempt_id,
+                "state": "CANCEL_REQUESTED",
+                "changed": False,
+                "write_epoch": row["write_epoch"],
+                "write_claim_state": self.claims.state(row),
+                "execution_unit_state": _bounded_peer_observation(
+                    "execution_unit_state",
+                    self.unit_manager.inspect(str(row["execution_unit_id"] or "")).get("state"),
+                ),
+            }
+        if row["state"] == "CANCEL_REQUESTED" and self._invocation_in_flight(attempt_id):
+            return {
+                "dispatch_id": dispatch_id,
+                "attempt_id": attempt_id,
+                "state": "CANCEL_REQUESTED",
+                "changed": False,
+                "write_epoch": row["write_epoch"],
+                "write_claim_state": self.claims.state(row),
+                "execution_unit_state": _bounded_peer_observation(
+                    "execution_unit_state",
+                    self.unit_manager.inspect(str(row["execution_unit_id"] or "")).get("state"),
+                ),
             }
         with base._connect(self.db_path) as db:
             db.execute(
