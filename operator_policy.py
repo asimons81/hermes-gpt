@@ -914,14 +914,6 @@ def iter_audit_for_task(task_id: str) -> Iterable[dict[str, Any]]:
         return
 
 
-def audit_for_task(task_id: str, limit: int = 1_000) -> list[dict[str, Any]]:
-    """Return a bounded newest-last view of one task's audit records."""
-    from collections import deque
-
-    bounded_limit = max(1, min(int(limit), 10_000))
-    return list(deque(iter_audit_for_task(task_id), maxlen=bounded_limit))
-
-
 # ---------------------------------------------------------------------------
 # Subprocess helper (shared by cron / gateway / workspace run_test / owner)
 # ---------------------------------------------------------------------------
