@@ -32,6 +32,7 @@ import operator_codex as op_codex
 import operator_fleet as op_fleet
 import operator_session as op_session
 import operator_mission as op_mission
+import operator_mission_runtime as op_mission_runtime
 import operator_contract as op_contract
 import operator_runners as op_runners
 import operator_review as op_review
@@ -1407,6 +1408,14 @@ def hermes_operator_status() -> str:
             "hermes_mission_vault",
             "hermes_mission_usage",
             "hermes_mission_audit",
+            "hermes_mission_create",
+            "hermes_mission_get",
+            "hermes_mission_list",
+            "hermes_mission_update",
+            "hermes_mission_attach",
+            "hermes_mission_reconcile",
+            "hermes_mission_transition",
+            "hermes_mission_approve",
             "hermes_contract_define",
             "hermes_contract_dispatch",
             "hermes_contract_validate",
@@ -1988,6 +1997,75 @@ def hermes_mission_usage(force_refresh: bool = False) -> str:
     return op_mission.hermes_mission_usage_tool(hermes_root=_default_hermes_root(), force_refresh=force_refresh)
 
 
+# --- First-class Mission runtime (v0.9) -----------------------------------
+
+
+def hermes_mission_create(mission_json: str, confirm: bool = False, dry_run: bool = True) -> str:
+    return op_mission_runtime.hermes_mission_create(mission_json, confirm, dry_run, _default_hermes_root())
+
+
+def hermes_mission_get(mission_id: str) -> str:
+    return op_mission_runtime.hermes_mission_get(mission_id, _default_hermes_root())
+
+
+def hermes_mission_list(status: str = "", limit: int = 50) -> str:
+    return op_mission_runtime.hermes_mission_list(status, limit, _default_hermes_root())
+
+
+def hermes_mission_update(mission_id: str, patch_json: str, confirm: bool = False, dry_run: bool = True) -> str:
+    return op_mission_runtime.hermes_mission_update(mission_id, patch_json, confirm, dry_run, _default_hermes_root())
+
+
+def hermes_mission_attach(
+    mission_id: str,
+    kind: str,
+    ref: str,
+    relationship: str = "contains",
+    state: str = "unknown",
+    evidence_ref: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    return op_mission_runtime.hermes_mission_attach(
+        mission_id,
+        kind,
+        ref,
+        relationship,
+        state,
+        evidence_ref,
+        confirm,
+        dry_run,
+        _default_hermes_root(),
+    )
+
+
+def hermes_mission_reconcile(mission_id: str, confirm: bool = False, dry_run: bool = True) -> str:
+    return op_mission_runtime.hermes_mission_reconcile(mission_id, confirm, dry_run, _default_hermes_root())
+
+
+def hermes_mission_transition(
+    mission_id: str,
+    status: str,
+    reason: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    return op_mission_runtime.hermes_mission_transition(
+        mission_id, status, reason, confirm, dry_run, _default_hermes_root()
+    )
+
+
+def hermes_mission_approve(
+    mission_id: str,
+    approval_reference: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    return op_mission_runtime.hermes_mission_approve(
+        mission_id, approval_reference, confirm, dry_run, _default_hermes_root()
+    )
+
+
 # --- Work Contracts (v0.6 M1) ----------------------------------------------
 
 
@@ -2410,6 +2488,21 @@ def register_tools(server: FastMCP) -> None:
         hermes_mission_audit,
     ):
         server.add_tool(_mission_tool, meta=tool_meta())
+
+    # First-class durable Mission runtime (v0.9). Authority is enforced by
+    # operator_mission_runtime; list/get are read-only, mutations are
+    # workspace/direct and final approval is Owner-gated.
+    for _mission_runtime_tool in (
+        hermes_mission_create,
+        hermes_mission_get,
+        hermes_mission_list,
+        hermes_mission_update,
+        hermes_mission_attach,
+        hermes_mission_reconcile,
+        hermes_mission_transition,
+        hermes_mission_approve,
+    ):
+        server.add_tool(_mission_runtime_tool, meta=tool_meta())
 
     # Event history (v0.7 S4): read-only normalized timeline over durable
     # stores. Registered unconditionally; each tool enforces the per-client
