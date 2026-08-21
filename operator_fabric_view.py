@@ -200,6 +200,11 @@ def _sanitize_exclusion(value: Any) -> dict[str, str] | None:
     return {"code": code, "detail": _safe_text(value.get("detail"), 240)}
 
 
+def _optional_bool(value: dict[str, Any], key: str) -> bool | None:
+    item = value.get(key)
+    return item if isinstance(item, bool) else None
+
+
 def _sanitize_candidate(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -219,11 +224,12 @@ def _sanitize_candidate(value: Any) -> dict[str, Any] | None:
     return {
         "node": _safe_token(value.get("node"), 64),
         "backend": _safe_token(value.get("backend"), 64),
-        "remote": bool(value.get("remote")),
-        "healthy": bool(value.get("healthy")),
-        "capability_fresh": bool(value.get("capability_fresh")),
+        "transport_backend": _safe_token(value.get("transport_backend"), 64),
+        "remote": _optional_bool(value, "remote"),
+        "healthy": _optional_bool(value, "healthy"),
+        "capability_fresh": _optional_bool(value, "capability_fresh"),
         "authority_ceiling": _safe_token(value.get("authority_ceiling"), 32),
-        "eligible": bool(value.get("eligible")),
+        "eligible": _optional_bool(value, "eligible"),
         "exclusions": exclusions,
         "rank": rank,
     }

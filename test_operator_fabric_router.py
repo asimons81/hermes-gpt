@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -166,6 +167,11 @@ def test_fresh_gpu_remote_can_win_specialized_hardware_rank(tmp_path, monkeypatc
     )
     assert decision["selected"]["node"] == "node-a"
     assert decision["selected"]["backend"] == "pi_rpc"
+    assert decision["selected"]["healthy"] is True
+    assert decision["selected"]["capability_fresh"] is True
+    assert decision["selected"]["authority_ceiling"] == "high_impact"
+    assert decision["selected"]["eligible"] is True
+    assert decision["selected"]["exclusions"] == []
 
 
 def test_stale_remote_manifest_fails_closed(tmp_path, monkeypatch):
@@ -346,7 +352,14 @@ def test_auto_backend_dispatches_only_the_selected_concrete_contract(tmp_path, m
     assert captured[0][0]["authorization"] == contract(tmp_path)["authorization"]
     journal = tmp_path / "fabric" / "routing-decisions.jsonl"
     assert journal.is_file()
-    assert "objective" not in journal.read_text(encoding="utf-8")
+    journal_text = journal.read_text(encoding="utf-8")
+    assert "objective" not in journal_text
+    receipt = json.loads(journal_text.splitlines()[-1])
+    assert receipt["selected"]["healthy"] is True
+    assert receipt["selected"]["capability_fresh"] is True
+    assert receipt["selected"]["authority_ceiling"] == "high_impact"
+    assert receipt["selected"]["eligible"] is True
+    assert receipt["selected"]["exclusions"] == []
 
 
 def test_auto_requires_unambiguous_assigned_agent(tmp_path):
