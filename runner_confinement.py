@@ -270,6 +270,7 @@ def _wrap_argv_with_tool(
     tool: str,
     *,
     writable: bool = True,
+    expose_proc: bool = False,
 ) -> list[str]:
     """Build the platform confinement argv with an already-resolved tool."""
     workspace_path = Path(workspace).expanduser().resolve()
@@ -287,10 +288,13 @@ def _wrap_argv_with_tool(
             wrapped += ["--ro-bind-try", source, source]
         # Do not expose host runtime sockets or host temporary files. Pi still
         # has normal writable scratch space, but it is private to the sandbox.
-        # Keep /proc private and empty. A real procfs would expose the child's
-        # own environment via /proc/self/environ, including the selected
-        # provider credential. Pi does not require procfs for RPC operation.
-        wrapped += ["--dir", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run"]
+        # Pi keeps /proc empty because its child environment may contain a
+        # selected provider credential. Backends whose child environment is
+        # explicitly secret-free (currently OpenCode) may request a procfs
+        # mounted inside the already-isolated PID namespace for runtimes such
+        # as Bun that require /proc to initialize.
+        proc_args = ["--proc", "/proc"] if expose_proc else ["--dir", "/proc"]
+        wrapped += [*proc_args, "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run"]
         if runtime_root is not None:
             runtime = str(runtime_root)
             wrapped += ["--ro-bind", runtime, runtime]
@@ -315,7 +319,7 @@ def _wrap_argv_with_tool(
     raise RuntimeError(f"confinement unsupported on platform {sys.platform!r}")
 
 
-def _probe_confinement(tool: str, *, writable: bool = True) -> bool:
+def _probe_confinement(tool: str, *, writable: bool = True, expose_proc: bool = False) -> bool:
     """Prove the backend can enforce the requested workspace boundary.
 
     The probe is bounded and fail-closed. Both postures prove the workspace is
@@ -340,8 +344,9 @@ def _probe_confinement(tool: str, *, writable: bool = True) -> bool:
             escape_link = workspace / "escape-link"
             escape_link.symlink_to(outside)
             dotdot = workspace / ".." / outside.name
+            proc_check = 'test -r /proc/self/status || exit 70; ' if expose_proc else ''
             if writable:
-                probe_script = (
+                probe_script = proc_check + (
                     'cat "$1" >/dev/null 2>&1 || exit 71; '
                     'cat "$2" >/dev/null 2>&1 && exit 72; '
                     'cat "$3" >/dev/null 2>&1 && exit 73; '
@@ -351,7 +356,7 @@ def _probe_confinement(tool: str, *, writable: bool = True) -> bool:
                     'exit 0'
                 )
             else:
-                probe_script = (
+                probe_script = proc_check + (
                     'cat "$1" >/dev/null 2>&1 || exit 76; '
                     'cat "$2" >/dev/null 2>&1 && exit 77; '
                     'cat "$3" >/dev/null 2>&1 && exit 78; '
@@ -370,7 +375,13 @@ def _probe_confinement(tool: str, *, writable: bool = True) -> bool:
                 str(escape_link),
             ]
 
-            wrapped = _wrap_argv_with_tool(argv, workspace, tool, writable=writable)
+            wrapped = _wrap_argv_with_tool(
+                argv,
+                workspace,
+                tool,
+                writable=writable,
+                expose_proc=expose_proc,
+            )
             completed = subprocess.run(
                 wrapped,
                 stdin=subprocess.DEVNULL,
@@ -388,7 +399,7 @@ def _probe_confinement(tool: str, *, writable: bool = True) -> bool:
         return False
 
 
-def confinement_available(*, writable: bool = True) -> bool:
+def confinement_available(*, writable: bool = True, expose_proc: bool = False) -> bool:
     """Return True only when the opted-in confinement posture is usable.
 
     Binary presence alone is not sufficient. Availability requires a bounded
@@ -398,7 +409,7 @@ def confinement_available(*, writable: bool = True) -> bool:
     if not confinement_enabled():
         return False
     tool = confinement_tool()
-    return bool(tool and _probe_confinement(tool, writable=writable))
+    return bool(tool and _probe_confinement(tool, writable=writable, expose_proc=expose_proc))
 
 
 def confine_path(base: Path, candidate: str | Path) -> Path:
@@ -493,7 +504,13 @@ def validate_workspace_boundary(workspace: Path) -> Path:
     return root
 
 
-def wrap_argv(argv: list[str], workspace: Path, *, writable: bool = True) -> list[str]:
+def wrap_argv(
+    argv: list[str],
+    workspace: Path,
+    *,
+    writable: bool = True,
+    expose_proc: bool = False,
+) -> list[str]:
     """Wrap ``argv`` so the child process is confined to ``workspace``.
 
     Linux exposes only required runtime trees read-only, provides private
@@ -509,4 +526,10 @@ def wrap_argv(argv: list[str], workspace: Path, *, writable: bool = True) -> lis
     if tool is None:
         raise RuntimeError("no OS confinement tool available (install bubblewrap or sandbox-exec)")
     validated_workspace = validate_workspace_boundary(workspace)
-    return _wrap_argv_with_tool(argv, validated_workspace, tool, writable=writable)
+    return _wrap_argv_with_tool(
+        argv,
+        validated_workspace,
+        tool,
+        writable=writable,
+        expose_proc=expose_proc,
+    )
