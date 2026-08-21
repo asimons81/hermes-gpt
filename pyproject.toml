@@ -92,6 +92,7 @@ py-modules = [
   "docs/README.md",
   "docs/oauth.md",
   "docs/operator-mode.md",
+  "docs/missions.md",
   "docs/mcp-compatibility.md",
   "docs/file-export.md",
   "docs/openai-secure-mcp-tunnel.md",
