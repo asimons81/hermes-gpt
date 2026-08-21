@@ -489,6 +489,44 @@ def test_false_done_rejected_self_review(hermes_root):
     assert by_kind["review"] == "FAIL"
 
 
+def test_auto_assignee_uses_profile_for_review_distinctness(hermes_root):
+    """Auto placement must not let the stage owner satisfy its own review gate."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="auto",
+        assigned_profile="hermes-dev",
+        authorization={"class": "reversible_write", "approved": True},
+    )
+    _add_review_evidence(c, reviewer="hermes-dev")
+    _, _, sha = contract_mod._parse_contract(json.dumps(c))
+
+    out = contract_mod._check_review(c, sha, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "distinct from the assignee" in out["detail"]
+
+
+def test_remote_assignee_uses_profile_for_review_distinctness(hermes_root):
+    """Remote placement must not let the executing profile review itself."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="rza",
+        assigned_profile="hermes-dev",
+        authorization={"class": "reversible_write", "approved": True},
+    )
+    _add_review_evidence(c, reviewer="hermes-dev")
+    _, _, sha = contract_mod._parse_contract(json.dumps(c))
+
+    out = contract_mod._check_review(c, sha, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "distinct from the assignee" in out["detail"]
+
+
 def test_false_done_rejected_no_review_evidence(hermes_root):
     """Review required but no evidence by a distinct reviewer or human approval."""
     ws = hermes_root.parent / "ws"
@@ -521,6 +559,40 @@ def test_false_done_rejected_forbidden_action(hermes_root):
     by_kind = {ch["kind"]: ch["status"] for ch in out["checks"]}
     assert by_kind["forbidden"] == "FAIL"
     assert any("forbidden" in r for r in out["rejected_reasons"])
+
+
+def test_auto_assignee_uses_profile_for_forbidden_audit_attribution(hermes_root):
+    """Auto placement must attribute task-scoped audit evidence to the stage owner."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="auto",
+        assigned_profile="hermes-dev",
+    )
+    _add_forbidden_evidence(c, profile="hermes-dev")
+
+    out = contract_mod._check_forbidden(c, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "public_publish" in out["detail"]
+
+
+def test_remote_assignee_uses_profile_for_forbidden_audit_attribution(hermes_root):
+    """Remote placement must attribute audit evidence to the executing profile."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        assigned_agent="rza",
+        assigned_profile="hermes-dev",
+    )
+    _add_forbidden_evidence(c, profile="hermes-dev")
+
+    out = contract_mod._check_forbidden(c, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "public_publish" in out["detail"]
 
 
 def test_false_done_rejected_no_observed_run_is_inconclusive(hermes_root):

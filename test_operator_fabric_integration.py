@@ -784,7 +784,7 @@ def test_mixed_local_remote_swarm_fan_out_fan_in_and_owner_approval_compose(tmp_
                 dry_run=False,
                 hermes_root=hermes_root,
             )
-         )
+        )
         assert join_dispatch["success"] is True
         join_advance = json.loads(
             swarm.hermes_swarm_stage_advance(
@@ -817,7 +817,7 @@ def test_mixed_local_remote_swarm_fan_out_fan_in_and_owner_approval_compose(tmp_
                 dry_run=False,
                 hermes_root=hermes_root,
             )
-         )
+        )
         assert denied["success"] is False
         assert denied["code"] == "SWARM_POLICY_DENIED"
 

@@ -710,18 +710,34 @@ def _check_tests(contract: dict[str, Any], runner: Callable[..., tuple[int, str,
     }
 
 
+def _assignee_identity(contract: dict[str, Any]) -> str:
+    """Return the executing profile identity for attribution-sensitive checks.
+
+    ``assigned_agent`` identifies placement: it may be ``auto`` before routing
+    or a Fabric node name after remote placement. ``assigned_profile`` is the
+    authority-bearing actor that actually executes the contract, so review
+    distinctness and audit attribution must use it whenever present. The
+    assigned-agent fallback preserves compatibility with legacy callers that
+    construct an incomplete contract outside the normal parser.
+    """
+    assigned_profile = str(contract.get("assigned_profile") or "").strip()
+    if assigned_profile:
+        return assigned_profile
+    return str(contract["assigned_agent"])
+
+
 def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: Path) -> dict[str, Any]:
     review = contract["review_requirements"]
-    assigned_agent = contract["assigned_agent"]
+    assignee_identity = _assignee_identity(contract)
     if not review["required"]:
         return {"kind": "review", "status": "PASS", "detail": "review not required"}
 
     declared_reviewer = review.get("reviewer") or ""
-    if declared_reviewer and declared_reviewer == assigned_agent:
+    if declared_reviewer and declared_reviewer == assignee_identity:
         return {
             "kind": "review",
             "status": "FAIL",
-            "detail": "self-review: declared reviewer == assigned_agent",
+            "detail": "self-review: declared reviewer == assignee identity",
         }
 
     # Evidence 1: an audit hermes_contract_validate acceptance by a distinct reviewer.
@@ -734,7 +750,7 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
         if verdict not in ("SATISFIED", "accept", "ACCEPT"):
             continue
         reviewer = rec.get("reviewer") or rec.get("profile") or ""
-        if reviewer and reviewer != assigned_agent:
+        if reviewer and reviewer != assignee_identity:
             return {
                 "kind": "review",
                 "status": "PASS",
@@ -753,7 +769,7 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
             if rec.get("verdict") != "SATISFIED":
                 continue
             reviewer = rec.get("reviewer") or ""
-            if reviewer and reviewer != assigned_agent:
+            if reviewer and reviewer != assignee_identity:
                 return {
                     "kind": "review",
                     "status": "PASS",
@@ -764,7 +780,7 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
     # Evidence 2: human approval reference by someone other than the assignee.
     auth = contract.get("authorization") or {}
     approved_by = auth.get("approved_by") or ""
-    if approved_by and approved_by != assigned_agent and auth.get("approval_reference"):
+    if approved_by and approved_by != assignee_identity and auth.get("approval_reference"):
         return {
             "kind": "review",
             "status": "PASS",
@@ -782,7 +798,7 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
     if not forbidden:
         return {"kind": "forbidden", "status": "PASS", "detail": "no forbidden actions declared"}
 
-    assigned_agent = contract["assigned_agent"]
+    assignee_identity = _assignee_identity(contract)
     task_id = contract["task_id"]
     labels = [fa["action"].lower() for fa in forbidden]
     signals: list[dict[str, Any]] = []
@@ -794,7 +810,7 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
         if str(rec.get("task_id") or "") != task_id:
             continue
         profile = str(rec.get("profile") or "")
-        if profile != assigned_agent and profile not in ("", "unknown"):
+        if profile != assignee_identity and profile not in ("", "unknown"):
             continue
         tool = str(rec.get("tool") or "").lower()
         summary = str(rec.get("summary") or "").lower()
