@@ -25,7 +25,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -547,20 +548,39 @@ def _prepare_db_parent(path: Path) -> None:
         return
 
 
-def _connect(path: Path) -> sqlite3.Connection:
+@contextmanager
+def _connect(path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a write-capable Fabric journal connection with deterministic close.
+
+    ``sqlite3.Connection`` commits/rolls back when used directly as a context
+    manager, but it does not close at ``__exit__``. Fabric operations must not
+    leave connection teardown (and any WAL checkpoint/cleanup it triggers) to
+    later garbage collection, because that can make a subsequent read-only
+    validation appear to mutate the journal. Keep transaction semantics while
+    closing synchronously at the operation boundary.
+    """
     db = sqlite3.connect(path, timeout=5.0)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA foreign_keys=ON")
-    return db
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA foreign_keys=ON")
+        with db:
+            yield db
+    finally:
+        db.close()
 
 
-def _connect_readonly(path: Path) -> sqlite3.Connection:
+@contextmanager
+def _connect_readonly(path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a query-only Fabric journal connection and close it deterministically."""
     uri = f"file:{urllib.parse.quote(str(path))}?mode=ro"
     db = sqlite3.connect(uri, uri=True, timeout=5.0)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA query_only=ON")
-    return db
+    try:
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA query_only=ON")
+        yield db
+    finally:
+        db.close()
 
 
 def _init_coordinator_db(path: Path) -> None:
