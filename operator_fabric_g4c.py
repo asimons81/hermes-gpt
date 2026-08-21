@@ -1723,10 +1723,18 @@ class FabricCoordinator(base.FabricCoordinator):
                 before_stat = resolved.stat()
                 if before_stat.st_size != expected_size:
                     continue
-                digest = hashlib.sha256()
+                first_digest = hashlib.sha256()
                 with resolved.open("rb") as fh:
                     while chunk := fh.read(1024 * 1024):
-                        digest.update(chunk)
+                        first_digest.update(chunk)
+                # Re-read independently before accepting the admission. A
+                # same-size rewrite can occur within one filesystem timestamp
+                # tick, so mtime/ctime identity checks alone are not a
+                # deterministic stability proof.
+                second_digest = hashlib.sha256()
+                with resolved.open("rb") as fh:
+                    while chunk := fh.read(1024 * 1024):
+                        second_digest.update(chunk)
                 after_stat = resolved.stat()
                 if (
                     after_stat.st_size != expected_size
@@ -1736,7 +1744,8 @@ class FabricCoordinator(base.FabricCoordinator):
                     or after_stat.st_ctime_ns != before_stat.st_ctime_ns
                 ):
                     continue
-                if digest.hexdigest() != row["sha256"]:
+                expected_digest = row["sha256"]
+                if first_digest.hexdigest() != expected_digest or second_digest.hexdigest() != expected_digest:
                     continue
             except (OSError, TypeError, ValueError):
                 continue
