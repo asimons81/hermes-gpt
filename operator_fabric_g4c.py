@@ -1782,6 +1782,12 @@ class AutoRouter(router.AutoRouter):
 
         super().__init__(remote_probe=selected_probe, hermes_root=hermes_root, **kwargs)
 
+    def _audit_decision(self, decision: dict[str, Any], *, dry_run: bool) -> None:
+        # The base G4-B decision is preliminary for write/artifact-capable remote
+        # candidates. Defer its audit until ``route`` applies the live G4-C
+        # feature gates so the durable audit trail describes the actual winner.
+        return None
+
     def route(
         self,
         contract: dict[str, Any],
@@ -1793,6 +1799,11 @@ class AutoRouter(router.AutoRouter):
         needs_write = write_guard.is_write(contract)
         needs_artifacts = bool(contract.get("expected_artifacts"))
         if not (needs_write or needs_artifacts):
+            router._audit_route(
+                decision,
+                success=decision.get("selected") is not None,
+                dry_run=dry_run,
+            )
             return decision
         for candidate in decision.get("candidates", []):
             if not candidate.get("remote"):
@@ -1834,6 +1845,11 @@ class AutoRouter(router.AutoRouter):
             "write_required": needs_write,
             "artifact_required": needs_artifacts,
         }
+        router._audit_route(
+            decision,
+            success=decision.get("selected") is not None,
+            dry_run=dry_run,
+        )
         return decision
 
 
