@@ -745,6 +745,144 @@ def test_unrelated_profile_is_not_attributed_for_forbidden_actions(hermes_root):
     assert out["status"] == "PASS"
 
 
+def test_explicit_fabric_observer_failure_cannot_be_masked_by_local_completion(hermes_root, monkeypatch):
+    """Unavailable remote evidence must never become proof of no forbidden action."""
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-done",
+        execution={"backend": "fabric", "options": {}},
+        expected_artifacts=[],
+        review_requirements={"required": False, "reviewer": "", "evidence": "", "approval_required": False},
+        completion_criteria={
+            "run_state": {"terminal": True, "outcome_ok": ["completed", "done"]},
+            "artifacts_present": False,
+            "tests_pass": False,
+            "review_satisfied": False,
+            "no_forbidden_actions": True,
+        },
+    )
+    canonical, normalized, sha = contract_mod._parse_contract(json.dumps(c))
+    assert canonical
+    monkeypatch.setattr(
+        contract_mod,
+        "_observed_runs",
+        lambda task_id, _root: [
+            {"task_id": task_id, "status": "completed", "outcome": "completed", "scope": "runner:pi_rpc"}
+        ],
+    )
+
+    class BrokenFabricBackend:
+        def observed_forbidden_checks(self, task_id, *, hermes_root=None):
+            raise OSError("fabric evidence unavailable")
+
+    original_get_backend = contract_mod.op_runners.get_backend
+    monkeypatch.setattr(
+        contract_mod.op_runners,
+        "get_backend",
+        lambda name: BrokenFabricBackend() if name == "fabric" else original_get_backend(name),
+    )
+
+    verdict = contract_mod._validate_impl(normalized, sha, None, hermes_root)
+    forbidden = next(check for check in verdict["checks"] if check["kind"] == "forbidden")
+
+    assert forbidden["status"] == "UNVERIFIED"
+    assert "unavailable" in forbidden["detail"]
+    assert verdict["verdict"] != "SATISFIED"
+    assert verdict["satisfied"] is False
+
+
+def test_auto_remote_lineage_fails_closed_when_forbidden_evidence_is_unavailable(hermes_root, monkeypatch):
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-auto-remote",
+        assigned_agent="auto",
+        execution={"backend": "auto", "options": {}},
+    )
+    _, normalized, sha = contract_mod._parse_contract(json.dumps(c))
+    journal = hermes_root / "fabric" / "routing-decisions.jsonl"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text(
+        json.dumps(
+            {
+                "schema": "hermes.fabric-routing-decision/v1",
+                "task_id": normalized["task_id"],
+                "original_contract_sha256": sha,
+                "selected": {
+                    "node": "node-a",
+                    "backend": "fake",
+                    "transport_backend": "fabric",
+                    "remote": True,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class BrokenFabricBackend:
+        def observed_forbidden_checks(self, task_id, *, hermes_root=None):
+            raise OSError("fabric evidence unavailable")
+
+    original_get_backend = contract_mod.op_runners.get_backend
+    monkeypatch.setattr(
+        contract_mod.op_runners,
+        "get_backend",
+        lambda name: BrokenFabricBackend() if name == "fabric" else original_get_backend(name),
+    )
+
+    out = contract_mod._check_forbidden(normalized, hermes_root, sha)
+
+    assert out["status"] == "UNVERIFIED"
+    assert "auto placement" in out["detail"]
+
+
+def test_auto_local_lineage_can_pass_when_fabric_evidence_is_unavailable(hermes_root, monkeypatch):
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(
+        ws,
+        task_id="t-auto-local",
+        assigned_agent="auto",
+        execution={"backend": "auto", "options": {}},
+    )
+    _, normalized, sha = contract_mod._parse_contract(json.dumps(c))
+    journal = hermes_root / "fabric" / "routing-decisions.jsonl"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text(
+        json.dumps(
+            {
+                "schema": "hermes.fabric-routing-decision/v1",
+                "task_id": normalized["task_id"],
+                "original_contract_sha256": sha,
+                "selected": {
+                    "node": "local",
+                    "backend": "pi_rpc",
+                    "transport_backend": "pi_rpc",
+                    "remote": False,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class MissingForbiddenEvidenceBackend:
+        pass
+
+    original_get_backend = contract_mod.op_runners.get_backend
+    monkeypatch.setattr(
+        contract_mod.op_runners,
+        "get_backend",
+        lambda name: MissingForbiddenEvidenceBackend() if name == "fabric" else original_get_backend(name),
+    )
+    monkeypatch.setattr(contract_mod.op_runners, "observed_runs", lambda task_id, *, hermes_root=None: [])
+
+    out = contract_mod._check_forbidden(normalized, hermes_root, sha)
+
+    assert out["status"] == "PASS"
+
+
 def test_false_done_rejected_no_observed_run_is_inconclusive(hermes_root):
     """Case 6: valid contract, no observed run at all -> INCONCLUSIVE (fail-closed)."""
     ws = hermes_root.parent / "ws"

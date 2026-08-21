@@ -779,22 +779,6 @@ def _check_tests(contract: dict[str, Any], runner: Callable[..., tuple[int, str,
     }
 
 
-def _assignee_identity(contract: dict[str, Any]) -> str:
-    """Return the executing profile identity for attribution-sensitive checks.
-
-    ``assigned_agent`` identifies placement: it may be ``auto`` before routing
-    or a Fabric node name after remote placement. ``assigned_profile`` is the
-    authority-bearing actor that actually executes the contract, so review
-    distinctness and audit attribution must use it whenever present. The
-    assigned-agent fallback preserves compatibility with legacy callers that
-    construct an incomplete contract outside the normal parser.
-    """
-    assigned_profile = str(contract.get("assigned_profile") or "").strip()
-    if assigned_profile:
-        return assigned_profile
-    return str(contract["assigned_agent"])
-
-
 def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: Path) -> dict[str, Any]:
     review = contract["review_requirements"]
     assignee_identities = _attributable_identities(contract)
@@ -882,33 +866,83 @@ def _attributable_identities(contract: dict[str, Any]) -> set[str]:
 
 def _remote_forbidden_evidence(
     task_id: str, hermes_root: Path
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
+    """Return admitted Fabric forbidden checks plus observer availability."""
     try:
         backend = op_runners.get_backend("fabric")
     except LookupError:
-        return []
+        return [], False
     observer = getattr(backend, "observed_forbidden_checks", None)
     if not callable(observer):
-        return []
+        return [], False
     try:
         value = observer(task_id, hermes_root=hermes_root)
     except (OSError, RuntimeError, ValueError, TypeError):
-        return []
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+        return [], False
+    if not isinstance(value, list):
+        return [], False
+    return [item for item in value if isinstance(item, dict)], True
 
 
-def _has_remote_fabric_run(task_id: str, hermes_root: Path) -> bool:
+def _has_remote_fabric_run(task_id: str, hermes_root: Path) -> bool | None:
+    """Return remote-run presence, or None when Fabric observation is unavailable."""
     try:
         runs = op_runners.observed_runs(task_id, hermes_root=hermes_root)
     except (OSError, RuntimeError, ValueError, TypeError):
-        return False
+        return None
     return any(
         isinstance(run, dict) and str(run.get("scope") or "").startswith("fabric:")
         for run in runs
     )
 
 
-def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, Any]:
+def _auto_fabric_lineage(
+    contract: dict[str, Any],
+    contract_sha256: str,
+    hermes_root: Path,
+) -> bool | None:
+    """Return whether durable auto-placement lineage proves remote Fabric use."""
+    execution = contract.get("execution")
+    if not isinstance(execution, dict) or str(execution.get("backend") or "").strip().lower() != "auto":
+        return False
+    if not contract_sha256:
+        return None
+
+    journal = _resolve_root(hermes_root) / "fabric" / "routing-decisions.jsonl"
+    matched = False
+    try:
+        with journal.open("rb") as fh:
+            for raw_line in fh:
+                if not raw_line or len(raw_line) > 128_000:
+                    continue
+                try:
+                    record = json.loads(raw_line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                if (
+                    record.get("schema") != "hermes.fabric-routing-decision/v1"
+                    or record.get("task_id") != contract.get("task_id")
+                    or record.get("original_contract_sha256") != contract_sha256
+                ):
+                    continue
+                selected = record.get("selected")
+                if not isinstance(selected, dict):
+                    continue
+                matched = True
+                if selected.get("remote") is True and selected.get("transport_backend") == "fabric":
+                    return True
+    except OSError:
+        return None
+    return False if matched else None
+
+
+def _check_forbidden(
+    contract: dict[str, Any],
+    hermes_root: Path,
+    contract_sha256: str = "",
+) -> dict[str, Any]:
     forbidden = contract["forbidden_actions"]
     if not forbidden:
         return {"kind": "forbidden", "status": "PASS", "detail": "no forbidden actions declared"}
@@ -965,7 +999,7 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
                 continue
 
     expected_policy_sha = _json_sha256(forbidden)
-    remote_checks = _remote_forbidden_evidence(task_id, hermes_root)
+    remote_checks, remote_evidence_available = _remote_forbidden_evidence(task_id, hermes_root)
     mismatched_remote = [
         check for check in remote_checks if str(check.get("policy_sha256") or "") != expected_policy_sha
     ]
@@ -998,7 +1032,37 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
             "status": "PASS",
             "detail": "no forbidden actions detected in coordinator and admitted peer audit evidence",
         }
-    if _has_remote_fabric_run(task_id, hermes_root):
+
+    execution = contract.get("execution")
+    execution_backend = (
+        str(execution.get("backend") or "").strip().lower()
+        if isinstance(execution, dict)
+        else ""
+    )
+    if execution_backend == "fabric":
+        detail = (
+            "remote Fabric forbidden-action evidence is unavailable"
+            if not remote_evidence_available
+            else "remote Fabric run lacks admitted forbidden-action evidence"
+        )
+        return {"kind": "forbidden", "status": "UNVERIFIED", "detail": detail}
+
+    auto_lineage = _auto_fabric_lineage(contract, contract_sha256, hermes_root)
+    if auto_lineage is True:
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "remote Fabric auto placement lacks admitted forbidden-action evidence",
+        }
+    if auto_lineage is None:
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "auto placement provenance is unavailable for forbidden-action verification",
+        }
+
+    remote_run = _has_remote_fabric_run(task_id, hermes_root)
+    if remote_run is True:
         return {
             "kind": "forbidden",
             "status": "UNVERIFIED",
@@ -1178,7 +1242,7 @@ def _validate_impl(contract: dict[str, Any], sha: str, runner: Callable[..., tup
         _check_artifacts(contract, sha, hermes_root),
         _check_tests(contract, runner, hermes_root),
         _check_review(contract, sha, hermes_root),
-        _check_forbidden(contract, hermes_root),
+        _check_forbidden(contract, hermes_root, sha),
         _check_authorization(contract),
     ]
 
