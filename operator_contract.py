@@ -419,6 +419,11 @@ def _contract_sha256(canonical_json: str) -> str:
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
+def _json_sha256(value: Any) -> str:
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _parse_contract(contract_json: str) -> tuple[str, dict[str, Any], str]:
     """Parse + canonicalize a contract JSON string.
 
@@ -916,9 +921,11 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
     # Audit trail scan (D5): scope strictly to this contract's task identity.
     # Profile-only matching allowed an unrelated concurrent contract to fail this
     # one; records without a matching task_id are intentionally ignored.
-    for rec in _observed_audit():
-        if str(rec.get("task_id") or "") != task_id:
-            continue
+    try:
+        audit_records = op.iter_audit_for_task(task_id)
+    except (OSError, RuntimeError, ValueError, TypeError):
+        audit_records = ()
+    for rec in audit_records:
         profile = str(rec.get("profile") or "")
         source = str(rec.get("source_profile") or "").strip()
         attributable = (
@@ -957,8 +964,15 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
             except OSError:
                 continue
 
+    expected_policy_sha = _json_sha256(forbidden)
     remote_checks = _remote_forbidden_evidence(task_id, hermes_root)
-    for remote in remote_checks:
+    mismatched_remote = [
+        check for check in remote_checks if str(check.get("policy_sha256") or "") != expected_policy_sha
+    ]
+    matching_remote = [
+        check for check in remote_checks if str(check.get("policy_sha256") or "") == expected_policy_sha
+    ]
+    for remote in matching_remote:
         if remote.get("status") == "FAIL":
             for item in remote.get("signals") or []:
                 if isinstance(item, dict):
@@ -966,8 +980,14 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
     if signals:
         detail = "; ".join(f"{s['action']} ({s['class']}) via {s['tool']}" for s in signals[:5])
         return {"kind": "forbidden", "status": "FAIL", "detail": f"forbidden action detected: {detail}", "evidence": signals[:10]}
-    if remote_checks:
-        if any(check.get("status") != "PASS" for check in remote_checks):
+    if mismatched_remote:
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "remote Fabric forbidden-action evidence policy does not match this contract",
+        }
+    if matching_remote:
+        if any(check.get("status") != "PASS" for check in matching_remote):
             return {
                 "kind": "forbidden",
                 "status": "UNVERIFIED",

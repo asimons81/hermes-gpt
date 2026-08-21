@@ -889,6 +889,39 @@ def audit_tail(limit: int = 20) -> list[dict[str, Any]]:
     return records[-limit:]
 
 
+def iter_audit_for_task(task_id: str) -> Iterable[dict[str, Any]]:
+    """Stream every valid audit record for one task without tail eviction."""
+    if not isinstance(task_id, str) or not task_id:
+        return
+    log_path = audit_log_path()
+    if not log_path.exists():
+        return
+    try:
+        with open(log_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                if len(line) > 64_000:
+                    continue
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(record, dict) and str(record.get("task_id") or "") == task_id:
+                    yield record
+    except OSError:
+        return
+
+
+def audit_for_task(task_id: str, limit: int = 1_000) -> list[dict[str, Any]]:
+    """Return a bounded newest-last view of one task's audit records."""
+    from collections import deque
+
+    bounded_limit = max(1, min(int(limit), 10_000))
+    return list(deque(iter_audit_for_task(task_id), maxlen=bounded_limit))
+
+
 # ---------------------------------------------------------------------------
 # Subprocess helper (shared by cron / gateway / workspace run_test / owner)
 # ---------------------------------------------------------------------------

@@ -190,6 +190,17 @@ def test_remote_forbidden_violation_cannot_reach_false_satisfied(tmp_path, monke
             summary="public_publish attempted by remote runner",
             extra={"task_id": dispatched["attempt_id"], "forbidden_action": "public_publish"},
         )
+        for index in range(1_005):
+            op.audit_record(
+                tool="benign_read",
+                level="read_only",
+                apply_mode="direct",
+                dry_run=False,
+                success=True,
+                profile="other-profile",
+                summary=f"unrelated audit record {index}",
+                extra={"task_id": f"unrelated-{index}"},
+            )
         observed.append(_completed_observation())
         coord.poll(dispatched["attempt_id"], reconcile=True)
         admitted = coord.collect(dispatched["attempt_id"])["evidence"]
@@ -236,6 +247,45 @@ def test_remote_forbidden_clean_peer_evidence_can_satisfy(tmp_path, monkeypatch)
     by_kind = {item["kind"]: item for item in verdict["checks"]}
     assert by_kind["forbidden"]["status"] == "PASS"
 
+
+
+def test_remote_forbidden_pass_from_different_policy_cannot_satisfy_contract(tmp_path, monkeypatch):
+    real_get_backend = runners.get_backend
+    observed: list[dict[str, str]] = []
+    svc = make_service(tmp_path, monkeypatch, observed=observed)
+    coord = make_coordinator(tmp_path, svc)
+
+    dispatched_value = contract(tmp_path)
+    dispatched_value["forbidden_actions"] = [
+        {"action": "network_egress", "reason": "stay offline", "class": "HIGH"}
+    ]
+    _, dispatched_contract = op_contract._canonical_contract(dispatched_value)
+    backend = base.FabricBackend(coordinator_factory=lambda **_kwargs: coord)
+    dispatched = backend.dispatch(
+        dispatched_contract,
+        confirm=True,
+        dry_run=False,
+        timeout=10,
+        hermes_root=tmp_path,
+    )
+    assert dispatched["success"] is True
+    observed.append(_completed_observation())
+    coord.poll(dispatched["attempt_id"], reconcile=True)
+    admitted = coord.collect(dispatched["attempt_id"])["evidence"]
+    assert admitted["forbidden_check"]["status"] == "PASS"
+
+    stricter = contract(tmp_path)
+    stricter["forbidden_actions"] = [
+        {"action": "public_publish", "reason": "must remain private", "class": "HIGH"}
+    ]
+    stricter_canonical, _ = op_contract._canonical_contract(stricter)
+    monkeypatch.setattr(runners, "get_backend", real_get_backend)
+    verdict = _validate_with_coordinator(stricter_canonical, coord, tmp_path)
+
+    assert verdict["verdict"] != "SATISFIED"
+    by_kind = {item["kind"]: item for item in verdict["checks"]}
+    assert by_kind["forbidden"]["status"] == "UNVERIFIED"
+    assert "policy does not match" in by_kind["forbidden"]["detail"]
 
 
 def test_remote_profile_scope_mismatch_is_rejected_before_dry_run_placement(tmp_path, monkeypatch):

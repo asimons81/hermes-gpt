@@ -616,6 +616,28 @@ def test_false_done_rejected_forbidden_action(hermes_root):
     assert any("forbidden" in r for r in out["rejected_reasons"])
 
 
+def test_local_forbidden_violation_survives_unrelated_audit_flood(hermes_root):
+    ws = hermes_root.parent / "ws"
+    c = _contract_for_ws(ws, task_id="t-done")
+    _add_forbidden_evidence(c)
+    for index in range(1_005):
+        op.audit_record(
+            tool="benign_read",
+            level="read_only",
+            apply_mode="direct",
+            dry_run=False,
+            success=True,
+            profile="other-profile",
+            summary=f"same-task benign audit record {index}",
+            extra={"task_id": c["task_id"]},
+        )
+
+    out = contract_mod._check_forbidden(c, hermes_root)
+
+    assert out["status"] == "FAIL"
+    assert "public_publish" in out["detail"]
+
+
 def test_auto_assignee_uses_profile_for_forbidden_audit_attribution(hermes_root):
     """Auto placement must attribute task-scoped audit evidence to the stage owner."""
     ws = hermes_root.parent / "ws"

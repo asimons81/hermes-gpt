@@ -318,6 +318,32 @@ def test_peer_rejects_envelope_profile_outside_preserved_scope(tmp_path, monkeyp
     assert exc.value.code == "FABRIC_AUTHORITY_DENIED"
 
 
+def test_coordinator_rejects_contract_profile_scope_wider_than_node_policy(tmp_path, monkeypatch):
+    svc = service(tmp_path, monkeypatch)
+    coord = coordinator(tmp_path, svc)
+    value = contract(tmp_path)
+    value["allowed_scope"]["profiles"] = ["default", "qa"]
+
+    with pytest.raises(fabric.FabricError) as exc:
+        coord.dispatch(value, dry_run=True, confirm=False, timeout=10)
+
+    assert exc.value.code == "FABRIC_AUTHORITY_DENIED"
+    assert "allowed profile scope" in str(exc.value)
+
+
+def test_peer_rejects_contract_profile_scope_wider_than_peer_policy(tmp_path, monkeypatch):
+    svc = service(tmp_path, monkeypatch)
+    value = contract(tmp_path)
+    value["allowed_scope"]["profiles"] = ["default", "qa"]
+    envelope = envelope_for(svc, value)
+
+    with pytest.raises(fabric.FabricError) as exc:
+        svc._authorize_envelope(envelope, "coord-main", policy(tmp_path))
+
+    assert exc.value.code == "FABRIC_AUTHORITY_DENIED"
+    assert "profile scope exceeds peer policy" in str(exc.value)
+
+
 def test_remote_forbidden_actions_are_preserved_and_admitted(tmp_path, monkeypatch):
     observed: list[dict[str, str]] = []
     counter = {"count": 0}
@@ -377,6 +403,19 @@ def test_remote_forbidden_violation_is_admitted_as_fail(tmp_path, monkeypatch):
             summary="public_publish attempted by remote runner",
             extra={"task_id": result["attempt_id"], "forbidden_action": "public_publish"},
         )
+        # A later flood of benign records for the same task must not push the
+        # violation out of the evidence scan and turn FAIL into a false PASS.
+        for index in range(1_005):
+            fabric.op.audit_record(
+                tool="benign_read",
+                level="read_only",
+                apply_mode="direct",
+                dry_run=False,
+                success=True,
+                profile="default",
+                summary=f"benign same-task audit record {index}",
+                extra={"task_id": result["attempt_id"]},
+            )
         observed.append(
             {
                 "status": "completed",

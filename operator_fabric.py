@@ -1339,6 +1339,8 @@ class FabricPeerService:
                 "FABRIC_AUTHORITY_DENIED",
                 "assigned profile is outside the Work Contract allowed_scope",
             )
+        if not set(envelope["allowed_profiles"]) <= set(policy.allowed_profiles):
+            raise FabricError("FABRIC_AUTHORITY_DENIED", "contract profile scope exceeds peer policy")
         if envelope["assigned_profile"] not in policy.allowed_profiles:
             raise FabricError("FABRIC_AUTHORITY_DENIED", "assigned profile is outside peer policy")
         auth = _auth_object(envelope["authorization"])
@@ -1751,13 +1753,7 @@ def _peer_forbidden_check(row: sqlite3.Row, policy: FabricPeerPolicy) -> dict[st
 
     identities = {assigned_profile, str(row["node_name"])}
     signals: list[dict[str, str]] = []
-    try:
-        audit = op.audit_tail(limit=1_000)
-    except _EXPECTED_ERRORS:
-        audit = []
-    for rec in audit:
-        if not isinstance(rec, dict) or str(rec.get("task_id") or "") != row["local_task_id"]:
-            continue
+    for rec in op.iter_audit_for_task(str(row["local_task_id"])):
         profile = str(rec.get("profile") or "")
         source = str(rec.get("source_profile") or "").strip()
         if not (
@@ -1962,11 +1958,13 @@ def _validate_evidence(
             signals.append(
                 {
                     "action": _bounded_string(signal["action"], field="forbidden signal action", maximum=128),
-                    "class": _bounded_string(signal["class"], field="forbidden signal class", maximum=8),
+                    "class": _bounded_string(signal["class"], field="forbidden signal class", maximum=8).upper(),
                     "tool": _bounded_string(signal["tool"], field="forbidden signal tool", maximum=128, required=False),
                     "summary": _bounded_string(signal["summary"], field="forbidden signal summary", maximum=300, required=False),
                 }
             )
+        if any(signal["class"] not in {"LOW", "MED", "HIGH"} for signal in signals):
+            raise FabricError("FABRIC_EVIDENCE_REJECTED", "forbidden evidence class is invalid")
         if status_value == "PASS" and signals:
             raise FabricError(
                 "FABRIC_EVIDENCE_REJECTED",
@@ -2093,6 +2091,11 @@ class FabricCoordinator:
             raise FabricError(
                 "FABRIC_AUTHORITY_DENIED",
                 "contract assigned_profile is outside its allowed_scope.profiles",
+            )
+        if not set(allowed_profiles) <= set(node.allowed_profiles):
+            raise FabricError(
+                "FABRIC_AUTHORITY_DENIED",
+                "contract allowed profile scope exceeds managed-node policy",
             )
         if contract.get("assigned_profile") not in node.allowed_profiles:
             raise FabricError(
