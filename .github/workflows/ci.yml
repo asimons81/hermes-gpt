@@ -7,6 +7,39 @@ on:
   workflow_call:
 
 jobs:
+  apply-g5-repair:
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'v0.8-fabric-g5-repair-staging' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.8-fabric-g5-repair-staging
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply and verify final G5 fail-closed repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object operator_contract.py)" = "e90dc7e085a7b6f53f5075f21751c46eb03c6fb5"
+          test "$(git hash-object test_operator_fabric_g5_review_repairs.py)" = "0ef81b40c4a70574ce3b10b623381852ce251a06"
+          git apply --check .github/g5-final-repair.patch
+          git apply .github/g5-final-repair.patch
+          python -m pip install -e ".[dev]"
+          python -m py_compile operator_contract.py test_operator_fabric_g5_review_repairs.py
+          python -m pytest -q test_operator_fabric_g5_review_repairs.py
+          git show 2fa011a86cd537ce0a2e7c39470f97aa86c96bf5:.github/workflows/ci.yml > .github/workflows/ci.yml
+          git rm .github/g5-final-repair.patch
+          git add operator_contract.py test_operator_fabric_g5_review_repairs.py .github/workflows/ci.yml
+          git diff --cached --check
+          git config user.name "Tony Simons"
+          git config user.email "asimons81@gmail.com"
+          git commit -m "fix(v0.8): fail closed on unavailable Fabric evidence"
+          git push origin HEAD:v0.8-fabric-g5-repair-staging
+
   test:
     strategy:
       fail-fast: false
