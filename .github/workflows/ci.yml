@@ -163,3 +163,48 @@ jobs:
         with:
           name: distributions
           path: dist/*
+
+  repair-staging:
+    if: github.event_name == 'pull_request' && github.head_ref == 'v0.8-fabric-g5-repair-staging'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.8-fabric-g5-repair-staging
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Apply approved HIGH repairs
+        run: python tools/g5_high_repair_staging.py
+      - name: Run blocking-finding regressions
+        run: python -m pytest -q test_operator_fabric_g5_review_repairs.py
+      - name: Run focused Fabric and contract suites
+        run: >-
+          python -m pytest -q
+          test_operator_contract.py
+          test_operator_fabric.py
+          test_operator_fabric_adversarial.py
+          test_operator_fabric_router.py
+          test_operator_fabric_g4c.py
+          test_operator_fabric_integration.py
+          test_operator_swarm.py
+      - name: Lint repaired surfaces
+        run: python -m ruff check operator_fabric.py operator_contract.py test_operator_fabric_g5_review_repairs.py
+      - name: Compile repaired runtime
+        run: python -m py_compile operator_fabric.py operator_contract.py operator_fabric_g4c.py operator_fabric_router.py operator_swarm.py
+      - name: Check patch whitespace
+        run: git diff --check
+      - name: Commit verified repair and remove staging scaffolding
+        shell: bash
+        run: |
+          git show 7ff97973bff74548ed18b56d64412fd24c3ecb40:.github/workflows/ci.yml > .github/workflows/ci.yml
+          rm -f .github/workflows/fabric-g5-repair-staging.yml tools/g5_high_repair_staging.py
+          git config user.name "Hermes GPT repair"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(v0.8): close independent G5 HIGH findings"
+          git push origin HEAD:v0.8-fabric-g5-repair-staging
