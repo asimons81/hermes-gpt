@@ -919,6 +919,51 @@ def _attempt_id(dispatch_id: str, sequence: int = 1) -> str:
     return "faba-" + hashlib.sha256(f"{dispatch_id}:{sequence}".encode()).hexdigest()[:32]
 
 
+def _contract_profile_scope(contract: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
+    """Fail closed if Fabric placement would widen Work Contract profile scope."""
+    scope = contract.get("allowed_scope")
+    if not isinstance(scope, dict):
+        raise FabricError(
+            "FABRIC_AUTHORITY_DENIED",
+            "contract allowed_scope must be an object",
+        )
+    profiles = tuple(
+        _bounded_strings(
+            scope.get("profiles"),
+            field="contract.allowed_scope.profiles",
+            maximum=16,
+            item_max=64,
+        )
+    )
+    if not profiles or any(not _PROFILE_RE.fullmatch(profile) for profile in profiles):
+        raise FabricError(
+            "FABRIC_AUTHORITY_DENIED",
+            "contract profile scope is invalid",
+        )
+    assigned_profile = _bounded_string(
+        contract.get("assigned_profile"),
+        field="contract.assigned_profile",
+        pattern=_PROFILE_RE,
+    )
+    if assigned_profile not in profiles:
+        raise FabricError(
+            "FABRIC_AUTHORITY_DENIED",
+            "assigned profile is outside the Work Contract profile scope",
+        )
+    return assigned_profile, profiles
+
+
+def _contract_forbidden_actions_present(contract: dict[str, Any]) -> bool:
+    """Return whether the contract declares checks Fabric v1 cannot yet prove."""
+    forbidden = contract.get("forbidden_actions", [])
+    if not isinstance(forbidden, list) or len(forbidden) > 32:
+        raise FabricError(
+            "FABRIC_SCHEMA_INVALID",
+            "contract forbidden_actions must be a bounded list",
+        )
+    return bool(forbidden)
+
+
 def _auth_object(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise FabricError("FABRIC_AUTHORITY_DENIED", "authorization must be an object")
@@ -1870,12 +1915,18 @@ class FabricCoordinator:
             contract
         )
         node = self._node(node_name)
+        assigned_profile, _profile_scope = _contract_profile_scope(contract)
+        if _contract_forbidden_actions_present(contract):
+            raise FabricError(
+                "FABRIC_EVIDENCE_POLICY_INVALID",
+                "verified Fabric cannot prove non-empty forbidden-action checks",
+            )
         if contract.get("assigned_agent") != node.name:
             raise FabricError(
                 "FABRIC_AUTHORITY_DENIED",
                 "Fabric contract assigned_agent must match the managed node name",
             )
-        if contract.get("assigned_profile") not in node.allowed_profiles:
+        if assigned_profile not in node.allowed_profiles:
             raise FabricError(
                 "FABRIC_AUTHORITY_DENIED",
                 "contract profile is outside managed-node policy",

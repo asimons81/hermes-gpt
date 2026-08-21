@@ -932,6 +932,32 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
     if signals:
         detail = "; ".join(f"{s['action']} ({s['class']}) via {s['tool']}" for s in signals[:5])
         return {"kind": "forbidden", "status": "FAIL", "detail": f"forbidden action detected: {detail}", "evidence": signals[:10]}
+
+    # Fabric v1 admits bounded remote run-state evidence but does not admit a
+    # coordinator-verifiable forbidden-action audit trail. New dispatches with
+    # non-empty forbidden_actions are rejected at the Fabric boundary; this
+    # guard keeps historical admitted Fabric runs from being certified merely
+    # because no coordinator-local violation signal exists. Absence is not proof.
+    try:
+        fabric_backend = op_runners.get_backend("fabric")
+        observer = getattr(fabric_backend, "observed_runs", None)
+        fabric_runs = observer(task_id, hermes_root=hermes_root) if callable(observer) else []
+    except (LookupError, OSError, RuntimeError, TypeError, ValueError):
+        fabric_runs = []
+    if any(
+        isinstance(run, dict)
+        and (
+            run.get("backend") == "fabric"
+            or str(run.get("scope") or "").startswith("fabric:")
+        )
+        for run in fabric_runs
+    ):
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "remote Fabric run has no coordinator-verifiable forbidden-action evidence",
+        }
+
     return {"kind": "forbidden", "status": "PASS", "detail": "no forbidden actions detected in audit/artifacts"}
 
 
