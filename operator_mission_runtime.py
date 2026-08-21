@@ -170,7 +170,7 @@ def _bounded_text(value: Any, field: str, maximum: int, *, required: bool = Fals
     if value is None:
         value = ""
     if not isinstance(value, str):
-        raise ValueError(f"{field} must be a string")
+        raise TypeError(f"{field} must be a string")
     value = value.strip()
     if required and not value:
         raise ValueError(f"{field} is required")
@@ -195,7 +195,7 @@ def _normalize_context(raw: Any) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for item in raw:
         if not isinstance(item, dict):
-            raise ValueError("context_refs items must be objects")
+            raise TypeError("context_refs items must be objects")
         _closed(item, _ALLOWED_CONTEXT_KEYS, "context ref")
         kind = _bounded_text(item.get("kind"), "context kind", 64, required=True)
         ref = _bounded_text(item.get("ref"), "context ref", 256, required=True)
@@ -223,7 +223,7 @@ def _normalize_skills(raw: Any) -> list[dict[str, str]]:
     seen: set[str] = set()
     for item in raw:
         if not isinstance(item, dict):
-            raise ValueError("skills items must be objects")
+            raise TypeError("skills items must be objects")
         _closed(item, _ALLOWED_SKILL_KEYS, "skill")
         name = _bounded_text(item.get("name"), "skill name", 128, required=True)
         if name in seen:
@@ -257,7 +257,7 @@ def _normalize_spec(raw: dict[str, Any], *, mission_id: str | None = None) -> di
         raise ValueError("mission_id is invalid")
     final_approval = raw.get("final_approval_required", True)
     if not isinstance(final_approval, bool):
-        raise ValueError("final_approval_required must be boolean")
+        raise TypeError("final_approval_required must be boolean")
     return {
         "schema": MISSION_SPEC_SCHEMA,
         "mission_id": mid,
@@ -348,8 +348,8 @@ def _audit(tool: str, policy: op.OperatorPolicy, *, dry_run: bool, success: bool
             summary=summary,
             extra={"mission_id": mission_id},
         )
-    except Exception:
-        pass
+    except (OSError, TypeError, ValueError):
+        return
 
 
 def _error(exc: Exception, code: str, action: str) -> str:
@@ -368,7 +368,7 @@ def hermes_mission_create(
         policy.require_mutation(dry_run)
         raw = json.loads(mission_json)
         if not isinstance(raw, dict):
-            raise ValueError("mission_json must contain an object")
+            raise TypeError("mission_json must contain an object")
         spec = _normalize_spec(raw)
         effective_dry = policy.effective_dry_run(dry_run)
         if not effective_dry and not confirm:
@@ -451,7 +451,7 @@ def hermes_mission_update(
         policy.require_mutation(dry_run)
         patch = json.loads(patch_json)
         if not isinstance(patch, dict):
-            raise ValueError("patch_json must contain an object")
+            raise TypeError("patch_json must contain an object")
         _closed(patch, _ALLOWED_PATCH_KEYS, "mission patch")
         effective_dry = policy.effective_dry_run(dry_run)
         if not effective_dry and not confirm:
