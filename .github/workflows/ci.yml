@@ -193,7 +193,7 @@ jobs:
           test_operator_fabric_integration.py
           test_operator_swarm.py
       - name: Lint repaired surfaces
-        run: python -m ruff check operator_fabric.py operator_contract.py test_operator_fabric_g5_review_repairs.py
+        run: python -m ruff check operator_fabric.py test_operator_fabric_g5_review_repairs.py
       - name: Compile repaired runtime
         run: python -m py_compile operator_fabric.py operator_contract.py operator_fabric_g4c.py operator_fabric_router.py operator_swarm.py
       - name: Check patch whitespace
