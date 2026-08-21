@@ -754,6 +754,11 @@ class AutoRouter:
                 "backend": winner["backend"],
                 "transport_backend": winner["transport_backend"],
                 "remote": winner["remote"],
+                "healthy": winner["healthy"],
+                "capability_fresh": winner["capability_fresh"],
+                "authority_ceiling": winner["authority_ceiling"],
+                "eligible": winner["eligible"],
+                "exclusions": list(winner["exclusions"]),
                 "rank": winner["rank"],
             }
         decision = {

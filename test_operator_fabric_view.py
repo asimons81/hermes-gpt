@@ -247,7 +247,18 @@ def test_routing_receipt_exposes_bounded_explanation(tmp_path):
                 "original_contract_sha256": "1" * 64,
                 "placed_contract_sha256": "a" * 64,
                 "requirements": {"location": "remote", "gpu": True, "runners": ["pi_rpc"]},
-                "selected": {"node": "node-a", "backend": "pi_rpc", "remote": True, "rank": [0, 0, 1]},
+                "selected": {
+                    "node": "node-a",
+                    "backend": "pi_rpc",
+                    "transport_backend": "fabric",
+                    "remote": True,
+                    "healthy": True,
+                    "capability_fresh": True,
+                    "authority_ceiling": "read_only",
+                    "eligible": True,
+                    "exclusions": [],
+                    "rank": [0, 0, 1],
+                },
                 "candidates": [
                     {
                         "node": "node-b",
@@ -269,6 +280,18 @@ def test_routing_receipt_exposes_bounded_explanation(tmp_path):
     rows = view.routing_decisions_view(hermes_root=tmp_path)
     assert rows[0]["explanation_available"] is True
     assert rows[0]["requirements"]["gpu"] is True
+    assert rows[0]["selected"] == {
+        "node": "node-a",
+        "backend": "pi_rpc",
+        "transport_backend": "fabric",
+        "remote": True,
+        "healthy": True,
+        "capability_fresh": True,
+        "authority_ceiling": "read_only",
+        "eligible": True,
+        "exclusions": [],
+        "rank": [0, 0, 1],
+    }
     assert rows[0]["candidates"][0]["exclusions"][0]["code"] == "CAPABILITY_STALE"
 
 
@@ -293,3 +316,8 @@ def test_old_routing_receipt_degrades_without_inventing_explanation(tmp_path):
     assert rows[0]["explanation_available"] is False
     assert rows[0]["requirements"] == {}
     assert rows[0]["candidates"] == []
+    assert rows[0]["selected"]["remote"] is True
+    assert rows[0]["selected"]["healthy"] is None
+    assert rows[0]["selected"]["capability_fresh"] is None
+    assert rows[0]["selected"]["eligible"] is None
+    assert rows[0]["selected"]["authority_ceiling"] == ""
