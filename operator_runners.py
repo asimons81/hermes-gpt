@@ -18,12 +18,14 @@ backend names; contracts select them with ``execution.backend``.
 
 from __future__ import annotations
 
+import hmac
 import http.client
 import importlib.metadata
 import json
 import logging
 import os
 import re
+import secrets
 import selectors
 import shutil
 import signal
@@ -845,7 +847,6 @@ class PiRpcBackend(_LocalProcessBackend):
 
 
 _OPENCODE_ENV_REF_RE = re.compile(r"^(?:\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*))$")
-_OPENCODE_PROXY_DUMMY_KEY = "hermes-gpt-local-relay"
 _OPENCODE_PROXY_MAX_BODY = 16 * 1024 * 1024
 _OPENCODE_HOP_HEADERS = frozenset({
     "connection",
@@ -962,7 +963,8 @@ class _OpenCodeCredentialProxy(ThreadingHTTPServer):
     allow_reuse_address = False
 
     def __init__(self, material: dict[str, Any]):
-        self.material = material
+        self.material = dict(material)
+        self.material["relay_token"] = secrets.token_urlsafe(32)
         super().__init__(("127.0.0.1", 0), _OpenCodeCredentialProxyHandler)
 
 
@@ -987,6 +989,11 @@ class _OpenCodeCredentialProxyHandler(BaseHTTPRequestHandler):
 
     def _forward(self) -> None:
         material = self.relay.material
+        supplied = self.headers.get("Authorization", "")
+        expected = f"Bearer {material['relay_token']}"
+        if not hmac.compare_digest(supplied, expected):
+            self._send_plain(401, "unauthorized")
+            return
         upstream = material["upstream"]
         incoming = urllib.parse.urlsplit(self.path)
         prefix = upstream.path.rstrip("/")
@@ -1050,7 +1057,7 @@ def _opencode_child_config(material: dict[str, Any], proxy_port: int) -> str:
         "npm": material["npm"],
         "options": {
             "baseURL": proxy_base,
-            "apiKey": _OPENCODE_PROXY_DUMMY_KEY,
+            "apiKey": material["relay_token"],
             "timeout": material["timeout_ms"],
         },
         "models": {material["model_id"]: material["model_meta"]},
@@ -1360,7 +1367,7 @@ def _worker_opencode(
             "XDG_DATA_HOME": "/tmp/hermes-opencode/data",
             "XDG_CACHE_HOME": "/tmp/hermes-opencode/cache",
             "XDG_STATE_HOME": "/tmp/hermes-opencode/state",
-            "OPENCODE_CONFIG_CONTENT": _opencode_child_config(material, proxy.server_port),
+            "OPENCODE_CONFIG_CONTENT": _opencode_child_config(proxy.material, proxy.server_port),
             "OPENCODE_DISABLE_AUTOUPDATE": "1",
         }
     )

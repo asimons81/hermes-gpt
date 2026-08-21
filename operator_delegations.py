@@ -259,7 +259,12 @@ def _ensure_mission(mission_id: str, hermes_root: Path | None) -> None:
     if not mission_id:
         return
     payload = json.loads(mission_runtime.hermes_mission_get(mission_id, hermes_root=hermes_root))
-    if not payload.get("success"):
+    if (
+        not payload.get("success")
+        or payload.get("found") is False
+        or payload.get("mission_id") != mission_id
+        or "status" not in payload
+    ):
         raise LookupError(f"mission {mission_id!r} was not found")
 
 
@@ -354,6 +359,10 @@ def hermes_delegation_dispatch(
         now = _now()
         backend_state = str(dispatch.get("state") or dispatch.get("status") or ("ambiguous" if ambiguous else "queued"))
         state = "reconciling" if ambiguous else _normalize_state(backend_state)
+        if state == "succeeded":
+            # Dispatch self-report is never completion proof. Reconciliation must
+            # validate the matching Work Contract before success is durable.
+            state = "reconciling"
         if state == "reconciling" and not ambiguous and not backend_state:
             state = "queued"
         with _connect(path, write=True) as db:
@@ -470,7 +479,14 @@ def hermes_delegation_reconcile(
     apply: bool = False,
     hermes_root: Path | None = None,
 ) -> str:
-    """Derive normalized state from authoritative runner/Fabric observations."""
+    """Derive normalized state from authoritative runner/Fabric observations.
+
+    Backend terminal success is necessary but never sufficient. A delegation can
+    become ``succeeded`` only when its matching Work Contract is currently
+    ``SATISFIED`` (or a previously persisted SATISFIED verdict exists for the
+    same immutable contract digest). Missing/unreadable/UNVERIFIED evidence
+    therefore remains fail-closed as ``reconciling``.
+    """
     policy = op.OperatorPolicy()
     try:
         policy.require_level("read_only")
@@ -483,17 +499,19 @@ def hermes_delegation_reconcile(
         path = _db_path(hermes_root)
         with _connect(path, write=False) as db:
             stored = dict(_get_row(db, delegation_id))
+
         observed = _latest_observation(stored["task_id"], root)
         if observed is None:
-            desired = "reconciling" if stored["state"] not in TERMINAL_STATES else stored["state"]
+            observed_desired = "reconciling" if stored["state"] not in TERMINAL_STATES else stored["state"]
             backend_state = "unobserved"
             outcome = stored.get("outcome") or ""
         else:
             backend_state = str(observed.get("status") or observed.get("state") or observed.get("outcome") or "unknown")
             outcome = str(observed.get("outcome") or observed.get("state") or backend_state)
-            desired = _normalize_state(outcome or backend_state)
+            observed_desired = _normalize_state(outcome or backend_state)
             if observed.get("error"):
-                desired = "failed"
+                observed_desired = "failed"
+
         verdict = str(stored.get("validation_verdict") or "")
         if contract_json:
             canonical, contract, sha = contract_mod._parse_contract(contract_json)
@@ -501,13 +519,38 @@ def hermes_delegation_reconcile(
                 raise ValueError("contract_json does not match delegation lineage")
             validation = json.loads(contract_mod.hermes_contract_validate(canonical, hermes_root=root))
             verdict = str(validation.get("verdict") or "")
-        changed = desired != stored["state"] or _bounded(backend_state, 128) != stored["backend_state"] or verdict != stored.get("validation_verdict", "")
+
+        desired = observed_desired
+        if observed_desired == "succeeded" and verdict != "SATISFIED":
+            desired = "reconciling"
+        verified_success = desired == "succeeded" and verdict == "SATISFIED"
+
+        changed = (
+            desired != stored["state"]
+            or _bounded(backend_state, 128) != stored["backend_state"]
+            or verdict != stored.get("validation_verdict", "")
+        )
         preview = dict(stored)
-        preview.update({"state": desired, "backend_state": _bounded(backend_state, 128), "outcome": _bounded(outcome, 128), "validation_verdict": _bounded(verdict, 64)})
+        preview.update({
+            "state": desired,
+            "backend_state": _bounded(backend_state, 128),
+            "outcome": _bounded(outcome, 128),
+            "validation_verdict": _bounded(verdict, 64),
+        })
         if not apply:
-            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": changed, "applied": False, "delegation": _surface(preview), "observed": observed}, ensure_ascii=False, indent=2)
+            return json.dumps({
+                "success": True,
+                "schema_version": SCHEMA_VERSION,
+                "changed": changed,
+                "applied": False,
+                "delegation": _surface(preview),
+                "observed": observed,
+            }, ensure_ascii=False, indent=2)
+
         now = _now()
         terminal_at = stored.get("terminal_at") or (now if desired in TERMINAL_STATES else None)
+        if desired not in TERMINAL_STATES:
+            terminal_at = None
         with _connect(path, write=True) as db:
             _init(db)
             db.execute(
@@ -518,8 +561,18 @@ def hermes_delegation_reconcile(
                 _event(db, delegation_id, "delegation.reconciled", from_state=stored["state"], to_state=desired, backend_state=backend_state, observed=observed)
             db.commit()
             row = dict(_get_row(db, delegation_id))
+
         if row.get("mission_id"):
-            mission_runtime.record_attachment_state(row["mission_id"], "delegation", delegation_id, _mission_state(desired), evidence_ref=f"delegation:{delegation_id}", hermes_root=root)
+            evidence_ref = f"contract:{row['contract_sha256']}" if verified_success else f"delegation:{delegation_id}"
+            mission_runtime.record_attachment_state(
+                row["mission_id"],
+                "delegation",
+                delegation_id,
+                _mission_state(desired),
+                evidence_ref=evidence_ref,
+                verified=verified_success,
+                hermes_root=root,
+            )
         if changed:
             _live_event("delegation.reconciled", row)
         _audit(tool="hermes_delegation_reconcile", policy=policy, dry_run=False, success=True, changed=changed, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
