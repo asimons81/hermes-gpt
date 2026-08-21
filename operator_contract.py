@@ -875,6 +875,34 @@ def _attributable_identities(contract: dict[str, Any]) -> set[str]:
     return identities
 
 
+def _remote_forbidden_evidence(
+    task_id: str, hermes_root: Path
+) -> list[dict[str, Any]]:
+    try:
+        backend = op_runners.get_backend("fabric")
+    except LookupError:
+        return []
+    observer = getattr(backend, "observed_forbidden_checks", None)
+    if not callable(observer):
+        return []
+    try:
+        value = observer(task_id, hermes_root=hermes_root)
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return []
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _has_remote_fabric_run(task_id: str, hermes_root: Path) -> bool:
+    try:
+        runs = op_runners.observed_runs(task_id, hermes_root=hermes_root)
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return False
+    return any(
+        isinstance(run, dict) and str(run.get("scope") or "").startswith("fabric:")
+        for run in runs
+    )
+
+
 def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, Any]:
     forbidden = contract["forbidden_actions"]
     if not forbidden:
@@ -929,9 +957,33 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
             except OSError:
                 continue
 
+    remote_checks = _remote_forbidden_evidence(task_id, hermes_root)
+    for remote in remote_checks:
+        if remote.get("status") == "FAIL":
+            for item in remote.get("signals") or []:
+                if isinstance(item, dict):
+                    signals.append(dict(item))
     if signals:
         detail = "; ".join(f"{s['action']} ({s['class']}) via {s['tool']}" for s in signals[:5])
         return {"kind": "forbidden", "status": "FAIL", "detail": f"forbidden action detected: {detail}", "evidence": signals[:10]}
+    if remote_checks:
+        if any(check.get("status") != "PASS" for check in remote_checks):
+            return {
+                "kind": "forbidden",
+                "status": "UNVERIFIED",
+                "detail": "remote Fabric forbidden-action evidence is not definitive",
+            }
+        return {
+            "kind": "forbidden",
+            "status": "PASS",
+            "detail": "no forbidden actions detected in coordinator and admitted peer audit evidence",
+        }
+    if _has_remote_fabric_run(task_id, hermes_root):
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "remote Fabric run lacks admitted forbidden-action evidence",
+        }
     return {"kind": "forbidden", "status": "PASS", "detail": "no forbidden actions detected in audit/artifacts"}
 
 

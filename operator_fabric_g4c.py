@@ -435,8 +435,8 @@ class FabricPeerService(base.FabricPeerService):
                 "INSERT INTO attempts"
                 "(attempt_id,dispatch_id,envelope_sha256,contract_sha256,task_id,coordinator_principal,"
                 "node_name,remote_backend,logical_workspace,conflict_domain,authorization_class,policy_sha256,"
-                "local_task_id,state,created_at,updated_at,write_epoch,execution_unit_kind,execution_unit_id,retry_parent_attempt_id)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "authority_json,local_task_id,state,created_at,updated_at,write_epoch,execution_unit_kind,execution_unit_id,retry_parent_attempt_id)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     envelope["attempt_id"],
                     envelope["dispatch_id"],
@@ -450,6 +450,13 @@ class FabricPeerService(base.FabricPeerService):
                     mapping.conflict_domain,
                     envelope["authorization"]["class"],
                     policy.digest,
+                    base.canonical_json(
+                        {
+                            "assigned_profile": envelope["assigned_profile"],
+                            "allowed_profiles": list(envelope["allowed_profiles"]),
+                            "forbidden_actions": [dict(item) for item in envelope["forbidden_actions"]],
+                        }
+                    ),
                     envelope["attempt_id"],
                     "ACCEPTED",
                     now,
@@ -1727,16 +1734,36 @@ class FabricCoordinator(base.FabricCoordinator):
                 with resolved.open("rb") as fh:
                     while chunk := fh.read(1024 * 1024):
                         digest.update(chunk)
+                middle_stat = resolved.stat()
+                if (
+                    middle_stat.st_size != expected_size
+                    or middle_stat.st_dev != before_stat.st_dev
+                    or middle_stat.st_ino != before_stat.st_ino
+                    or middle_stat.st_mtime_ns != before_stat.st_mtime_ns
+                    or middle_stat.st_ctime_ns != before_stat.st_ctime_ns
+                    or digest.hexdigest() != row["sha256"]
+                ):
+                    continue
+
+                # Re-read the admitted bytes before returning evidence. Stat
+                # timestamps alone are not a sufficient mutation detector on
+                # every filesystem: a same-size rewrite can occur within one
+                # timestamp tick after the first read. Two independent hashes
+                # must both match the admitted digest while file identity stays
+                # stable, otherwise artifact evidence fails closed.
+                verify_digest = hashlib.sha256()
+                with resolved.open("rb") as fh:
+                    while chunk := fh.read(1024 * 1024):
+                        verify_digest.update(chunk)
                 after_stat = resolved.stat()
                 if (
                     after_stat.st_size != expected_size
-                    or after_stat.st_dev != before_stat.st_dev
-                    or after_stat.st_ino != before_stat.st_ino
-                    or after_stat.st_mtime_ns != before_stat.st_mtime_ns
-                    or after_stat.st_ctime_ns != before_stat.st_ctime_ns
+                    or after_stat.st_dev != middle_stat.st_dev
+                    or after_stat.st_ino != middle_stat.st_ino
+                    or after_stat.st_mtime_ns != middle_stat.st_mtime_ns
+                    or after_stat.st_ctime_ns != middle_stat.st_ctime_ns
+                    or verify_digest.hexdigest() != row["sha256"]
                 ):
-                    continue
-                if digest.hexdigest() != row["sha256"]:
                     continue
             except (OSError, TypeError, ValueError):
                 continue
