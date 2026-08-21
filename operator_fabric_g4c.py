@@ -1665,11 +1665,12 @@ class FabricCoordinator(base.FabricCoordinator):
         allowed_shas = {contract_sha256}
         journal = router._journal_path(self.hermes_root)
         try:
-            size = journal.stat().st_size
+            # Stream the whole journal: an older but still-valid routing
+            # decision must not silently vanish merely because the journal grew
+            # past a fixed tail window. Parsing stays bounded per record (each
+            # line is length-capped and independently JSON-validated), and the
+            # file is opened read-only for the duration of the scan.
             with journal.open("rb") as fh:
-                if size > 4_000_000:
-                    fh.seek(size - 4_000_000)
-                    fh.readline()
                 for raw_line in fh:
                     if not raw_line or len(raw_line) > 128_000:
                         continue
@@ -1719,12 +1720,22 @@ class FabricCoordinator(base.FabricCoordinator):
                 if not resolved.is_relative_to(admission_root) or not resolved.is_file():
                     continue
                 expected_size = int(row["size_bytes"])
-                if resolved.stat().st_size != expected_size:
+                before_stat = resolved.stat()
+                if before_stat.st_size != expected_size:
                     continue
                 digest = hashlib.sha256()
                 with resolved.open("rb") as fh:
                     while chunk := fh.read(1024 * 1024):
                         digest.update(chunk)
+                after_stat = resolved.stat()
+                if (
+                    after_stat.st_size != expected_size
+                    or after_stat.st_dev != before_stat.st_dev
+                    or after_stat.st_ino != before_stat.st_ino
+                    or after_stat.st_mtime_ns != before_stat.st_mtime_ns
+                    or after_stat.st_ctime_ns != before_stat.st_ctime_ns
+                ):
+                    continue
                 if digest.hexdigest() != row["sha256"]:
                     continue
             except (OSError, TypeError, ValueError):
@@ -1796,51 +1807,61 @@ class AutoRouter(router.AutoRouter):
         dry_run: bool = False,
     ) -> dict[str, Any]:
         decision = super().route(contract, timeout=timeout, dry_run=dry_run)
-        needs_write = write_guard.is_write(contract)
-        needs_artifacts = bool(contract.get("expected_artifacts"))
-        if not (needs_write or needs_artifacts):
-            router._audit_route(
-                decision,
-                success=decision.get("selected") is not None,
-                dry_run=dry_run,
+        try:
+            needs_write = write_guard.is_write(contract)
+            needs_artifacts = bool(contract.get("expected_artifacts"))
+            if not (needs_write or needs_artifacts):
+                router._audit_route(
+                    decision,
+                    success=decision.get("selected") is not None,
+                    dry_run=dry_run,
+                )
+                return decision
+            for candidate in decision.get("candidates", []):
+                if not candidate.get("remote"):
+                    continue
+                features = self._features.get(str(candidate.get("node") or ""), set())
+                filtered: list[dict[str, str]] = []
+                for exclusion in candidate.get("exclusions") or []:
+                    code = exclusion.get("code")
+                    unlock_write = (
+                        code == "WRITE_CONFLICT_GUARD_UNAVAILABLE"
+                        and needs_write
+                        and write_guard.WRITE_FEATURES <= features
+                    )
+                    unlock_artifact = (
+                        code == "REMOTE_ARTIFACT_ADMISSION_UNAVAILABLE"
+                        and needs_artifacts
+                        and artifacts.ARTIFACT_FEATURES <= features
+                    )
+                    if not (unlock_write or unlock_artifact):
+                        filtered.append(exclusion)
+                candidate["exclusions"] = filtered
+                candidate["eligible"] = not filtered
+                candidate["g4c_features"] = sorted(features)
+            eligible = sorted(
+                (item for item in decision.get("candidates", []) if item.get("eligible")),
+                key=lambda item: tuple(item.get("rank") or []),
             )
-            return decision
-        for candidate in decision.get("candidates", []):
-            if not candidate.get("remote"):
-                continue
-            features = self._features.get(str(candidate.get("node") or ""), set())
-            filtered: list[dict[str, str]] = []
-            for exclusion in candidate.get("exclusions") or []:
-                code = exclusion.get("code")
-                unlock_write = (
-                    code == "WRITE_CONFLICT_GUARD_UNAVAILABLE"
-                    and needs_write
-                    and write_guard.WRITE_FEATURES <= features
-                )
-                unlock_artifact = (
-                    code == "REMOTE_ARTIFACT_ADMISSION_UNAVAILABLE"
-                    and needs_artifacts
-                    and artifacts.ARTIFACT_FEATURES <= features
-                )
-                if not (unlock_write or unlock_artifact):
-                    filtered.append(exclusion)
-            candidate["exclusions"] = filtered
-            candidate["eligible"] = not filtered
-            candidate["g4c_features"] = sorted(features)
-        eligible = sorted(
-            (item for item in decision.get("candidates", []) if item.get("eligible")),
-            key=lambda item: tuple(item.get("rank") or []),
-        )
-        decision["selected"] = None
-        if eligible:
-            winner = eligible[0]
-            decision["selected"] = {
-                "node": winner["node"],
-                "backend": winner["backend"],
-                "transport_backend": winner["transport_backend"],
-                "remote": winner["remote"],
-                "rank": winner["rank"],
-            }
+            decision["selected"] = None
+            if eligible:
+                winner = eligible[0]
+                decision["selected"] = {
+                    "node": winner["node"],
+                    "backend": winner["backend"],
+                    "transport_backend": winner["transport_backend"],
+                    "remote": winner["remote"],
+                    "rank": winner["rank"],
+                }
+        except Exception:
+            # G4-C feature-gate processing raised after the preliminary base
+            # route. The base audit was deferred, so emit exactly one failure
+            # record now. The preliminary winner is never claimed as selected:
+            # the gate evaluation that proves eligibility did not complete.
+            failed = dict(decision)
+            failed["selected"] = None
+            router._audit_route(failed, success=False, dry_run=dry_run)
+            raise
         decision["g4c_guards"] = {
             "write_required": needs_write,
             "artifact_required": needs_artifacts,

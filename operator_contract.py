@@ -792,12 +792,12 @@ def _assignee_identity(contract: dict[str, Any]) -> str:
 
 def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: Path) -> dict[str, Any]:
     review = contract["review_requirements"]
-    assignee_identity = _assignee_identity(contract)
+    assignee_identities = _attributable_identities(contract)
     if not review["required"]:
         return {"kind": "review", "status": "PASS", "detail": "review not required"}
 
     declared_reviewer = review.get("reviewer") or ""
-    if declared_reviewer and declared_reviewer == assignee_identity:
+    if declared_reviewer and declared_reviewer in assignee_identities:
         return {
             "kind": "review",
             "status": "FAIL",
@@ -814,7 +814,7 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
         if verdict not in ("SATISFIED", "accept", "ACCEPT"):
             continue
         reviewer = rec.get("reviewer") or rec.get("profile") or ""
-        if reviewer and reviewer != assignee_identity:
+        if reviewer and reviewer not in assignee_identities:
             return {
                 "kind": "review",
                 "status": "PASS",
@@ -833,7 +833,7 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
             if rec.get("verdict") != "SATISFIED":
                 continue
             reviewer = rec.get("reviewer") or ""
-            if reviewer and reviewer != assignee_identity:
+            if reviewer and reviewer not in assignee_identities:
                 return {
                     "kind": "review",
                     "status": "PASS",
@@ -844,7 +844,7 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
     # Evidence 2: human approval reference by someone other than the assignee.
     auth = contract.get("authorization") or {}
     approved_by = auth.get("approved_by") or ""
-    if approved_by and approved_by != assignee_identity and auth.get("approval_reference"):
+    if approved_by and approved_by not in assignee_identities and auth.get("approval_reference"):
         return {
             "kind": "review",
             "status": "PASS",
@@ -857,12 +857,30 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
     }
 
 
+def _attributable_identities(contract: dict[str, Any]) -> set[str]:
+    """Identities whose audit records are attributable to this contract's execution.
+
+    ``assigned_profile`` is the effective assignee (authority-bearing actor).
+    ``assigned_agent`` is the placement identity: after remote auto placement it
+    is the Fabric node / dispatcher name that physically executed on the
+    assignee's behalf. Task-scoped records recorded under either identity must
+    be attributed; records under any other concrete profile stay unattributed
+    so unrelated concurrent actors cannot fail or satisfy this contract.
+    """
+    identities: set[str] = set()
+    for value in (contract.get("assigned_profile"), contract.get("assigned_agent")):
+        text = str(value or "").strip()
+        if text:
+            identities.add(text)
+    return identities
+
+
 def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, Any]:
     forbidden = contract["forbidden_actions"]
     if not forbidden:
         return {"kind": "forbidden", "status": "PASS", "detail": "no forbidden actions declared"}
 
-    assignee_identity = _assignee_identity(contract)
+    identities = _attributable_identities(contract)
     task_id = contract["task_id"]
     labels = [fa["action"].lower() for fa in forbidden]
     signals: list[dict[str, Any]] = []
@@ -874,7 +892,14 @@ def _check_forbidden(contract: dict[str, Any], hermes_root: Path) -> dict[str, A
         if str(rec.get("task_id") or "") != task_id:
             continue
         profile = str(rec.get("profile") or "")
-        if profile != assignee_identity and profile not in ("", "unknown"):
+        source = str(rec.get("source_profile") or "").strip()
+        attributable = (
+            profile in identities
+            or profile in ("", "unknown")
+            # Records written by a dispatcher/peer on behalf of the assignee.
+            or (bool(source) and source in identities)
+        )
+        if not attributable:
             continue
         tool = str(rec.get("tool") or "").lower()
         summary = str(rec.get("summary") or "").lower()

@@ -564,6 +564,151 @@ def test_auto_artifact_evidence_maps_original_contract_and_rehashes_admission(tm
     ) == []
 
 
+def test_validator_sha_links_routing_journal_and_admitted_artifacts_end_to_end(tmp_path, monkeypatch):
+    """End-to-end: validate() ties the canonical SHA to the journal lineage and
+    coordinator-admitted artifact evidence, and fails closed on tamper."""
+    content = b"end-to-end admitted artifact"
+    real_get_backend = runners.get_backend
+    (tmp_path / "out.txt").write_bytes(content)
+    observed = [_completed_observation()]
+    svc = make_service(tmp_path, monkeypatch, observed=observed)
+    coord = make_coordinator(tmp_path, svc)
+    backend, _captured = _auto_backend(tmp_path, svc, coord, monkeypatch)
+    raw = auto_contract(
+        tmp_path,
+        artifacts=[{"path": "out.txt", "must_exist": True, "min_bytes": 1}],
+    )
+    canonical, normalized = op_contract._canonical_contract(raw)
+    canonical_sha = op_contract._contract_sha256(canonical)
+
+    result = backend.dispatch(
+        normalized,
+        confirm=True,
+        dry_run=False,
+        timeout=10,
+        hermes_root=tmp_path,
+    )
+    assert result["success"] is True
+    assert result["selected_node"] == "node-a"
+    coord.poll(result["attempt_id"], reconcile=True)
+    assert coord.collect(result["attempt_id"], timeout=10)["state"] == "COMPLETED"
+
+    journal_record = json.loads(
+        router._journal_path(tmp_path).read_text().splitlines()[-1]
+    )
+    assert journal_record["schema"] == router.ROUTING_DECISION_SCHEMA
+    assert journal_record["task_id"] == normalized["task_id"]
+    assert journal_record["original_contract_sha256"] == canonical_sha
+    assert journal_record["placed_contract_sha256"] == result["placed_contract_sha256"]
+    assert journal_record["selected"]["remote"] is True
+
+    # Force the artifact to be provable only through coordinator admission.
+    (tmp_path / "out.txt").unlink()
+    monkeypatch.setattr(runners, "get_backend", real_get_backend)
+    verdict = _validate_with_coordinator(canonical, coord, tmp_path)
+    assert verdict["contract_sha256"] == canonical_sha
+    by_kind = {item["kind"]: item for item in verdict["checks"]}
+    assert by_kind["run_state"]["status"] == "PASS"
+    artifact_check = by_kind["artifacts"]
+    assert artifact_check["status"] == "PASS"
+    artifact_evidence = verdict["evidence"]["artifacts"]
+    assert artifact_evidence[0]["provenance"] == "coordinator_verified_artifact"
+    assert artifact_evidence[0]["sha256"] == hashlib.sha256(content).hexdigest()
+
+    # Fail-closed: tampered admission bytes must not satisfy the artifact check.
+    with base._connect_readonly(coord.db_path) as db:
+        row = db.execute(
+            "SELECT admission_path FROM artifact_admissions WHERE attempt_id=?",
+            (result["attempt_id"],),
+        ).fetchone()
+    assert row is not None
+    admission_path = Path(row["admission_path"])
+
+    # Fail-closed if the admitted path is replaced/modified while its bytes are
+    # being hashed. Use same-size replacement bytes so the post-read identity
+    # checks, not just the size guard, are what reject the evidence.
+    original_open = Path.open
+
+    class _MutatingReader:
+        def __init__(self, handle):
+            self.handle = handle
+            self.mutated = False
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return self.handle.__exit__(exc_type, exc, tb)
+
+        def read(self, size=-1):
+            data = self.handle.read(size)
+            if data and not self.mutated:
+                self.mutated = True
+                with original_open(admission_path, "wb") as writer:
+                    writer.write(b"x" * len(content))
+            return data
+
+    def mutating_open(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if path == admission_path and mode == "rb":
+            return _MutatingReader(handle)
+        return handle
+
+    admission_path.write_bytes(content)
+    with monkeypatch.context() as mutation_patch:
+        mutation_patch.setattr(Path, "open", mutating_open)
+        raced = _validate_with_coordinator(canonical, coord, tmp_path)
+    raced_by_kind = {item["kind"]: item for item in raced["checks"]}
+    assert raced_by_kind["artifacts"]["status"] == "FAIL"
+
+    admission_path.write_bytes(b"tampered")
+    tampered = _validate_with_coordinator(canonical, coord, tmp_path)
+    tampered_by_kind = {item["kind"]: item for item in tampered["checks"]}
+    assert tampered_by_kind["artifacts"]["status"] == "FAIL"
+
+
+def test_observed_artifacts_lineage_survives_journal_growth_past_tail_window(tmp_path, monkeypatch):
+    """A valid older routing decision must not vanish when the journal is big."""
+    content = b"admitted artifact behind a large journal"
+    (tmp_path / "out.txt").write_bytes(content)
+    observed = [_completed_observation()]
+    svc = make_service(tmp_path, monkeypatch, observed=observed)
+    coord = make_coordinator(tmp_path, svc)
+    backend, _captured = _auto_backend(tmp_path, svc, coord, monkeypatch)
+    value = auto_contract(
+        tmp_path,
+        artifacts=[{"path": "out.txt", "must_exist": True, "min_bytes": 1}],
+    )
+
+    result = backend.dispatch(
+        value,
+        confirm=True,
+        dry_run=False,
+        timeout=10,
+        hermes_root=tmp_path,
+    )
+    assert result["success"] is True
+    coord.poll(result["attempt_id"], reconcile=True)
+    assert coord.collect(result["attempt_id"], timeout=10)["state"] == "COMPLETED"
+
+    # Push the routing decision far outside any 4 MB tail window by appending
+    # oversized junk records after it (each is skipped per-record, bounded).
+    journal = router._journal_path(tmp_path)
+    with journal.open("ab") as fh:
+        fh.write(("x" * 100_000 + "\n").encode() * 45)
+    assert journal.stat().st_size > 4_000_000
+
+    admitted = coord.observed_artifacts(
+        value["task_id"],
+        contract_sha256=base.sha256_json(value),
+    )
+    assert len(admitted) == 1
+    assert admitted[0]["logical_name"] == "out.txt"
+    assert admitted[0]["sha256"] == hashlib.sha256(content).hexdigest()
+
+
 def test_remote_completion_cannot_self_satisfy_required_human_review(tmp_path, monkeypatch):
     real_get_backend = runners.get_backend
     observed = [_completed_observation()]
