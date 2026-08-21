@@ -767,8 +767,17 @@ class AutoRouter:
             "selected": selected,
             "candidates": candidates,
         }
-        _audit_route(decision, success=selected is not None, dry_run=dry_run)
+        self._audit_decision(decision, dry_run=dry_run)
         return decision
+
+    def _audit_decision(self, decision: dict[str, Any], *, dry_run: bool) -> None:
+        """Audit the authoritative routing decision.
+
+        G4-C overrides this hook so it can defer auditing until its live feature
+        gates have transformed the preliminary G4-B candidate set. Ordinary
+        G4-B callers retain the existing one-record behavior.
+        """
+        _audit_route(decision, success=decision.get("selected") is not None, dry_run=dry_run)
 
     def placed_contract(self, contract: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
         selected = decision.get("selected")

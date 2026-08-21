@@ -590,6 +590,31 @@ def test_each_stage_emits_valid_m1_contract(hermes_root, monkeypatch):
         assert len(csha) == 64
 
 
+def test_auto_stage_contract_delegates_agent_choice_without_losing_owner_profile(hermes_root):
+    ws = hermes_root.parent / "ws"
+    execution = {
+        "backend": "auto",
+        "options": {
+            "requirements": {"runners": ["pi_rpc"]},
+            "preferences": {"prefer_local": True},
+            "logical_workspace": "repo",
+            "runner_options": {},
+        },
+    }
+    wf = _canonical_flow(ws, executions={"implementation": execution})
+    _, workflow, _ = swarm._parse_workflow(json.dumps(wf))
+    stage = next(item for item in workflow["stages"] if item["id"] == "implementation")
+    contract = swarm._stage_contract(workflow, stage)
+
+    assert contract["assigned_agent"] == "auto"
+    assert contract["assigned_profile"] == stage["owner"]
+    assert contract["allowed_scope"]["profiles"] == [stage["owner"]]
+    assert contract["execution"] == execution
+    _, normalized, _ = contract_mod._parse_contract(json.dumps(contract))
+    assert normalized["assigned_agent"] == "auto"
+    assert normalized["assigned_profile"] == stage["owner"]
+
+
 def test_worktree_plan_native_ng5_shape(hermes_root):
     """D-SW2/NG5: implementation stages plan upstream worktrees, not git."""
     ws = hermes_root.parent / "ws"

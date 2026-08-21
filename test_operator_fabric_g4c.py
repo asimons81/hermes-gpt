@@ -1301,6 +1301,104 @@ def test_auto_remote_write_unlock_requires_live_g4c_features(tmp_path, monkeypat
     assert unlocked["selected"]["node"] == "node-a"
 
 
+def test_g4c_auto_route_audits_only_authoritative_post_unlock_decision(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
+    audits: list[dict[str, object]] = []
+
+    def capture_audit(decision, *, success, dry_run):
+        audits.append(
+            {
+                "success": success,
+                "dry_run": dry_run,
+                "selected": dict(decision.get("selected") or {}),
+            }
+        )
+
+    monkeypatch.setattr(base_router, "_audit_route", capture_audit)
+    now = datetime.now(timezone.utc)
+    decision = fabric.AutoRouter(
+        registry_loader=lambda: {"node-a": node()},
+        routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
+        local_backends=list,
+        remote_probe=lambda _node, _timeout: {
+            "healthy": True,
+            "latency_ms": 5,
+            "features": [
+                fabric.FEATURE_WRITE_OWNERSHIP,
+                fabric.FEATURE_EXECUTION_UNIT,
+                fabric.FEATURE_WRITE_EPOCH,
+            ],
+        },
+        now=lambda: now,
+    ).route(auto_contract(tmp_path, auth="reversible_write"), dry_run=False)
+
+    assert decision["selected"]["node"] == "node-a"
+    assert decision["selected"]["backend"] == "pi_rpc"
+    assert audits == [
+        {
+            "success": True,
+            "dry_run": False,
+            "selected": {
+                "node": "node-a",
+                "backend": "pi_rpc",
+                "transport_backend": "fabric",
+                "remote": True,
+                "rank": decision["selected"]["rank"],
+            },
+        }
+    ]
+
+
+def test_g4c_auto_route_audits_failure_when_feature_gate_raises(tmp_path, monkeypatch):
+    """A gate crash after the preliminary base route must still leave one audit
+    record, must not claim the preliminary winner, and must propagate."""
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
+    audits: list[dict[str, object]] = []
+
+    def capture_audit(decision, *, success, dry_run):
+        audits.append(
+            {
+                "success": success,
+                "dry_run": dry_run,
+                "selected": decision.get("selected"),
+            }
+        )
+
+    monkeypatch.setattr(base_router, "_audit_route", capture_audit)
+
+    class _BoomFeatures(dict):
+        def get(self, *_args, **_kwargs):
+            raise RuntimeError("g4c feature gate exploded")
+
+    now = datetime.now(timezone.utc)
+    router_obj = fabric.AutoRouter(
+        registry_loader=lambda: {"node-a": node()},
+        routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
+        local_backends=list,
+        remote_probe=lambda _node, _timeout: {
+            "healthy": True,
+            "latency_ms": 5,
+            "features": [],
+        },
+        now=lambda: now,
+    )
+    monkeypatch.setattr(router_obj, "_features", _BoomFeatures())
+
+    with pytest.raises(RuntimeError, match="feature gate exploded"):
+        router_obj.route(
+            auto_contract(
+                tmp_path,
+                artifacts=[{"path": "out.txt", "must_exist": True, "min_bytes": 1}],
+            ),
+            dry_run=False,
+        )
+
+    assert audits == [{"success": False, "dry_run": False, "selected": None}]
+
 
 def test_auto_remote_artifact_unlock_requires_snapshot_features(tmp_path, monkeypatch):
     from datetime import datetime, timezone

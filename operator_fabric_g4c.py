@@ -1629,6 +1629,131 @@ class FabricCoordinator(base.FabricCoordinator):
                 )
         return out
 
+    def observed_artifacts(
+        self,
+        task_id: str,
+        *,
+        contract_sha256: str,
+    ) -> list[dict[str, Any]]:
+        """Return re-verified coordinator-admitted artifacts for one contract lineage.
+
+        Auto placement changes the canonical contract before Fabric dispatch. The
+        routing journal is coordinator-local evidence linking the original Work
+        Contract hash to that placed hash. Only completed attempts with admitted
+        run evidence are eligible, and the admission bytes are re-hashed before
+        they are returned as completion evidence.
+        """
+        if not base._ID_RE.fullmatch(task_id or "") or not base._SHA_RE.fullmatch(contract_sha256 or ""):
+            return []
+        # Observation must remain strictly read-only. Ordinary Work Contract
+        # validation may construct the Fabric backend even when Fabric has never
+        # run; do not migrate/create a coordinator journal merely to look for
+        # artifact evidence.
+        if not self.db_path.is_file():
+            return []
+        try:
+            with base._connect_readonly(self.db_path) as db:
+                tables = {
+                    str(row["name"])
+                    for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                }
+        except sqlite3.Error:
+            return []
+        if not {"attempts", "dispatches", "artifact_admissions"} <= tables:
+            return []
+
+        allowed_shas = {contract_sha256}
+        journal = router._journal_path(self.hermes_root)
+        try:
+            # Stream the whole journal: an older but still-valid routing
+            # decision must not silently vanish merely because the journal grew
+            # past a fixed tail window. Parsing stays bounded per record (each
+            # line is length-capped and independently JSON-validated), and the
+            # file is opened read-only for the duration of the scan.
+            with journal.open("rb") as fh:
+                for raw_line in fh:
+                    if not raw_line or len(raw_line) > 128_000:
+                        continue
+                    try:
+                        record = base.strict_json_loads(raw_line, maximum=128_000)
+                    except FabricError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    selected = record.get("selected")
+                    if (
+                        record.get("schema") != router.ROUTING_DECISION_SCHEMA
+                        or record.get("task_id") != task_id
+                        or record.get("original_contract_sha256") != contract_sha256
+                        or not isinstance(selected, dict)
+                        or selected.get("remote") is not True
+                        or selected.get("transport_backend") != "fabric"
+                    ):
+                        continue
+                    placed_sha = record.get("placed_contract_sha256")
+                    if isinstance(placed_sha, str) and base._SHA_RE.fullmatch(placed_sha):
+                        allowed_shas.add(placed_sha)
+        except OSError:
+            pass
+
+        placeholders = ",".join("?" for _ in allowed_shas)
+        with base._connect_readonly(self.db_path) as db:
+            rows = db.execute(
+                "SELECT aa.*,d.contract_sha256,a.state,a.evidence_json,a.created_at "
+                "FROM artifact_admissions aa "
+                "JOIN dispatches d ON d.dispatch_id=aa.dispatch_id "
+                "JOIN attempts a ON a.attempt_id=aa.attempt_id "
+                f"WHERE d.task_id=? AND d.contract_sha256 IN ({placeholders}) "
+                "AND a.state='COMPLETED' AND a.evidence_json IS NOT NULL "
+                "ORDER BY a.created_at,aa.logical_name",
+                (task_id, *sorted(allowed_shas)),
+            ).fetchall()
+
+        admission_root = (base._root(self.hermes_root) / "fabric" / "admitted").resolve()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                candidate = Path(str(row["admission_path"]))
+                if candidate.is_symlink():
+                    continue
+                resolved = candidate.resolve(strict=True)
+                if not resolved.is_relative_to(admission_root) or not resolved.is_file():
+                    continue
+                expected_size = int(row["size_bytes"])
+                before_stat = resolved.stat()
+                if before_stat.st_size != expected_size:
+                    continue
+                digest = hashlib.sha256()
+                with resolved.open("rb") as fh:
+                    while chunk := fh.read(1024 * 1024):
+                        digest.update(chunk)
+                after_stat = resolved.stat()
+                if (
+                    after_stat.st_size != expected_size
+                    or after_stat.st_dev != before_stat.st_dev
+                    or after_stat.st_ino != before_stat.st_ino
+                    or after_stat.st_mtime_ns != before_stat.st_mtime_ns
+                    or after_stat.st_ctime_ns != before_stat.st_ctime_ns
+                ):
+                    continue
+                if digest.hexdigest() != row["sha256"]:
+                    continue
+            except (OSError, TypeError, ValueError):
+                continue
+            out.append(
+                {
+                    "logical_name": row["logical_name"],
+                    "size_bytes": expected_size,
+                    "sha256": row["sha256"],
+                    "media_type": row["media_type"],
+                    "active_content": bool(row["active_content"]),
+                    "attempt_id": row["attempt_id"],
+                    "dispatch_id": row["dispatch_id"],
+                    "provenance": "coordinator_verified_artifact",
+                }
+            )
+        return out
+
 
 class AutoRouter(router.AutoRouter):
     """Unlock only remote G4-B bridge exclusions proven by live G4-C features."""
@@ -1668,6 +1793,12 @@ class AutoRouter(router.AutoRouter):
 
         super().__init__(remote_probe=selected_probe, hermes_root=hermes_root, **kwargs)
 
+    def _audit_decision(self, decision: dict[str, Any], *, dry_run: bool) -> None:
+        # The base G4-B decision is preliminary for write/artifact-capable remote
+        # candidates. Defer its audit until ``route`` applies the live G4-C
+        # feature gates so the durable audit trail describes the actual winner.
+        return None
+
     def route(
         self,
         contract: dict[str, Any],
@@ -1676,50 +1807,70 @@ class AutoRouter(router.AutoRouter):
         dry_run: bool = False,
     ) -> dict[str, Any]:
         decision = super().route(contract, timeout=timeout, dry_run=dry_run)
-        needs_write = write_guard.is_write(contract)
-        needs_artifacts = bool(contract.get("expected_artifacts"))
-        if not (needs_write or needs_artifacts):
-            return decision
-        for candidate in decision.get("candidates", []):
-            if not candidate.get("remote"):
-                continue
-            features = self._features.get(str(candidate.get("node") or ""), set())
-            filtered: list[dict[str, str]] = []
-            for exclusion in candidate.get("exclusions") or []:
-                code = exclusion.get("code")
-                unlock_write = (
-                    code == "WRITE_CONFLICT_GUARD_UNAVAILABLE"
-                    and needs_write
-                    and write_guard.WRITE_FEATURES <= features
+        try:
+            needs_write = write_guard.is_write(contract)
+            needs_artifacts = bool(contract.get("expected_artifacts"))
+            if not (needs_write or needs_artifacts):
+                router._audit_route(
+                    decision,
+                    success=decision.get("selected") is not None,
+                    dry_run=dry_run,
                 )
-                unlock_artifact = (
-                    code == "REMOTE_ARTIFACT_ADMISSION_UNAVAILABLE"
-                    and needs_artifacts
-                    and artifacts.ARTIFACT_FEATURES <= features
-                )
-                if not (unlock_write or unlock_artifact):
-                    filtered.append(exclusion)
-            candidate["exclusions"] = filtered
-            candidate["eligible"] = not filtered
-            candidate["g4c_features"] = sorted(features)
-        eligible = sorted(
-            (item for item in decision.get("candidates", []) if item.get("eligible")),
-            key=lambda item: tuple(item.get("rank") or []),
-        )
-        decision["selected"] = None
-        if eligible:
-            winner = eligible[0]
-            decision["selected"] = {
-                "node": winner["node"],
-                "backend": winner["backend"],
-                "transport_backend": winner["transport_backend"],
-                "remote": winner["remote"],
-                "rank": winner["rank"],
-            }
+                return decision
+            for candidate in decision.get("candidates", []):
+                if not candidate.get("remote"):
+                    continue
+                features = self._features.get(str(candidate.get("node") or ""), set())
+                filtered: list[dict[str, str]] = []
+                for exclusion in candidate.get("exclusions") or []:
+                    code = exclusion.get("code")
+                    unlock_write = (
+                        code == "WRITE_CONFLICT_GUARD_UNAVAILABLE"
+                        and needs_write
+                        and write_guard.WRITE_FEATURES <= features
+                    )
+                    unlock_artifact = (
+                        code == "REMOTE_ARTIFACT_ADMISSION_UNAVAILABLE"
+                        and needs_artifacts
+                        and artifacts.ARTIFACT_FEATURES <= features
+                    )
+                    if not (unlock_write or unlock_artifact):
+                        filtered.append(exclusion)
+                candidate["exclusions"] = filtered
+                candidate["eligible"] = not filtered
+                candidate["g4c_features"] = sorted(features)
+            eligible = sorted(
+                (item for item in decision.get("candidates", []) if item.get("eligible")),
+                key=lambda item: tuple(item.get("rank") or []),
+            )
+            decision["selected"] = None
+            if eligible:
+                winner = eligible[0]
+                decision["selected"] = {
+                    "node": winner["node"],
+                    "backend": winner["backend"],
+                    "transport_backend": winner["transport_backend"],
+                    "remote": winner["remote"],
+                    "rank": winner["rank"],
+                }
+        except Exception:
+            # G4-C feature-gate processing raised after the preliminary base
+            # route. The base audit was deferred, so emit exactly one failure
+            # record now. The preliminary winner is never claimed as selected:
+            # the gate evaluation that proves eligibility did not complete.
+            failed = dict(decision)
+            failed["selected"] = None
+            router._audit_route(failed, success=False, dry_run=dry_run)
+            raise
         decision["g4c_guards"] = {
             "write_required": needs_write,
             "artifact_required": needs_artifacts,
         }
+        router._audit_route(
+            decision,
+            success=decision.get("selected") is not None,
+            dry_run=dry_run,
+        )
         return decision
 
 
