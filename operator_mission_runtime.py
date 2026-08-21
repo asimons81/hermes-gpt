@@ -349,6 +349,31 @@ def _event(
         "VALUES(?,?,?,?,?,?,?)",
         (mission_id, event_type, from_status, to_status, reason_sha, json.dumps(details or {}, sort_keys=True), _now()),
     )
+    # Mission storage remains authoritative. Live events are wake-up notices
+    # that point clients back to durable Mission state, so delivery failure
+    # must never roll back or alter the Mission transaction.
+    try:
+        db_row = db.execute("PRAGMA database_list").fetchone()
+        event_root = Path(str(db_row[2])).resolve().parent.parent if db_row and db_row[2] else None
+        import operator_live_events as live_events
+
+        live_events.publish_event(
+            topic="mission",
+            kind=event_type,
+            subject_type="mission",
+            subject_id=mission_id,
+            mission_id=mission_id,
+            source="mission-runtime",
+            payload={
+                "from_status": from_status,
+                "to_status": to_status,
+                "reason_sha256": reason_sha,
+                "details": details or {},
+            },
+            hermes_root=event_root,
+        )
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+        return
 
 
 def _audit(tool: str, policy: op.OperatorPolicy, *, dry_run: bool, success: bool, changed: bool, mission_id: str = "", summary: str = "") -> None:
