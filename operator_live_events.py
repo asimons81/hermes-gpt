@@ -1,10 +1,10 @@
 """Durable live-event bus and authenticated WebSocket stream for Hermes GPT v0.9.
 
-The bus is an append-only, bounded notification layer. It does not replace the
+The bus is an append-only, bounded notification layer.  It does not replace the
 source-of-truth journals owned by Work Contracts, Swarm, Fabric, Missions, or
-runners. Events wake interested parents/clients and point back to durable state.
+runners.  Events wake interested parents/clients and point back to durable state.
 
-The public MCP surfaces are read-only cursor/long-poll reads. The WebSocket
+The public MCP surfaces are read-only cursor/long-poll reads.  The WebSocket
 surface is also read-only with respect to Hermes state; inbound control frames
 may only change the client's subscription/ack cursor or request a ping.
 """
@@ -287,14 +287,7 @@ def hermes_live_events_cursor(hermes_root: Path | None = None) -> str:
         policy.require_level("read_only")
         return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "cursor": high_watermark(hermes_root)})
     except (PermissionError, OSError, sqlite3.Error) as exc:
-        return json.dumps(
-            op.error_from_exception(
-                exc,
-                layer="operator",
-                code="LIVE_EVENT_CURSOR_FAILED",
-                suggested_action="Check Operator read access.",
-            )
-        )
+        return json.dumps(op.error_from_exception(exc, layer="operator", code="LIVE_EVENT_CURSOR_FAILED", suggested_action="Check Operator read access."))
 
 
 def hermes_live_events_since(
@@ -312,26 +305,12 @@ def hermes_live_events_since(
         cursor = _bounded_cursor(cursor)
         wait_ms = max(0, min(int(wait_ms), MAX_WAIT_MS))
         deadline = time.monotonic() + wait_ms / 1000
-        events, next_cursor = read_since(
-            cursor,
-            mission_id=mission_id,
-            topic=topic,
-            kind=kind,
-            limit=limit,
-            hermes_root=hermes_root,
-        )
+        events, next_cursor = read_since(cursor, mission_id=mission_id, topic=topic, kind=kind, limit=limit, hermes_root=hermes_root)
         while not events and wait_ms and time.monotonic() < deadline:
             remaining = max(0.0, deadline - time.monotonic())
             with _condition:
                 _condition.wait(timeout=min(0.25, remaining))
-            events, next_cursor = read_since(
-                cursor,
-                mission_id=mission_id,
-                topic=topic,
-                kind=kind,
-                limit=limit,
-                hermes_root=hermes_root,
-            )
+            events, next_cursor = read_since(cursor, mission_id=mission_id, topic=topic, kind=kind, limit=limit, hermes_root=hermes_root)
         return json.dumps(
             {
                 "success": True,
@@ -346,14 +325,7 @@ def hermes_live_events_since(
             ensure_ascii=False,
         )
     except (TypeError, ValueError, PermissionError, OSError, sqlite3.Error) as exc:
-        return json.dumps(
-            op.error_from_exception(
-                exc,
-                layer="operator",
-                code="LIVE_EVENT_READ_FAILED",
-                suggested_action="Check cursor/filter bounds and Operator read access.",
-            )
-        )
+        return json.dumps(op.error_from_exception(exc, layer="operator", code="LIVE_EVENT_READ_FAILED", suggested_action="Check cursor/filter bounds and Operator read access."))
 
 
 async def _websocket_endpoint(
@@ -389,7 +361,7 @@ async def _websocket_endpoint(
                     limit=100,
                     hermes_root=root_getter(),
                 )
-            except (TypeError, ValueError, OSError, sqlite3.Error):
+            except (ValueError, OSError, sqlite3.Error):
                 await websocket.send_json({"schema": STREAM_SCHEMA, "type": "error", "code": "LIVE_EVENT_READ_FAILED"})
                 await websocket.close(code=1011)
                 return
