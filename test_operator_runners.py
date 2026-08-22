@@ -53,17 +53,21 @@ def _enable_workspace(monkeypatch: pytest.MonkeyPatch, ws: Path) -> None:
 
 def _enable_pi_confinement(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub a usable boundary in tests that are not exercising confinement itself."""
-    monkeypatch.setattr(runners.confinement, "confinement_available", lambda *, writable=True: True)
+    monkeypatch.setattr(
+        runners.confinement,
+        "confinement_available",
+        lambda *, writable=True, expose_proc=False: True,
+    )
     monkeypatch.setattr(
         runners.confinement,
         "wrap_argv",
-        lambda argv, workspace, *, writable=True: list(argv),
+        lambda argv, workspace, *, writable=True, expose_proc=False: list(argv),
     )
 
 
 def test_builtin_backends_registered():
     names = {item["name"] for item in runners.list_backends()}
-    assert {"fleet", "pi_rpc", "omx", "codex"}.issubset(names)
+    assert {"fleet", "pi_rpc", "opencode", "omx", "codex"}.issubset(names)
 
 
 def test_legacy_contract_hash_shape_unchanged_without_execution(tmp_path: Path):
@@ -196,6 +200,193 @@ def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest
     assert rc == 0
     assert final_text == "done"
     assert time.monotonic() - started < 5
+
+
+def test_opencode_dry_run_uses_pure_json_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    root = tmp_path / "hermes"
+    root.mkdir()
+    _enable_workspace(monkeypatch, ws)
+    _enable_pi_confinement(monkeypatch)
+    backend = runners.get_backend("opencode")
+    monkeypatch.setattr(backend, "executable", lambda: "/bin/true")
+    raw = _contract(
+        ws,
+        backend="opencode",
+        options={"model": "cliproxyapi/glm-test", "agent": "build", "variant": "high"},
+    )
+    payload = json.loads(contract_mod.hermes_contract_dispatch(json.dumps(raw), dry_run=True, hermes_root=root))
+    assert payload["success"] is True
+    assert payload["backend"] == "opencode"
+    assert payload["plan"]["mode"] == "run"
+    assert payload["plan"]["format"] == "json"
+    assert payload["plan"]["pure"] is True
+    assert payload["plan"]["sandbox"] == "workspace-write"
+    assert payload["plan"]["model"] == "cliproxyapi/glm-test"
+
+
+def test_opencode_worker_pipes_prompt_and_uses_confinement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        runners.confinement,
+        "confinement_available",
+        lambda *, writable=True, expose_proc=False: True,
+    )
+
+    def wrap(argv, workspace, *, writable=True, expose_proc=False):
+        captured["wrapped"] = (list(argv), workspace, writable, expose_proc)
+        return list(argv)
+
+    monkeypatch.setattr(runners.confinement, "wrap_argv", wrap)
+    real_key = "trusted-parent-only-value"
+    material = {
+        "model": "cliproxyapi/glm-test",
+        "provider_id": "cliproxyapi",
+        "model_id": "glm-test",
+        "provider_name": "CLIProxyAPI",
+        "npm": "@ai-sdk/openai-compatible",
+        "timeout_ms": 60_000,
+        "model_meta": {"name": "GLM test"},
+        "upstream": runners.urllib.parse.urlparse("http://127.0.0.1:9/v1"),
+        "real_key": real_key,
+    }
+    monkeypatch.setattr(runners, "_opencode_runtime_material", lambda *args, **kwargs: material)
+    fake = tmp_path / "fake-opencode"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        "prompt = sys.stdin.read()\n"
+        "config = os.environ['OPENCODE_CONFIG_CONTENT']\n"
+        "assert 'trusted-parent-only-value' not in config\n"
+        "assert 'trusted-parent-only-value' not in repr(dict(os.environ))\n"
+        "cfg = json.loads(config)\n"
+        "relay_value = cfg['provider']['cliproxyapi']['options']['apiKey']\n"
+        "assert relay_value and relay_value != 'trusted-parent-only-value'\n"
+        "assert len(relay_value) >= 32\n"
+        "assert prompt == 'Inspect the workspace and make the requested bounded change.'\n"
+        "assert '--pure' in sys.argv and '--format' in sys.argv and 'json' in sys.argv\n"
+        "assert prompt not in sys.argv\n"
+        "print(json.dumps({'type':'text','part':{'type':'text','text':'done'}}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    contract = _contract(ws, backend="opencode", options={"model": "cliproxyapi/glm-test"})
+    rc, final_text = runners._worker_opencode(str(fake), contract, 5, tmp_path / "events.jsonl")
+    assert rc == 0
+    assert final_text == "done"
+    argv, wrapped_ws, writable, expose_proc = captured["wrapped"]
+    assert wrapped_ws == ws.resolve()
+    assert writable is True
+    assert expose_proc is True
+    assert "--auto" not in argv
+
+
+def test_opencode_relay_replaces_child_authorization_without_serializing_parent_value():
+    observed: dict[str, object] = {}
+
+    class UpstreamHandler(runners.BaseHTTPRequestHandler):
+        def log_message(self, _format, *_args):
+            return
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            observed["authorization"] = self.headers.get("Authorization")
+            observed["path"] = self.path
+            observed["body"] = self.rfile.read(length)
+            payload = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    upstream = runners.ThreadingHTTPServer(("127.0.0.1", 0), UpstreamHandler)
+    upstream_thread = runners.threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    parent_value = "trusted-parent-only-value"
+    material = {
+        "model": "cliproxyapi/glm-test",
+        "provider_id": "cliproxyapi",
+        "model_id": "glm-test",
+        "provider_name": "CLIProxyAPI",
+        "npm": "@ai-sdk/openai-compatible",
+        "timeout_ms": 60_000,
+        "model_meta": {},
+        "upstream": runners.urllib.parse.urlparse(f"http://127.0.0.1:{upstream.server_port}/v1"),
+        "real_key": parent_value,
+    }
+    relay = runners._OpenCodeCredentialProxy(material)
+    relay_thread = runners.threading.Thread(target=relay.serve_forever, daemon=True)
+    relay_thread.start()
+    try:
+        child_config_text = runners._opencode_child_config(relay.material, relay.server_port)
+        child_config = json.loads(child_config_text)
+        relay_value = child_config["provider"]["cliproxyapi"]["options"]["apiKey"]
+        assert parent_value not in child_config_text
+        assert relay_value == relay.material["relay_token"]
+        assert relay_value != parent_value
+
+        for supplied in (None, "wrong-local-capability"):
+            connection = runners.http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+            headers = {"Content-Type": "application/json"}
+            if supplied is not None:
+                headers["Authorization"] = f"Bearer {supplied}"
+            connection.request("POST", "/v1/chat/completions", body=b"{}", headers=headers)
+            response = connection.getresponse()
+            assert response.status == 401
+            response.read()
+            connection.close()
+        assert observed == {}
+
+        connection = runners.http.client.HTTPConnection("127.0.0.1", relay.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/v1/chat/completions",
+            body=b"{}",
+            headers={
+                "Authorization": f"Bearer {relay_value}",
+                "Content-Type": "application/json",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        assert response.read() == b'{"ok":true}'
+        connection.close()
+        assert observed["authorization"] == f"Bearer {parent_value}"
+        assert observed["path"] == "/v1/chat/completions"
+        assert observed["body"] == b"{}"
+    finally:
+        relay.shutdown()
+        relay.server_close()
+        relay_thread.join(timeout=2)
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join(timeout=2)
+
+
+def test_read_only_opencode_uses_read_only_confinement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    root = tmp_path / "hermes"
+    root.mkdir()
+    _enable_workspace(monkeypatch, ws)
+    calls: list[tuple[bool, bool]] = []
+    monkeypatch.setattr(
+        runners.confinement,
+        "confinement_available",
+        lambda *, writable=True, expose_proc=False: calls.append((writable, expose_proc)) or True,
+    )
+    backend = runners.get_backend("opencode")
+    monkeypatch.setattr(backend, "executable", lambda: "/bin/true")
+    raw = _contract(ws, backend="opencode")
+    raw["authorization"] = {"class": "read_only", "approved": True}
+    payload = json.loads(contract_mod.hermes_contract_dispatch(json.dumps(raw), dry_run=True, hermes_root=root))
+    assert payload["success"] is True
+    assert payload["plan"]["sandbox"] == "read-only"
+    assert calls == [(False, True)]
 
 
 def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path):
