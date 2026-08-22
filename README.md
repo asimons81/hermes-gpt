@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.7.0 - Flight Deck: Review Evidence, Event History, and Encrypted Tokens](assets/hermes-gpt-v0.7.0-readme-hero.jpg)
+![Hermes GPT v0.8.0 - Fabric: Cross-Machine Swarm Execution, Capability-Aware Routing, and Verified Evidence](assets/hermes-gpt-v0.8.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
@@ -106,7 +106,7 @@ With no optional feature gates enabled, the server exposes a small read-oriented
 Optional legacy feature gates remain available for compatibility:
 
 | Capability | Gate | Default |
-| --- | --- | --- |
+| --- | --- |
 | File write / patch | `HERMES_GPT_ENABLE_WRITE=1` | hidden |
 | Memory mutation | `HERMES_GPT_ENABLE_MEMORY_WRITE=1` | disabled |
 | Session search/history | `HERMES_GPT_ENABLE_SESSION_SEARCH=1` | hidden |
