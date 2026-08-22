@@ -328,6 +328,47 @@ def test_release_doctor_allows_source_modules_with_secret_like_names(tmp_path, m
     assert not any("oauth" in issue.lower() or "token" in issue.lower() for issue in parsed["blocking_issues"])
 
 
+def test_release_doctor_allows_web_source_files_with_secret_like_names(tmp_path, monkeypatch):
+    """Design-token source files are code/assets, not secret-bearing data files."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    shared = repo / "web" / "src" / "shared"
+    shared.mkdir(parents=True)
+    (shared / "tokens.ts").write_text("export const spacing = 8;\n", encoding="utf-8")
+    (shared / "tokens.css").write_text(":root { --spacing: 8px; }\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(f'version = "{od.VERSION}"\n', encoding="utf-8")
+    out = od.hermes_release_doctor(workdir=str(repo), full_tests=False)
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert not any("tokens.ts" in issue or "tokens.css" in issue for issue in parsed["blocking_issues"])
+
+
+def test_release_doctor_blocks_secret_like_web_source_outside_allowlist(tmp_path, monkeypatch):
+    """A similarly named source file outside the exact design-token paths stays blocked."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tokens.ts").write_text("export const value = 'fixture';\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(f'version = "{od.VERSION}"\n', encoding="utf-8")
+    out = od.hermes_release_doctor(workdir=str(repo), full_tests=False)
+    parsed = json.loads(out)
+    assert parsed["status"] == "BLOCKED"
+    assert any("tokens.ts" in issue for issue in parsed["blocking_issues"])
+
+
+def test_release_doctor_ignores_local_worktree_container(tmp_path, monkeypatch):
+    """Nested local worktrees are dev artifacts and are never release payloads."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    local_tree = repo / ".worktrees" / "scratch"
+    local_tree.mkdir(parents=True)
+    (local_tree / "tokens.json").write_text("{}", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(f'version = "{od.VERSION}"\n', encoding="utf-8")
+    out = od.hermes_release_doctor(workdir=str(repo), full_tests=False)
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert not any(".worktrees" in issue for issue in parsed["blocking_issues"])
+
+
 def test_release_doctor_warns_on_dirty_tree(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

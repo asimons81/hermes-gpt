@@ -16,9 +16,9 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.7.0**. The matching GitHub release `v0.7.0` is published.
+Repository version: **0.8.0**. The GitHub release target is `v0.8.0`; verify the public GitHub Releases and PyPI channels independently.
 
-The latest PyPI release is **0.4.0**: PyPI is an independent distribution channel and has lagged GitHub since v0.5.0. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.5+ features require the GitHub distribution until PyPI catches up.
+PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.8 Fabric behavior requires a published PyPI version of 0.8.0 or newer.
 
 ## Current operational docs
 
@@ -30,7 +30,7 @@ The latest PyPI release is **0.4.0**: PyPI is an independent distribution channe
 | [`file-export.md`](file-export.md) | current | bounded binary file transfer, workspace/denied-path gates, size/extension limits, MCP embedded-resource semantics |
 | [`openai-secure-mcp-tunnel.md`](openai-secure-mcp-tunnel.md) | current | outbound-only private access from supported OpenAI products to loopback Hermes GPT |
 | [`cloudflare-tunnel.md`](cloudflare-tunnel.md) | current | public Cloudflare HTTPS proxy deployment and Host allowlist behavior |
-| [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration, Flight Deck v0.7 surfaces |
+| [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration, v0.8 Fabric execution, and Flight Deck surfaces |
 | [`codex.md`](codex.md) | current | Codex-as-MCP-client setup and delegated Codex CLI jobs |
 | [`windows-chatgpt-codex.md`](windows-chatgpt-codex.md) | current | Windows ChatGPT -> Hermes GPT -> Codex CLI deployment |
 | [`updating.md`](updating.md) | current | check-first Git and PyPI update behavior |
@@ -39,7 +39,8 @@ The latest PyPI release is **0.4.0**: PyPI is an independent distribution channe
 | [`session-control.md`](session-control.md) | current | gated asynchronous session continue/send jobs |
 | [`ui-security-boundary.md`](ui-security-boundary.md) | current | conversational UI browser security boundary and opt-in UI mount |
 | [`flight-deck-coverage.md`](flight-deck-coverage.md) | current | Flight Deck browser coverage and mutation safety decisions |
-| [`release-notes-v0.7.0.md`](release-notes-v0.7.0.md) | current release record | shipped v0.7 behavior and gates |
+| [`release-notes-v0.8.0.md`](release-notes-v0.8.0.md) | current release record | shipped v0.8 Fabric behavior, G6 acceptance boundary, and known limitation |
+| [`release-notes-v0.7.0.md`](release-notes-v0.7.0.md) | historical release record | shipped v0.7 behavior and gates |
 | [`release-notes-v0.6.0.md`](release-notes-v0.6.0.md) | current release record | shipped v0.6 behavior and known limitations |
 | [`../RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) | maintainer | release verification and publication gates |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | historical/current | concise version history |

@@ -16,6 +16,7 @@ include docs/release-notes-v0.5.0b2.md
 include docs/release-notes-v0.5.0.md
 include docs/release-notes-v0.6.0.md
 include docs/release-notes-v0.7.0.md
+include docs/release-notes-v0.8.0.md
 include docs/retention-policy.md
 include docs/updating.md
 include docs/windows-chatgpt-codex.md

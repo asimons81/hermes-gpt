@@ -9,17 +9,29 @@
 
 ## Current status
 
-- **Repository version:** 0.7.0
-- **Latest GitHub release:** v0.7.0
-- **Latest PyPI release:** 0.4.0 (PyPI has lagged GitHub since v0.5.0; check the badge for the current value)
+- **Repository version:** 0.8.0
+- **GitHub release target:** v0.8.0
+- **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 
 > [!IMPORTANT]
-> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.7 features unless the badge reports v0.7.0 or newer.
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.8 features unless the badge reports v0.8.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.8.0 adds
+
+v0.8.0 "Fabric" turns the v0.7 control plane into a local-first distributed execution fabric:
+
+1. **Cross-machine Swarm execution** - bounded stages can execute through an authenticated `hermes-gpt-fabric-peer` while the coordinator remains authoritative.
+2. **Capability-aware `auto` routing** - placement uses current node health/freshness, backend capability, profile/workspace policy, and authority ceilings, with explicit overrides preserved.
+3. **Remote evidence and artifacts** - remote evidence is admitted into the existing Work Contract boundary; missing required evidence fails closed and artifact bytes are hash-verified.
+4. **Restart/timeout/cancel reconciliation** - recoverable ambiguity reconciles the original attempt, with single-writer/write-epoch protections for mutation-capable paths.
+5. **Fabric Flight Deck visibility** - read-only node, placement, attempt, evidence, and routing views expose the authoritative selected-route fields.
+
+The final Fabric implementation passed fresh real two-machine G6 acceptance and independent review; the authoritative acceptance record is on [issue #37](https://github.com/asimons81/hermes-gpt/issues/37). G7 Owner ship authorization is recorded on [issue #27](https://github.com/asimons81/hermes-gpt/issues/27). See the [v0.8.0 release notes](docs/release-notes-v0.8.0.md) for the acceptance boundary, known presentation limitation, and additional changes included since v0.7.0.
 
 ## What v0.7.0 adds
 
@@ -54,6 +66,7 @@ See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention poli
 | Verify the MCP protocol surface | [MCP compatibility manifest](docs/mcp-compatibility.md) |
 | Use Codex as an MCP client | [Codex guide](docs/codex.md) |
 | Use ChatGPT or another trusted client to operate Hermes | [Operator Mode](docs/operator-mode.md) |
+| Understand cross-machine Fabric execution and its release boundary | [v0.8.0 Fabric release notes](docs/release-notes-v0.8.0.md) |
 | Let ChatGPT dispatch bounded work to the Codex CLI on Windows | [Windows ChatGPT -> Codex guide](docs/windows-chatgpt-codex.md) |
 | Update an install safely | [Updating](docs/updating.md) |
 | Review v0.6 data cleanup rules | [Retention policy](docs/retention-policy.md) |

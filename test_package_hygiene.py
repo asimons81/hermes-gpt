@@ -218,12 +218,13 @@ def test_sdist_does_not_ship_internal_docs(built_artifacts):
     )
     assert any("docs/release-notes-v0.6.0.md" in n for n in names), "sdist missing public release notes"
     assert any("docs/release-notes-v0.7.0.md" in n for n in names), "sdist missing v0.7 public release notes"
+    assert any("docs/release-notes-v0.8.0.md" in n for n in names), "sdist missing v0.8 public release notes"
     assert any("docs/retention-policy.md" in n for n in names), "sdist missing public retention policy"
     assert any("docs/mcp-compatibility.md" in n for n in names), "sdist missing public MCP compatibility manifest"
 
 
 def test_wheel_contains_public_docs_and_all_py_modules(built_artifacts):
-    """Proof 10: wheel ships v0.7 docs and every declared top-level module."""
+    """Proof 10: wheel ships current public docs and every declared top-level module."""
     try:
         import tomllib
     except ModuleNotFoundError:
@@ -237,6 +238,7 @@ def test_wheel_contains_public_docs_and_all_py_modules(built_artifacts):
     for suffix in (
         "share/hermes-gpt/docs/mcp-compatibility.md",
         "share/hermes-gpt/docs/release-notes-v0.7.0.md",
+        "share/hermes-gpt/docs/release-notes-v0.8.0.md",
     ):
         assert any(n.endswith(suffix) for n in names), f"wheel missing data file: {suffix}"
     with open(REPO_ROOT / "pyproject.toml", "rb") as fh:

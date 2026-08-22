@@ -788,25 +788,34 @@ def _find_secret_files(workdir: Path) -> list[str]:
     """Return relative paths of secret-looking files under workdir."""
     secret_names = op.DEFAULT_DENIED_BASENAMES | op.DEFAULT_DENIED_DIR_NAMES
     secret_substrings = op.SECRET_PATH_SUBSTRINGS
+    allowed_source_paths = {
+        Path("web/src/shared/tokens.ts"),
+        Path("web/src/shared/tokens.css"),
+    }
     found: list[str] = []
     for root, dirs, files in os.walk(workdir):
         root_path = Path(root)
         # Skip git internals, caches, and local virtualenvs (dev artifacts
         # that are never shipped; third-party packages inside them can contain
         # secret-like filenames, e.g. keyring/credentials.py).
-        dirs[:] = [d for d in dirs if d not in {".git", "__pycache__", ".pytest_cache", "node_modules", ".venv", "venv", ".tox", ".nox"}]
+        dirs[:] = [d for d in dirs if d not in {".git", ".worktrees", "__pycache__", ".pytest_cache", "node_modules", ".venv", "venv", ".tox", ".nox"}]
         for name in files:
             lower = name.lower()
             if name in secret_names or lower.startswith(".env.") or name == ".env":
                 found.append(str(root_path / name))
                 continue
+            candidate = root_path / name
+            try:
+                rel_candidate = candidate.relative_to(workdir)
+            except ValueError:
+                rel_candidate = None
             # The substring heuristic targets secret-bearing data files
-            # (tokens.json, oauth-store.json, credentials.yaml, ...). Source
-            # modules and markdown docs are legitimate even when their names
-            # contain "oauth"/"token"/"secret" (oauth_auth.py, token_store.py,
-            # docs/oauth.md), so they are exempt from the substring scan —
-            # exact-name checks above still apply to them.
-            if lower.endswith((".py", ".md")):
+            # (tokens.json, oauth-store.json, credentials.yaml, ...). Python
+            # source and markdown docs are legitimate even when their names
+            # contain "oauth"/"token"/"secret". The two known web design-token
+            # source assets are separately allowlisted by exact repository path;
+            # similarly named files elsewhere remain subject to the scan.
+            if lower.endswith((".py", ".md")) or rel_candidate in allowed_source_paths:
                 continue
             for sub in secret_substrings:
                 if sub in lower:

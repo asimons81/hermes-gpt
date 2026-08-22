@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-08-21
+
+Fabric: authenticated cross-machine Swarm execution with capability-aware routing, remote evidence/artifacts, reconciliation, and Flight Deck visibility.
+
+- Added the packaged `hermes-gpt-fabric-peer` A2A/Fabric runtime for authenticated remote execution. Non-loopback serving requires direct TLS.
+- Added durable node capabilities, health/freshness tracking, deterministic `execution.backend=auto` routing, explicit route exclusions, and authority-ceiling preservation.
+- Added remote evidence collection and immutable artifact admission. Required missing/unavailable evidence fails closed, and admitted artifacts are hash-verified by the coordinator.
+- Added restart/timeout/cancel reconciliation that preserves the original distributed attempt plus write-ownership/write-epoch guards for mutation-capable paths.
+- Added read-only Flight Deck Fabric nodes, placement, attempts, evidence, and routing views, including truthful selected-route health/freshness/eligibility/authority fields.
+- Completed fresh real two-machine G6 acceptance on final Fabric implementation target `4953c5f23db8d356365af8e18148e63d3c80125c`, including induced transport loss, same-attempt recovery, artifact re-hash, fail-closed validation, approval gating, and independent review.
+- Known non-blocking presentation limitation: a completed reconciled attempt may retain a historical `FABRIC_TRANSPORT_TIMEOUT` as a current-looking Flight Deck blocker.
 - Added `hermes_export_file`, a workspace-authorized MCP-native binary export surface with mandatory allowed-path confinement, denied-secret-path enforcement, symlink escape refusal, a 4 MiB default / 16 MiB hard size cap, optional extension allowlisting, safe audit metadata, and no base64 text fallback. Client attachment rendering remains client-controlled.
 - Added a first-class OpenAI Secure MCP Tunnel deployment path for private ChatGPT/Codex/OpenAI access while Hermes GPT stays bound to loopback. Added a canonical guide, supervised Windows launcher, tunnel-aware status example, package wiring, and cross-links from the README, MCP compatibility, Cloudflare, and Windows Codex docs.
 - Documented the tunnel security boundary: no public `HERMES_GPT_ALLOWED_HOSTS` entry is required for the private loopback path, static bearer remains optional defense in depth, and built-in OAuth still requires separately reachable browser-facing authorization-server endpoints.

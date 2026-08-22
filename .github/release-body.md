@@ -1,32 +1,45 @@
-# Hermes GPT v0.7.0 — Flight Deck
+# Hermes GPT v0.8.0 - Fabric
 
-Hermes GPT v0.7.0 "Flight Deck" makes durable autonomy legible: every long-running task, event, evidence record, and authority grant is visible, inspectable, and gated — without giving the operator a bypass. The release is additive; no existing tool name, schema, or authority class changes.
+Hermes GPT v0.8.0 turns the v0.7 control plane into a local-first distributed execution fabric. A bounded Swarm stage can now execute on another authenticated Hermes machine while the coordinator keeps authority, evidence admission, Work Contract validation, independent review, and final human approval on the trusted side of the boundary.
 
-## Production review evidence (`hermes_review_accept`)
+Remote worker self-report is still transport data, never proof of completion.
 
-Owner-gated write of review-acceptance records with distinct-reviewer enforcement **in code** at write time and re-checked at validate time (`reviewer != assignee`; self-review rejected both ways). Bounded verdict vocabulary (`SATISFIED` / `NOT_SATISFIED`), referenced-not-copied evidence (no raw prompts or transcripts in the store), and a durable append-only store read by `hermes_contract_validate` alongside the v0.6 audit + human-approval paths.
+## Cross-machine execution
 
-## Structured event history (`hermes_events_query` / `hermes_events_tail`)
+- Packaged `hermes-gpt-fabric-peer` A2A/Fabric runtime.
+- `execution.backend=auto` can choose eligible local or remote runtimes from current node capabilities.
+- Non-loopback Fabric peers require direct TLS with `--cert` and `--key`.
+- Placement preserves profile, logical workspace, backend, and server-controlled authority ceilings.
 
-A unified, queryable, redacted timeline across audit, swarm, codex, cron, and kanban stores. Read-only by construction, with a per-source allowlist (`HERMES_GPT_EVENTS_ALLOWED_SOURCES`), retention window (`HERMES_GPT_EVENTS_MAX_AGE_DAYS`, default 90), and the same Mission Control redaction invariants: no raw messages, memory bodies, transcripts, request dumps, credentials, or profile-secret bodies.
+## Evidence, artifacts, and recovery
 
-## Durable encrypted token storage + trusted-client OAuth
+- Remote evidence feeds the existing observed-state Work Contract validator.
+- Required missing/unavailable Fabric evidence fails closed.
+- Remote artifacts are admitted through immutable manifests and coordinator-side content hashing.
+- Restart/timeout/cancel reconciliation preserves the original attempt when recovery is possible.
+- Write-ownership/write-epoch guards prevent ambiguous or duplicate remote writers.
 
-OAuth access/refresh tokens persist through an AES-256-GCM envelope at `<hermes_data>/secrets/hermes_gpt_tokens.json` (0600) with keyring → key file → env key precedence, so server restarts no longer invalidate issued credentials. Added `hermes_oauth_status` (presence/expiry only — no token material on any surface) and `hermes_oauth_revoke` (owner-gated). OAuth is promoted from Unreleased to shipped and documented in `docs/oauth.md`.
+## Fabric Flight Deck
 
-## Restart-safe continuity (`hermes_swarm_reconcile`)
+Flight Deck now exposes read-only Fabric nodes, placement, attempts, evidence, and routing history. The final v0.8 repair preserves the authoritative selected-route health, capability-freshness, eligibility, transport-backend, and authority-ceiling fields instead of fabricating negative state for older/missing receipt fields.
 
-Marks swarm stages stuck in `running` as `blocked` with `reason: interrupted_by_restart` — never auto-advances — and reloads the durable token envelope. `hermes_swarm_stage_advance` is now idempotent for already-validated/done stages. Dry-run by default; apply requires workspace/owner + direct.
+## Two-machine acceptance
 
-## MCP compatibility manifest
+The final Fabric implementation target `4953c5f23db8d356365af8e18148e63d3c80125c` passed fresh real two-machine G6 acceptance. The authoritative acceptance evidence and independent-review result are recorded on [issue #37](https://github.com/asimons81/hermes-gpt/issues/37). The acceptance exercised authenticated remote Fabric -> Pi RPC execution, `execution.backend=auto`, an induced live transport interruption, same-attempt reconciliation, artifact admission plus independent re-hash, fail-closed missing evidence, Work Contract `SATISFIED`, non-owner approval denial, explicit Owner approval, and an independent final review.
 
-`docs/mcp-compatibility.md` pins the minimum supported MCP protocol revision (2024-11-05) through the installed SDK's latest (2025-11-25), the transport matrix (stdio, streamable HTTP, SSE), and trusted-client auth metadata, with compatibility tests against the installed SDK.
+Independent review: **PASS**. G6 closure blocked: **NO**. G7 Owner ship authorization is recorded on [issue #27](https://github.com/asimons81/hermes-gpt/issues/27).
 
-## Also in this release
+## Also included
 
-- Cross-machine seam interfaces (`seams.py`: `DispatchAdapter` / `EvidenceProvider` protocols) validated by a two-process-one-host fake over loopback — interfaces only, no remote implementation shipped.
-- CI hermeticity fix: `_call_skill_manager` no longer fails when the Hermes Agent source tree is absent from `sys.path`; profile-scoping tests skip only when `hermes_constants` is unavailable.
+- `hermes_export_file` bounded binary export.
+- OpenAI Secure MCP Tunnel deployment path.
+- FastMCP-compatible MCP 1.x dependency pin.
+- Fleet timeout recovery with pollable task identity.
+- Safer proxy trust and OIDC discovery behavior.
+- Stricter Operator doctor gateway health and Hermes source-root detection.
 
-## Verification
+## Known non-blocking presentation limitation
 
-Full test suite green: 646 tests collected — 643 passed, 3 skipped — covering MCP compat, recovery, review, events, token store, and seams. CI green on Python 3.10–3.12. See the [v0.7.0 release notes](docs/release-notes-v0.7.0.md) and [retention policy](docs/retention-policy.md).
+A reconciled attempt that ultimately reaches `COMPLETED` can still retain historical `FABRIC_TRANSPORT_TIMEOUT` data in the Flight Deck blocker/error presentation. Independent G6 review classified this as non-blocking because terminal peer evidence, artifact admission, coordinator validation, and workflow state independently establish completion.
+
+Full details: [v0.8.0 release notes](docs/release-notes-v0.8.0.md).

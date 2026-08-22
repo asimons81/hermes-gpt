@@ -1,6 +1,6 @@
 # Operator Mode for Hermes GPT
 
-Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.7.0 behavior.
+Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.8.0 behavior, including Fabric-backed cross-machine Swarm execution.
 
 For documentation authority and historical-artifact rules, see [docs/README.md](README.md).
 
@@ -245,12 +245,23 @@ Failed validation can return a stage for one bounded rework retry. A second fail
 
 Codex may provide a bounded review verdict, but Codex is never an implementation owner. Final workflow approval is human and Owner-gated.
 
-## Flight Deck (v0.7)
+## Fabric execution (v0.8)
 
-Flight Deck adds four coordinated v0.7 capabilities on top of the v0.6
-control plane: production review evidence, structured event history, durable
-encrypted token storage, and restart reconciliation. All new surfaces are
-additive; no existing tool name, schema, or authority class changes.
+v0.8 extends Swarm execution across authenticated Hermes machines without moving completion authority to the worker. A stage using `execution.backend=auto` can be placed on an eligible local or remote runtime from the current capability snapshot; explicit backend/placement choices remain available where the workflow supports them.
+
+The packaged remote endpoint is `hermes-gpt-fabric-peer`. Loopback HTTP is permitted for same-machine development. Non-loopback peer serving requires both `--cert` and `--key`; the peer refuses insecure remote transport.
+
+Fabric routing is fail-closed. Placement considers node health and capability freshness, backend support, profile/workspace policy, and the server-controlled authority ceiling. A remote peer cannot widen the coordinator's authority. Remote worker self-report is transport data, not Work Contract completion evidence.
+
+Remote evidence and artifacts are admitted through coordinator-controlled paths. Required unavailable evidence cannot become `SATISFIED`; artifact bytes are verified before admission. Restart, timeout, and cancellation reconciliation preserve the original attempt where recovery is possible rather than silently creating a replacement writer.
+
+Flight Deck adds read-only Fabric node, placement, attempt, evidence, and routing views. The selected-route record carries the authoritative health, capability-freshness, eligibility, transport-backend, and authority-ceiling fields used to explain placement.
+
+See [v0.8.0 release notes](release-notes-v0.8.0.md) for the two-machine acceptance boundary and the known historical-timeout presentation limitation.
+
+## Flight Deck (v0.7 foundation, v0.8 Fabric views)
+
+Flight Deck began in v0.7 with production review evidence, structured event history, durable encrypted token storage, and restart reconciliation. v0.8 layers read-only Fabric nodes, placement, attempts, evidence, and routing visibility onto that foundation. Existing authority classes and final human approval remain authoritative.
 
 ### Review evidence (`hermes_review_accept`)
 
@@ -517,6 +528,7 @@ $env:HERMES_GPT_OWNER_ACK="I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
 - [Windows ChatGPT -> Codex](windows-chatgpt-codex.md)
 - [Updating](updating.md)
 - [Retention policy](retention-policy.md)
+- [v0.8.0 release notes](release-notes-v0.8.0.md)
 - [v0.7.0 release notes](release-notes-v0.7.0.md)
 - [v0.6.0 release notes](release-notes-v0.6.0.md)
 
