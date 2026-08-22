@@ -403,6 +403,48 @@ def test_cancel_routes_backend_and_terminalizes_lifecycle(tmp_path: Path, monkey
     assert calls == [("delegation-task-cancel", "pi_rpc", True, False)]
 
 
+def test_cancel_backend_completed_self_report_stays_reconciling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    monkeypatch.setattr(
+        delegations.contract_mod,
+        "hermes_contract_dispatch",
+        lambda *args, **kwargs: json.dumps({"success": True, "changed": True, "backend": "pi_rpc", "state": "running"}),
+    )
+    assert json.loads(
+        delegations.hermes_delegation_dispatch(
+            json.dumps(_contract(workspace, task_id="delegation-task-cancel-completed")),
+            delegation_id="dlg-cancel-completed",
+            confirm=True,
+            dry_run=False,
+            hermes_root=root,
+        )
+    )["success"] is True
+    monkeypatch.setattr(
+        delegations.runners,
+        "hermes_runner_cancel",
+        lambda *args, **kwargs: json.dumps({"success": True, "changed": False, "backend": "pi_rpc", "state": "completed"}),
+    )
+    out = json.loads(
+        delegations.hermes_delegation_cancel(
+            "dlg-cancel-completed",
+            confirm=True,
+            dry_run=False,
+            hermes_root=root,
+        )
+    )
+    assert out["success"] is True
+    row = out["delegation"]
+    assert row["state"] == "reconciling"
+    assert row["validation_verdict"] == ""
+    assert row["terminal_at"] is None
+    assert row["cancel_requested"] is True
+    fetched = json.loads(delegations.hermes_delegation_get("dlg-cancel-completed", hermes_root=root))
+    assert fetched["delegation"]["events"][0]["event_type"] == "delegation.cancel_requested"
+
+
 def test_get_returns_bounded_event_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     workspace = tmp_path / "ws"
     workspace.mkdir()
