@@ -132,6 +132,56 @@ def test_mission_live_wakeup_is_published_after_authoritative_commit(hermes_root
     assert observed["status"] == "draft"
 
 
+def test_mission_live_wakeup_is_not_published_when_commit_fails(hermes_root: Path, monkeypatch):
+    import operator_mission_runtime as mission
+
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    published: list[dict[str, object]] = []
+    monkeypatch.setattr(live, "publish_event", lambda **kwargs: published.append(kwargs))
+    real_connect = mission._connect
+
+    class FailingCommitConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __enter__(self):
+            self.connection.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return self.connection.__exit__(exc_type, exc, tb)
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def commit(self):
+            raise OSError("injected mission commit failure")
+
+    def failing_connect(path, *, write):
+        connection = real_connect(path, write=write)
+        return FailingCommitConnection(connection) if write else connection
+
+    monkeypatch.setattr(mission, "_connect", failing_connect)
+    spec = json.dumps(
+        {
+            "schema": mission.MISSION_SPEC_SCHEMA,
+            "mission_id": "msn-live-rollback",
+            "title": "Rollback live mission",
+            "objective": "A failed authoritative commit must not publish a wake-up.",
+        }
+    )
+    created = json.loads(mission.hermes_mission_create(spec, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert created["success"] is False
+    assert published == []
+    monkeypatch.setattr(mission, "_connect", real_connect)
+    snapshot = json.loads(mission.hermes_mission_get("msn-live-rollback", hermes_root=hermes_root))
+    assert snapshot["success"] is False
+    assert snapshot["code"] == "MISSION_READ_FAILED"
+    events = json.loads(live.hermes_live_events_since(0, mission_id="msn-live-rollback", hermes_root=hermes_root))
+    assert events["events"] == []
+
+
 def test_websocket_stream_and_control_frames(hermes_root: Path):
     app = Starlette(routes=live.websocket_routes(lambda: hermes_root))
     client = TestClient(app)
