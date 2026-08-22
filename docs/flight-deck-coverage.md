@@ -7,6 +7,10 @@ The current policy contract remains [Operator Mode](operator-mode.md).
 
 ## Reachable read surfaces
 
+- [x] v0.9 first-class Missions through `GET /api/ops/missions`, Mission detail,
+  Mission-filtered cursor/long-poll wakeups, and delegation detail. The browser
+  re-reads durable Mission state after a wakeup and exposes no Mission mutation
+  path.
 - [x] Mission Control: overview, health, profiles, fleet, Codex, cron,
   delegations, failures, approvals, vault, usage, and audit through
   `GET /api/ops/:surface`.
