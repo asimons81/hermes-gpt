@@ -37,6 +37,7 @@ import operator_contract as op_contract
 import operator_runners as op_runners
 import operator_review as op_review
 import operator_events as op_events
+import operator_live_events as op_live_events
 import operator_oauth as op_oauth
 import operator_swarm as op_swarm
 import operator_recovery as op_recovery
@@ -1416,6 +1417,8 @@ def hermes_operator_status() -> str:
             "hermes_mission_reconcile",
             "hermes_mission_transition",
             "hermes_mission_approve",
+            "hermes_live_events_cursor",
+            "hermes_live_events_since",
             "hermes_contract_define",
             "hermes_contract_dispatch",
             "hermes_contract_validate",
@@ -1531,6 +1534,31 @@ def hermes_events_tail(limit: int = 20) -> str:
     """Recent events across all allowed sources (read-only, redacted)."""
     return op_events.hermes_events_tail(
         limit=limit, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_live_events_cursor() -> str:
+    """Return the durable v0.9 live-event high-water cursor."""
+    return op_live_events.hermes_live_events_cursor(hermes_root=_default_hermes_root())
+
+
+def hermes_live_events_since(
+    cursor: int = 0,
+    mission_id: str = "",
+    topic: str = "",
+    kind: str = "",
+    limit: int = 100,
+    wait_ms: int = 0,
+) -> str:
+    """Read or wait for durable v0.9 live events after a cursor."""
+    return op_live_events.hermes_live_events_since(
+        cursor=cursor,
+        mission_id=mission_id,
+        topic=topic,
+        kind=kind,
+        limit=limit,
+        wait_ms=wait_ms,
+        hermes_root=_default_hermes_root(),
     )
 
 
@@ -2286,6 +2314,50 @@ def build_asgi_app(server: FastMCP, *, http: bool) -> Any:
         raise ValueError("Built-in OAuth is supported only with streamable HTTP (--http).")
     raw_mcp_app = server.streamable_http_app() if http else server.sse_app()
     mcp_app = oauth_auth.DefaultMcpAcceptMiddleware(raw_mcp_app)
+    static_bearer = oauth_auth.static_bearer_from_env() or ""
+
+    async def live_websocket_authorized(websocket: Any) -> bool:
+        """Reuse the normal Hermes HTTP auth authority for WebSocket handshakes."""
+        if oauth_state is None and not static_bearer:
+            return True
+        admitted = False
+
+        async def admitted_app(_scope: dict[str, Any], _receive: Any, _send: Any) -> None:
+            nonlocal admitted
+            admitted = True
+
+        auth_middleware = oauth_auth.BearerAuthMiddleware(
+            admitted_app,
+            oauth_state,
+            static_token=static_bearer,
+        )
+        scope = dict(websocket.scope)
+        scope.update(
+            {
+                "type": "http",
+                "http_version": scope.get("http_version", "1.1"),
+                "scheme": "http",
+                "method": "POST",
+                "path": "/mcp",
+                "raw_path": b"/mcp",
+                "query_string": b"",
+            }
+        )
+        request_sent = False
+
+        async def receive() -> dict[str, Any]:
+            nonlocal request_sent
+            if request_sent:
+                return {"type": "http.disconnect"}
+            request_sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(_message: dict[str, Any]) -> None:
+            return None
+
+        await auth_middleware(scope, receive, send)
+        return admitted
+
     routes: list[BaseRoute] = [Route("/", health_root, methods=["GET", "POST", "OPTIONS"])]
     if oauth_state is not None:
         async def resource_metadata(request: Request) -> JSONResponse:
@@ -2325,13 +2397,20 @@ def build_asgi_app(server: FastMCP, *, http: bool) -> Any:
             routes.extend(ui_api.routes())
         except Exception as exc:  # noqa: BLE001
             eprint(f"UI mount skipped: {exc.__class__.__name__}: {exc}")
+    # v0.9 live-event delivery is read-only and remains behind the same outer
+    # Bearer/OAuth middleware as MCP and the browser UI.
+    routes.extend(
+        op_live_events.websocket_routes(
+            _default_hermes_root,
+            auth_check=live_websocket_authorized,
+        )
+    )
     routes.append(Mount("/", app=mcp_app))
     app = Starlette(routes=routes, lifespan=raw_mcp_app.router.lifespan_context)
     issuer = oauth_state.config.issuer if oauth_state is not None else ""
     parsed_issuer = urllib.parse.urlparse(issuer)
     issuer_origin = f"{parsed_issuer.scheme}://{parsed_issuer.netloc}" if parsed_issuer.netloc else ""
     origins = [origin for origin in ("https://chatgpt.com", issuer_origin) if origin]
-    static_bearer = oauth_auth.static_bearer_from_env() or ""
     return CORSMiddleware(
         oauth_auth.BearerAuthMiddleware(app, oauth_state, static_token=static_bearer),
         allow_origins=origins,
@@ -2522,6 +2601,22 @@ def register_tools(server: FastMCP) -> None:
         meta=tool_meta(),
         annotations=ToolAnnotations(
             title="Tail recent Hermes GPT events across allowed sources",
+            readOnlyHint=True,
+        ),
+    )
+    server.add_tool(
+        hermes_live_events_cursor,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Read the durable v0.9 live-event cursor",
+            readOnlyHint=True,
+        ),
+    )
+    server.add_tool(
+        hermes_live_events_since,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Read or wait for durable v0.9 live events",
             readOnlyHint=True,
         ),
     )

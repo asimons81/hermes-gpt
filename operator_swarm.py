@@ -246,6 +246,30 @@ def _audit_call(
         )
     except Exception:
         pass
+    # v0.9 wake-up channel. Swarm JSON/audit state remains authoritative;
+    # notification failure is non-fatal and never advances work.
+    try:
+        import operator_live_events as live_events
+
+        live_events.publish_event(
+            topic="swarm",
+            kind=tool,
+            subject_type="workflow-stage" if stage_id else "workflow",
+            subject_id=f"{workflow_id}:{stage_id}" if stage_id else workflow_id,
+            source="swarm",
+            payload={
+                "workflow_id": workflow_id,
+                "stage_id": stage_id,
+                "owner": owner,
+                "verdict": verdict,
+                "success": bool(success),
+                "changed": bool(changed),
+                **(extra or {}),
+            },
+            hermes_root=_default_hermes_root(),
+        )
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        return
 
 
 def _default_hermes_root() -> Path | None:

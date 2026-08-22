@@ -103,6 +103,7 @@ jobs:
           runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
           operator_export.py test_operator_export.py test_server_export.py
           operator_mission_runtime.py test_operator_mission_runtime.py
+          operator_live_events.py test_operator_live_events.py
           tools/check_package_hygiene.py test_package_hygiene.py
           ui_api.py ui_fabric.py
 
