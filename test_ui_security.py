@@ -276,7 +276,7 @@ def test_me_endpoint_loopback_ok(ui_root, monkeypatch):
     assert data["accountStatus"] == "ok"
     assert data["operatorLevel"] == "read_only"
     assert data["profile"] == "default"
-    assert data["serverVersion"] == "0.7.0"
+    assert data["serverVersion"] == server.VERSION
     assert data["allowedSurfaces"] == sorted(op_mission.MISSION_SURFACES)
     assert data["uiCapabilities"][:3] == ["chat", "flight", "events"]
     assert "approvals" not in data["uiCapabilities"]  # read_only level gate

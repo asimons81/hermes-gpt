@@ -1,6 +1,6 @@
 # MCP Compatibility
 
-- Status: current (v0.7.0, Flight Deck)
+- Status: current (v0.8.0, Fabric)
 - Owner: default (implementation: developer profile)
 - Verified: 2026-08-15 against `mcp` 1.28.1 (`mcp.shared.version`)
 
@@ -73,7 +73,7 @@ The MCP specification leaves rendering of embedded resources to the client. Herm
 ## Version advertisement
 
 The `initialize` handshake advertises the hermes-gpt app version in
-`serverInfo.version` (from `versioning.VERSION`, currently `0.7.0`) — not the
+`serverInfo.version` (from `versioning.VERSION`, currently `0.8.0`) — not the
 MCP SDK version. This lets a client detect a stale process that is still
 exposing an old schema. `test_mcp_compat.py::test_initialize_advertises_server_version`
 asserts the handshake reports `versioning.VERSION` and that the pinned floor
