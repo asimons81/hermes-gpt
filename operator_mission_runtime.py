@@ -777,14 +777,16 @@ def hermes_mission_approve(
             raise PermissionError("direct mission approval requires confirm=true")
         path = _db_path(hermes_root)
 
+        root = _root(hermes_root)
+
         def validate(mission: dict[str, Any]) -> None:
             if mission["status"] != "awaiting_approval":
                 raise ValueError("mission must be awaiting_approval before Owner approval")
-            attachments = mission["attachments"]
-            succeeded = [a for a in attachments if a["state"] == "succeeded" and bool(a.get("verified"))]
-            invalid = [a for a in attachments if a["state"] not in {"succeeded", "cancelled"} or (a["state"] == "succeeded" and not bool(a.get("verified")))]
+            observed = _observe_attachments(root, mission)
+            succeeded = [a for a in observed if a["state"] == "succeeded" and bool(a.get("verified"))]
+            invalid = [a for a in observed if a["state"] not in {"succeeded", "cancelled"} or (a["state"] == "succeeded" and not bool(a.get("verified")))]
             if invalid or not succeeded:
-                raise ValueError("mission children are not all terminal with at least one verified success")
+                raise ValueError("mission children are not currently terminal with at least one verified success")
 
         approval = {"approved": True, "approved_by": "owner", "approval_reference": approval_reference, "approved_at": _now()}
         target = "completed"

@@ -268,6 +268,28 @@ def test_approval_requires_awaiting_approval_and_verified_success(hermes_root: P
     assert denied["success"] is False
 
 
+@pytest.mark.parametrize("regression", ["blocked", "missing"])
+def test_approval_reobserves_child_evidence_and_fails_closed(hermes_root: Path, monkeypatch, regression: str):
+    assert _j(mission.hermes_mission_create(_spec(), confirm=True, dry_run=False, hermes_root=hermes_root))["success"]
+    assert _j(mission.hermes_mission_attach("msn-test", "workflow", "sw-child", state="pending", confirm=True, dry_run=False, hermes_root=hermes_root))["success"]
+    wf_dir = hermes_root / "swarm-workflows"
+    wf_dir.mkdir()
+    wf_path = wf_dir / "sw-child.json"
+    wf_path.write_text(json.dumps({"status": "done"}), encoding="utf-8")
+    reconciled = _j(mission.hermes_mission_reconcile("msn-test", confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert reconciled["status"] == "awaiting_approval"
+    if regression == "blocked":
+        wf_path.write_text(json.dumps({"status": "blocked"}), encoding="utf-8")
+    else:
+        wf_path.unlink()
+    _owner(monkeypatch)
+    denied = _j(mission.hermes_mission_approve("msn-test", "approval:stale", confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert denied["success"] is False
+    got = _j(mission.hermes_mission_get("msn-test", hermes_root=hermes_root))
+    assert got["status"] == "awaiting_approval"
+    assert not got["approval"].get("approved")
+
+
 def test_noop_reconcile_does_not_append_events(hermes_root: Path):
     assert _j(mission.hermes_mission_create(_spec(), confirm=True, dry_run=False, hermes_root=hermes_root))["success"]
     assert _j(mission.hermes_mission_attach("msn-test", "workflow", "sw-child", state="pending", confirm=True, dry_run=False, hermes_root=hermes_root))["success"]
