@@ -82,6 +82,7 @@ py-modules = [
   "ui_chat",
   "ui_ops",
   "ui_fabric",
+  "ui_missions",
 ]
 
 [tool.setuptools.data-files]
@@ -118,6 +119,7 @@ py-modules = [
   "docs/windows-chatgpt-codex.md",
   "docs/ui-security-boundary.md",
   "docs/flight-deck-coverage.md",
+  "docs/flight-deck-missions.md",
 ]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",

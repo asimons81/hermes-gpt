@@ -289,6 +289,30 @@ body {
   flex-wrap: wrap;
 }
 
+.fd-row--subtle {
+  color: var(--fd-text-tertiary);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.fd-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.fd-grid--2 {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.fd-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--fd-text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .fd-hint {
   margin: 4px 0 0;
   font-size: 12px;

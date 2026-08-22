@@ -8,6 +8,7 @@ import { DeckOverview } from './flight/DeckOverview';
 import { EventHistoryPanel } from './flight/EventHistoryPanel';
 import { FabricAttemptDetail, FabricPanel } from './flight/FabricPanel';
 import { FleetPanel } from './flight/FleetPanel';
+import { MissionDetail, MissionsPanel } from './flight/MissionsPanel';
 import { SURFACE_SCHEMAS } from './flight/schemas';
 import { SurfacePanel } from './flight/SurfacePanel';
 import { SwarmDetail, SwarmMonitor } from './flight/SwarmMonitor';
@@ -19,7 +20,7 @@ function FlightNav() {
       <Link to="/chat" className="fd-nav-brand">HERMES</Link>
       <div className="fd-nav-links">
         <Link to="/chat">Chat</Link><Link to="/ops">Deck</Link><Link to="/events">Events</Link>
-        <Link to="/ops/contracts">Contracts</Link><Link to="/ops/swarm">Swarm</Link><Link to="/ops/fabric">Fabric</Link><Link to="/account">Account</Link>
+        <Link to="/ops/missions">Missions</Link><Link to="/ops/contracts">Contracts</Link><Link to="/ops/swarm">Swarm</Link><Link to="/ops/fabric">Fabric</Link><Link to="/account">Account</Link>
       </div>
     </nav>
   );
@@ -33,6 +34,7 @@ function OpsSurface() {
       const element = surface === 'approvals' ? <ApprovalsPanel /> : surface === 'fleet' ? <FleetPanel /> : schema ? <SurfacePanel schema={schema} /> : <DeckOverview />;
       return <Route key={surface} path={surface} element={element} />;
     })}
+    <Route path="missions" element={<MissionsPanel />} /><Route path="missions/:missionId" element={<MissionDetail />} />
     <Route path="contracts" element={<ContractsPanel />} /><Route path="contracts/:contractSha256" element={<ContractDetail />} />
     <Route path="swarm" element={<SwarmMonitor />} /><Route path="swarm/:workflowId" element={<SwarmDetail />} />
     <Route path="fabric" element={<FabricPanel />} /><Route path="fabric/:attemptId" element={<FabricAttemptDetail />} />

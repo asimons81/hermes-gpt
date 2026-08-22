@@ -105,7 +105,7 @@ jobs:
           operator_mission_runtime.py test_operator_mission_runtime.py
           operator_live_events.py test_operator_live_events.py
           tools/check_package_hygiene.py test_package_hygiene.py
-          ui_api.py ui_fabric.py
+          ui_api.py ui_fabric.py ui_missions.py test_ui_missions.py
 
   web:
     runs-on: ubuntu-latest

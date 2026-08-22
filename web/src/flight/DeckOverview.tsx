@@ -47,6 +47,9 @@ export function DeckOverview() {
       </div>
 
       <div className="fd-deck-links">
+        <Link className="fd-btn fd-btn--ghost" to="/ops/missions">
+          Missions
+        </Link>
         <Link className="fd-btn fd-btn--ghost" to="/events">
           Event History
         </Link>
