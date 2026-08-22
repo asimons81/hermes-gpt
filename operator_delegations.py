@@ -7,10 +7,6 @@ scope, mutation gates, dispatch, cancellation, and completion evidence.
 This store deliberately persists no objective/prompt/transcript. It records only
 bounded lineage and normalized lifecycle metadata so Missions and clients can
 observe Pi, OpenCode, Codex, Fleet/Fabric, and future runner backends uniformly.
-
-When a delegation belongs to a Mission, its Mission attachment is reserved
-before backend dispatch. Later lifecycle-to-Mission bridge failures are surfaced
-as hard synchronization failures rather than silently returning success.
 """
 
 from __future__ import annotations
@@ -301,9 +297,9 @@ def _sync_mission_attachment(
 
 
 def _mission_sync_failure(
-    *,
     operation: str,
     row: dict[str, Any],
+    *,
     changed: bool,
     extra: dict[str, Any] | None = None,
 ) -> str:
@@ -348,8 +344,8 @@ def hermes_delegation_dispatch(
     """Dispatch a Work Contract and create one normalized delegation record."""
     policy = op.OperatorPolicy()
     mission_reserved = False
-    root: Path | None = None
     contract_sha = ""
+    root: Path | None = None
     try:
         policy.require_level("workspace")
         policy.require_mutation(dry_run)
@@ -371,25 +367,21 @@ def hermes_delegation_dispatch(
                 ).fetchone()
                 if existing is not None:
                     raise ValueError("delegation_id/task_id already has a lifecycle record")
-
         if mission_id:
-            reservation = json.loads(
-                mission_runtime.hermes_mission_attach(
-                    mission_id,
-                    "delegation",
-                    delegation_id,
-                    relationship="contains",
-                    state="pending",
-                    evidence_ref=f"contract:{contract_sha}",
-                    confirm=confirm,
-                    dry_run=effective_dry,
-                    hermes_root=root,
-                )
-            )
-            if not reservation.get("success"):
+            reserved = json.loads(mission_runtime.hermes_mission_attach(
+                mission_id,
+                "delegation",
+                delegation_id,
+                relationship="contains",
+                state="pending",
+                evidence_ref=f"contract:{contract_sha}",
+                confirm=confirm,
+                dry_run=effective_dry,
+                hermes_root=root,
+            ))
+            if not reserved.get("success"):
                 raise RuntimeError("Mission delegation reservation was rejected")
             mission_reserved = not effective_dry
-
         dispatch = json.loads(
             contract_mod.hermes_contract_dispatch(
                 canonical,
@@ -401,32 +393,19 @@ def hermes_delegation_dispatch(
         )
         ambiguous = bool(dispatch.get("submission_may_have_succeeded") or (dispatch.get("changed") and not dispatch.get("success")))
         if effective_dry:
-            _audit(
-                tool="hermes_delegation_dispatch",
-                policy=policy,
-                dry_run=True,
-                success=bool(dispatch.get("success")),
-                changed=False,
-                delegation_id=delegation_id,
-                task_id=task_id,
-                backend=backend,
-            )
-            return json.dumps(
-                {
-                    "success": bool(dispatch.get("success")),
-                    "schema_version": SCHEMA_VERSION,
-                    "delegation_id": delegation_id,
-                    "mission_id": mission_id,
-                    "task_id": task_id,
-                    "contract_sha256": contract_sha,
-                    "backend": backend,
-                    "dry_run": True,
-                    "changed": False,
-                    "dispatch": dispatch,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+            _audit(tool="hermes_delegation_dispatch", policy=policy, dry_run=True, success=bool(dispatch.get("success")), changed=False, delegation_id=delegation_id, task_id=task_id, backend=backend)
+            return json.dumps({
+                "success": bool(dispatch.get("success")),
+                "schema_version": SCHEMA_VERSION,
+                "delegation_id": delegation_id,
+                "mission_id": mission_id,
+                "task_id": task_id,
+                "contract_sha256": contract_sha,
+                "backend": backend,
+                "dry_run": True,
+                "changed": False,
+                "dispatch": dispatch,
+            }, ensure_ascii=False, indent=2)
         if not dispatch.get("success") and not ambiguous:
             if mission_reserved:
                 mission_runtime.record_attachment_state(
@@ -437,29 +416,16 @@ def hermes_delegation_dispatch(
                     evidence_ref=f"contract:{contract_sha}",
                     hermes_root=root,
                 )
-            _audit(
-                tool="hermes_delegation_dispatch",
-                policy=policy,
-                dry_run=False,
-                success=False,
-                changed=False,
-                delegation_id=delegation_id,
-                task_id=task_id,
-                backend=backend,
-            )
-            return json.dumps(
-                {
-                    "success": False,
-                    "schema_version": SCHEMA_VERSION,
-                    "delegation_id": delegation_id,
-                    "task_id": task_id,
-                    "backend": backend,
-                    "changed": False,
-                    "dispatch": dispatch,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+            _audit(tool="hermes_delegation_dispatch", policy=policy, dry_run=False, success=False, changed=False, delegation_id=delegation_id, task_id=task_id, backend=backend)
+            return json.dumps({
+                "success": False,
+                "schema_version": SCHEMA_VERSION,
+                "delegation_id": delegation_id,
+                "task_id": task_id,
+                "backend": backend,
+                "changed": False,
+                "dispatch": dispatch,
+            }, ensure_ascii=False, indent=2)
         now = _now()
         backend_state = str(dispatch.get("state") or dispatch.get("status") or ("ambiguous" if ambiguous else "queued"))
         state = "reconciling" if ambiguous else _normalize_state(backend_state)
@@ -504,44 +470,22 @@ def hermes_delegation_dispatch(
             )
         _live_event("delegation.dispatched", row, hermes_root=root)
         if not mission_linked:
-            _audit(
-                tool="hermes_delegation_dispatch",
-                policy=policy,
-                dry_run=False,
-                success=False,
-                changed=True,
-                delegation_id=delegation_id,
-                task_id=task_id,
-                backend=backend,
-            )
+            _audit(tool="hermes_delegation_dispatch", policy=policy, dry_run=False, success=False, changed=True, delegation_id=delegation_id, task_id=task_id, backend=backend)
             return _mission_sync_failure(
-                operation="dispatch",
-                row=row,
+                "dispatch",
+                row,
                 changed=True,
                 extra={"dispatch": dispatch, "submission_may_have_succeeded": True},
             )
-        _audit(
-            tool="hermes_delegation_dispatch",
-            policy=policy,
-            dry_run=False,
-            success=True,
-            changed=True,
-            delegation_id=delegation_id,
-            task_id=task_id,
-            backend=backend,
-        )
-        return json.dumps(
-            {
-                "success": True,
-                "schema_version": SCHEMA_VERSION,
-                "changed": True,
-                "delegation": _surface(row),
-                "mission_linked": bool(mission_id),
-                "dispatch": dispatch,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+        _audit(tool="hermes_delegation_dispatch", policy=policy, dry_run=False, success=True, changed=True, delegation_id=delegation_id, task_id=task_id, backend=backend)
+        return json.dumps({
+            "success": True,
+            "schema_version": SCHEMA_VERSION,
+            "changed": True,
+            "delegation": _surface(row),
+            "mission_linked": bool(mission_id),
+            "dispatch": dispatch,
+        }, ensure_ascii=False, indent=2)
     except (ValueError, TypeError, LookupError, PermissionError, RuntimeError, OSError, sqlite3.Error) as exc:
         if mission_reserved and mission_id and delegation_id and root is not None:
             mission_runtime.record_attachment_state(
@@ -566,28 +510,12 @@ def hermes_delegation_get(delegation_id: str, hermes_root: Path | None = None) -
             raise LookupError(f"delegation {delegation_id!r} was not found")
         with _connect(path, write=False) as db:
             row = _get_row(db, delegation_id)
-            events = [
-                dict(r)
-                for r in db.execute(
-                    "SELECT event_type,from_state,to_state,backend_state,observed_sha256,created_at FROM delegation_events WHERE delegation_id=? ORDER BY seq DESC LIMIT 100",
-                    (delegation_id,),
-                ).fetchall()
-            ]
-        _audit(
-            tool="hermes_delegation_get",
-            policy=policy,
-            dry_run=True,
-            success=True,
-            changed=False,
-            delegation_id=delegation_id,
-            task_id=row["task_id"],
-            backend=row["backend"],
-        )
-        return json.dumps(
-            {"success": True, "schema_version": SCHEMA_VERSION, "delegation": _surface(row, events=events)},
-            ensure_ascii=False,
-            indent=2,
-        )
+            events = [dict(r) for r in db.execute(
+                "SELECT event_type,from_state,to_state,backend_state,observed_sha256,created_at FROM delegation_events WHERE delegation_id=? ORDER BY seq DESC LIMIT 100",
+                (delegation_id,),
+            ).fetchall()]
+        _audit(tool="hermes_delegation_get", policy=policy, dry_run=True, success=True, changed=False, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
+        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "delegation": _surface(row, events=events)}, ensure_ascii=False, indent=2)
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "DELEGATION_GET_FAILED", "Check delegation id and Operator read access.")
 
@@ -621,16 +549,7 @@ def hermes_delegation_list(
                 f"SELECT * FROM delegations{where} ORDER BY updated_at DESC LIMIT ?",
                 (*params, limit),
             ).fetchall()
-        return json.dumps(
-            {
-                "success": True,
-                "schema_version": SCHEMA_VERSION,
-                "delegations": [_surface(r) for r in rows],
-                "count": len(rows),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "delegations": [_surface(r) for r in rows], "count": len(rows)}, ensure_ascii=False, indent=2)
     except (ValueError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "DELEGATION_LIST_FAILED", "Check filters and Operator read access.")
 
@@ -693,27 +612,21 @@ def hermes_delegation_reconcile(
             or verdict != stored.get("validation_verdict", "")
         )
         preview = dict(stored)
-        preview.update(
-            {
-                "state": desired,
-                "backend_state": _bounded(backend_state, 128),
-                "outcome": _bounded(outcome, 128),
-                "validation_verdict": _bounded(verdict, 64),
-            }
-        )
+        preview.update({
+            "state": desired,
+            "backend_state": _bounded(backend_state, 128),
+            "outcome": _bounded(outcome, 128),
+            "validation_verdict": _bounded(verdict, 64),
+        })
         if not apply:
-            return json.dumps(
-                {
-                    "success": True,
-                    "schema_version": SCHEMA_VERSION,
-                    "changed": changed,
-                    "applied": False,
-                    "delegation": _surface(preview),
-                    "observed": observed,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+            return json.dumps({
+                "success": True,
+                "schema_version": SCHEMA_VERSION,
+                "changed": changed,
+                "applied": False,
+                "delegation": _surface(preview),
+                "observed": observed,
+            }, ensure_ascii=False, indent=2)
 
         now = _now()
         terminal_at = stored.get("terminal_at") or (now if desired in TERMINAL_STATES else None)
@@ -723,26 +636,10 @@ def hermes_delegation_reconcile(
             _init(db)
             db.execute(
                 "UPDATE delegations SET state=?,backend_state=?,outcome=?,validation_verdict=?,updated_at=?,terminal_at=? WHERE delegation_id=?",
-                (
-                    desired,
-                    _bounded(backend_state, 128),
-                    _bounded(outcome, 128),
-                    _bounded(verdict, 64),
-                    now,
-                    terminal_at,
-                    delegation_id,
-                ),
+                (desired, _bounded(backend_state, 128), _bounded(outcome, 128), _bounded(verdict, 64), now, terminal_at, delegation_id),
             )
             if changed:
-                _event(
-                    db,
-                    delegation_id,
-                    "delegation.reconciled",
-                    from_state=stored["state"],
-                    to_state=desired,
-                    backend_state=backend_state,
-                    observed=observed,
-                )
+                _event(db, delegation_id, "delegation.reconciled", from_state=stored["state"], to_state=desired, backend_state=backend_state, observed=observed)
             db.commit()
             row = dict(_get_row(db, delegation_id))
 
@@ -759,44 +656,10 @@ def hermes_delegation_reconcile(
         if changed:
             _live_event("delegation.reconciled", row, hermes_root=root)
         if not mission_synced:
-            _audit(
-                tool="hermes_delegation_reconcile",
-                policy=policy,
-                dry_run=False,
-                success=False,
-                changed=changed,
-                delegation_id=delegation_id,
-                task_id=row["task_id"],
-                backend=row["backend"],
-            )
-            return _mission_sync_failure(
-                operation="reconciliation",
-                row=row,
-                changed=changed,
-                extra={"applied": True, "observed": observed},
-            )
-        _audit(
-            tool="hermes_delegation_reconcile",
-            policy=policy,
-            dry_run=False,
-            success=True,
-            changed=changed,
-            delegation_id=delegation_id,
-            task_id=row["task_id"],
-            backend=row["backend"],
-        )
-        return json.dumps(
-            {
-                "success": True,
-                "schema_version": SCHEMA_VERSION,
-                "changed": changed,
-                "applied": True,
-                "delegation": _surface(row),
-                "observed": observed,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+            _audit(tool="hermes_delegation_reconcile", policy=policy, dry_run=False, success=False, changed=changed, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
+            return _mission_sync_failure("reconciliation", row, changed=changed, extra={"applied": True, "observed": observed})
+        _audit(tool="hermes_delegation_reconcile", policy=policy, dry_run=False, success=True, changed=changed, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
+        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": changed, "applied": True, "delegation": _surface(row), "observed": observed}, ensure_ascii=False, indent=2)
     except (ValueError, TypeError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "DELEGATION_RECONCILE_FAILED", "Check delegation lineage, observed backend state, and mutation policy.")
 
@@ -816,45 +679,18 @@ def hermes_delegation_cancel(
         with _connect(path, write=False) as db:
             stored = dict(_get_row(db, delegation_id))
         if stored["state"] in TERMINAL_STATES:
-            return json.dumps(
-                {"success": True, "schema_version": SCHEMA_VERSION, "changed": False, "delegation": _surface(stored)},
-                ensure_ascii=False,
-                indent=2,
-            )
-        result = json.loads(
-            runners.hermes_runner_cancel(
-                stored["task_id"],
-                backend=stored["backend"],
-                confirm=confirm,
-                dry_run=dry_run,
-                hermes_root=root,
-            )
-        )
+            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": False, "delegation": _surface(stored)}, ensure_ascii=False, indent=2)
+        result = json.loads(runners.hermes_runner_cancel(
+            stored["task_id"],
+            backend=stored["backend"],
+            confirm=confirm,
+            dry_run=dry_run,
+            hermes_root=root,
+        ))
         if dry_run or policy.effective_dry_run(dry_run):
-            return json.dumps(
-                {
-                    "success": bool(result.get("success")),
-                    "schema_version": SCHEMA_VERSION,
-                    "changed": False,
-                    "dry_run": True,
-                    "delegation_id": delegation_id,
-                    "cancel": result,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+            return json.dumps({"success": bool(result.get("success")), "schema_version": SCHEMA_VERSION, "changed": False, "dry_run": True, "delegation_id": delegation_id, "cancel": result}, ensure_ascii=False, indent=2)
         if not result.get("success"):
-            return json.dumps(
-                {
-                    "success": False,
-                    "schema_version": SCHEMA_VERSION,
-                    "changed": False,
-                    "delegation_id": delegation_id,
-                    "cancel": result,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+            return json.dumps({"success": False, "schema_version": SCHEMA_VERSION, "changed": False, "delegation_id": delegation_id, "cancel": result}, ensure_ascii=False, indent=2)
         now = _now()
         backend_state = str(result.get("state") or "cancelled")
         normalized = _normalize_state(backend_state)
@@ -867,14 +703,7 @@ def hermes_delegation_cancel(
                 "UPDATE delegations SET state=?,backend_state=?,outcome=?,cancel_requested=1,updated_at=?,terminal_at=? WHERE delegation_id=?",
                 (desired, _bounded(backend_state, 128), outcome, now, now if desired in TERMINAL_STATES else None, delegation_id),
             )
-            _event(
-                db,
-                delegation_id,
-                event_type,
-                from_state=stored["state"],
-                to_state=desired,
-                backend_state=backend_state,
-            )
+            _event(db, delegation_id, event_type, from_state=stored["state"], to_state=desired, backend_state=backend_state)
             db.commit()
             row = dict(_get_row(db, delegation_id))
         mission_synced = True
@@ -887,43 +716,10 @@ def hermes_delegation_cancel(
             )
         _live_event(event_type, row, hermes_root=root)
         if not mission_synced:
-            _audit(
-                tool="hermes_delegation_cancel",
-                policy=policy,
-                dry_run=False,
-                success=False,
-                changed=True,
-                delegation_id=delegation_id,
-                task_id=row["task_id"],
-                backend=row["backend"],
-            )
-            return _mission_sync_failure(
-                operation="cancellation",
-                row=row,
-                changed=True,
-                extra={"cancel": result},
-            )
-        _audit(
-            tool="hermes_delegation_cancel",
-            policy=policy,
-            dry_run=False,
-            success=True,
-            changed=True,
-            delegation_id=delegation_id,
-            task_id=row["task_id"],
-            backend=row["backend"],
-        )
-        return json.dumps(
-            {
-                "success": True,
-                "schema_version": SCHEMA_VERSION,
-                "changed": True,
-                "delegation": _surface(row),
-                "cancel": result,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+            _audit(tool="hermes_delegation_cancel", policy=policy, dry_run=False, success=False, changed=True, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
+            return _mission_sync_failure("cancellation", row, changed=True, extra={"cancel": result})
+        _audit(tool="hermes_delegation_cancel", policy=policy, dry_run=False, success=True, changed=True, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
+        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": True, "delegation": _surface(row), "cancel": result}, ensure_ascii=False, indent=2)
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "DELEGATION_CANCEL_FAILED", "Check delegation state, backend cancellation support, and mutation policy.")
 
