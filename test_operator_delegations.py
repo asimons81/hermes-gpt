@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -302,6 +303,40 @@ def test_dispatch_immediate_backend_success_does_not_self_certify(tmp_path: Path
     )
     assert out["success"] is True
     assert out["delegation"]["state"] == "reconciling"
+
+
+def test_dispatch_post_backend_persistence_failure_marks_submission_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    monkeypatch.setattr(
+        delegations.contract_mod,
+        "hermes_contract_dispatch",
+        lambda *args, **kwargs: json.dumps({"success": True, "changed": True, "backend": "pi_rpc", "state": "queued"}),
+    )
+    real_connect = delegations._connect
+
+    def failing_connect(path, write=False):
+        if write:
+            raise sqlite3.OperationalError("simulated delegation store failure")
+        return real_connect(path, write=write)
+
+    monkeypatch.setattr(delegations, "_connect", failing_connect)
+    out = json.loads(
+        delegations.hermes_delegation_dispatch(
+            json.dumps(_contract(workspace, task_id="delegation-task-postdispatch")),
+            delegation_id="dlg-postdispatch",
+            confirm=True,
+            dry_run=False,
+            hermes_root=root,
+        )
+    )
+    assert out["success"] is False
+    assert out["code"] == "DELEGATION_DISPATCH_REJECTED"
+    assert out["submission_may_have_succeeded"] is True
+    assert out["changed"] is True
+    assert "reconcile" in out["suggested_action"].lower()
 
 
 def test_dispatch_rejects_nonexistent_mission_even_when_store_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

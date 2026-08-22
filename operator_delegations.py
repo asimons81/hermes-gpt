@@ -344,6 +344,7 @@ def hermes_delegation_dispatch(
     """Dispatch a Work Contract and create one normalized delegation record."""
     policy = op.OperatorPolicy()
     mission_reserved = False
+    backend_dispatched = False
     contract_sha = ""
     root: Path | None = None
     try:
@@ -392,6 +393,7 @@ def hermes_delegation_dispatch(
             )
         )
         ambiguous = bool(dispatch.get("submission_may_have_succeeded") or (dispatch.get("changed") and not dispatch.get("success")))
+        backend_dispatched = bool(dispatch.get("success") or ambiguous)
         if effective_dry:
             _audit(tool="hermes_delegation_dispatch", policy=policy, dry_run=True, success=bool(dispatch.get("success")), changed=False, delegation_id=delegation_id, task_id=task_id, backend=backend)
             return json.dumps({
@@ -496,7 +498,20 @@ def hermes_delegation_dispatch(
                 evidence_ref=f"contract:{contract_sha}",
                 hermes_root=root,
             )
-        return _error(exc, "DELEGATION_DISPATCH_REJECTED", "Check Work Contract, Mission linkage, runner availability, and mutation policy.")
+        envelope = _error(exc, "DELEGATION_DISPATCH_REJECTED", "Check Work Contract, Mission linkage, runner availability, and mutation policy.")
+        if backend_dispatched:
+            # Backend already accepted the submission; the failure was local
+            # persistence, not dispatch rejection. Surface the ambiguity so
+            # callers reconcile instead of treating this as a safe no-op.
+            payload = json.loads(envelope)
+            payload["submission_may_have_succeeded"] = True
+            payload["changed"] = True
+            payload["suggested_action"] = (
+                "Backend dispatch was accepted but the Delegation lifecycle record may not be durable. "
+                "Reconcile the delegation via hermes_delegation_reconcile before retrying or completing."
+            )
+            envelope = json.dumps(payload, ensure_ascii=False, indent=2)
+        return envelope
 
 
 def hermes_delegation_get(delegation_id: str, hermes_root: Path | None = None) -> str:
