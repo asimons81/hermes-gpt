@@ -104,6 +104,34 @@ def test_mission_runtime_event_bridge(hermes_root: Path, monkeypatch):
     assert any(event["kind"] == "mission.created" for event in out["events"])
 
 
+def test_mission_live_wakeup_is_published_after_authoritative_commit(hermes_root: Path, monkeypatch):
+    import operator_mission_runtime as mission
+
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    observed: dict[str, str] = {}
+    real_publish = live.publish_event
+
+    def publish_after_commit(**kwargs):
+        snapshot = json.loads(mission.hermes_mission_get("msn-live-committed", hermes_root=hermes_root))
+        assert snapshot["success"] is True
+        observed["status"] = snapshot["status"]
+        return real_publish(**kwargs)
+
+    monkeypatch.setattr(live, "publish_event", publish_after_commit)
+    spec = json.dumps(
+        {
+            "schema": mission.MISSION_SPEC_SCHEMA,
+            "mission_id": "msn-live-committed",
+            "title": "Committed live mission",
+            "objective": "Wake clients only after durable state commits.",
+        }
+    )
+    created = json.loads(mission.hermes_mission_create(spec, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert created["success"] is True
+    assert observed["status"] == "draft"
+
+
 def test_websocket_stream_and_control_frames(hermes_root: Path):
     app = Starlette(routes=live.websocket_routes(lambda: hermes_root))
     client = TestClient(app)
