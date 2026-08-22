@@ -60,3 +60,13 @@ Missions do not replace Work Contracts, Swarms, runners, or Fabric. They provide
 `Mission -> Swarm/work -> Work Contract -> runner/Fabric -> observed evidence -> Mission reconciliation`
 
 Completion remains based on coordinator-observed evidence and explicit approval boundaries, preserving the v0.8 Fabric safety model. A terminal backend self-report is not sufficient: Mission-facing success must come from a verified lifecycle adapter, and unverified legacy success is reconciled fail-closed to `blocked`.
+
+## Delegation dispatch and reconciliation
+
+Direct delegation dispatch reserves durable lineage before invoking a backend. The delegation store records the phases `reserved`, `invoking`, and `dispatched`; the `reserved -> invoking` claim is atomic. An exact retry with the same delegation id, task id, Mission, backend, contract digest, and validation context is idempotent. Any collision with different lineage is rejected. A definite backend rejection with no possible side effect returns the row to `reserved`; an ambiguous invocation remains `invoking` and is never automatically redispatched.
+
+For Mission-bound work, Hermes commits a private `pending` delegation attachment before backend invocation and rechecks the Mission and attachment immediately before the call. This reservation is idempotent and cannot downgrade an existing attachment. Public `hermes_mission_attach` calls cannot assert either `succeeded` or `cancelled` for any attachment kind. A Mission cannot be cancelled while a delegation child is reserved, invoking, pending, running, or ambiguous.
+
+Delegation reconciliation does not require callers to resupply the Work Contract. Dispatch stores a private, prompt-free validation manifest containing the manifest schema, immutable contract and validation-context digests, validation-only fields, and timestamps. It never stores objectives, prompts, transcripts, raw inputs, constraints, secrets, or backend request/response bodies; secret-like durable values are rejected before dispatch. Reconciliation uses the same observed-state validation algorithm as `hermes_contract_validate`, with or without a matching `contract_json` supplied for parity checking.
+
+Missing, corrupt, mismatched, or secret-like manifests fail closed. Missing current backend observation also fails closed, even if an earlier cached lifecycle or validation value claimed success. Mission reconciliation and Owner approval freshly re-observe delegation backend state, artifacts, review evidence, authorization, and the manifest on every decision. Verified Mission evidence is exactly `contract:<contract_sha256>`; cached attachment state and cached delegation verdicts are not completion authority.

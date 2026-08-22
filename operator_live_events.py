@@ -40,6 +40,7 @@ MAX_KIND = 128
 MAX_SUBJECT = 192
 MAX_QUERY = 500
 MAX_WAIT_MS = 30_000
+MAX_CURSOR = 2**63 - 1
 DEFAULT_RETENTION = 20_000
 HARD_RETENTION = 100_000
 
@@ -89,6 +90,10 @@ def _retention() -> int:
     except ValueError:
         value = DEFAULT_RETENTION
     return max(100, min(value, HARD_RETENTION))
+
+
+def _bounded_cursor(value: Any) -> int:
+    return max(0, min(int(value), MAX_CURSOR))
 
 
 def _init(db: sqlite3.Connection) -> None:
@@ -242,7 +247,7 @@ def read_since(
     limit: int = 100,
     hermes_root: Path | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    cursor = max(0, int(cursor))
+    cursor = _bounded_cursor(cursor)
     limit = max(1, min(int(limit), MAX_QUERY))
     mission_id = _bounded_ref(mission_id, "mission_id", MAX_SUBJECT)
     topic = _bounded_ref(topic, "topic", MAX_TOPIC)
@@ -297,6 +302,7 @@ def hermes_live_events_since(
     policy = op.OperatorPolicy()
     try:
         policy.require_level("read_only")
+        cursor = _bounded_cursor(cursor)
         wait_ms = max(0, min(int(wait_ms), MAX_WAIT_MS))
         deadline = time.monotonic() + wait_ms / 1000
         events, next_cursor = read_since(cursor, mission_id=mission_id, topic=topic, kind=kind, limit=limit, hermes_root=hermes_root)
@@ -310,7 +316,7 @@ def hermes_live_events_since(
                 "success": True,
                 "schema_version": SCHEMA_VERSION,
                 "stream_schema": STREAM_SCHEMA,
-                "cursor": int(cursor),
+                "cursor": cursor,
                 "next_cursor": next_cursor,
                 "high_watermark": high_watermark(hermes_root),
                 "events": events,
@@ -318,7 +324,7 @@ def hermes_live_events_since(
             },
             ensure_ascii=False,
         )
-    except (ValueError, PermissionError, OSError, sqlite3.Error) as exc:
+    except (TypeError, ValueError, PermissionError, OSError, sqlite3.Error) as exc:
         return json.dumps(op.error_from_exception(exc, layer="operator", code="LIVE_EVENT_READ_FAILED", suggested_action="Check cursor/filter bounds and Operator read access."))
 
 
@@ -337,8 +343,8 @@ async def _websocket_endpoint(
         return
     await websocket.accept()
     try:
-        cursor = max(0, int(websocket.query_params.get("cursor", "0") or 0))
-    except ValueError:
+        cursor = _bounded_cursor(websocket.query_params.get("cursor", "0") or 0)
+    except (TypeError, ValueError):
         cursor = 0
     mission_id = websocket.query_params.get("mission_id", "")[:MAX_SUBJECT]
     topic = websocket.query_params.get("topic", "")[:MAX_TOPIC]
@@ -388,7 +394,7 @@ async def _websocket_endpoint(
                 await websocket.send_json({"schema": STREAM_SCHEMA, "type": "pong", "cursor": cursor})
             elif action == "ack":
                 try:
-                    ack = max(0, int(control.get("cursor", cursor)))
+                    ack = _bounded_cursor(control.get("cursor", cursor))
                 except (TypeError, ValueError):
                     ack = cursor
                 cursor = max(cursor, ack)
@@ -406,7 +412,7 @@ async def _websocket_endpoint(
                 mission_id, topic, kind = candidate_mission, candidate_topic, candidate_kind
                 if "cursor" in control:
                     try:
-                        cursor = max(0, int(control["cursor"]))
+                        cursor = _bounded_cursor(control["cursor"])
                     except (TypeError, ValueError):
                         pass
                 await websocket.send_json(
