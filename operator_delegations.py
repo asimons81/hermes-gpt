@@ -608,19 +608,23 @@ def hermes_delegation_cancel(
         if not result.get("success"):
             return json.dumps({"success": False, "schema_version": SCHEMA_VERSION, "changed": False, "delegation_id": delegation_id, "cancel": result}, ensure_ascii=False, indent=2)
         now = _now()
-        desired = _normalize_state(result.get("state") or "cancelled")
+        backend_state = str(result.get("state") or "cancelled")
+        normalized = _normalize_state(backend_state)
+        desired = normalized if normalized in {"cancelled", "failed"} else "reconciling"
+        outcome = desired if desired in TERMINAL_STATES else ""
+        event_type = "delegation.cancelled" if desired == "cancelled" else "delegation.cancel_requested"
         with _connect(path, write=True) as db:
             _init(db)
             db.execute(
                 "UPDATE delegations SET state=?,backend_state=?,outcome=?,cancel_requested=1,updated_at=?,terminal_at=? WHERE delegation_id=?",
-                (desired, _bounded(result.get("state") or "cancelled", 128), desired, now, now if desired in TERMINAL_STATES else None, delegation_id),
+                (desired, _bounded(backend_state, 128), outcome, now, now if desired in TERMINAL_STATES else None, delegation_id),
             )
-            _event(db, delegation_id, "delegation.cancelled", from_state=stored["state"], to_state=desired, backend_state=str(result.get("state") or "cancelled"))
+            _event(db, delegation_id, event_type, from_state=stored["state"], to_state=desired, backend_state=backend_state)
             db.commit()
             row = dict(_get_row(db, delegation_id))
         if row.get("mission_id"):
             mission_runtime.record_attachment_state(row["mission_id"], "delegation", delegation_id, _mission_state(desired), evidence_ref=f"delegation:{delegation_id}", hermes_root=_root(hermes_root))
-        _live_event("delegation.cancelled", row)
+        _live_event(event_type, row)
         _audit(tool="hermes_delegation_cancel", policy=policy, dry_run=False, success=True, changed=True, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
         return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": True, "delegation": _surface(row), "cancel": result}, ensure_ascii=False, indent=2)
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
