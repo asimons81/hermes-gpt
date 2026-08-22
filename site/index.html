@@ -3,517 +3,133 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hermes GPT — Standalone Local MCP Sidecar for Hermes Agent</title>
-  <meta name="description" content="Expose your local Hermes Agent tools—including terminal commands, file access, and memory—to ChatGPT, Codex CLI, and other MCP clients via a secure local-dev sidecar with a two-way Codex bridge.">
+  <title>Hermes GPT v0.8.0 Fabric | Local-First Distributed Execution for Hermes Agent</title>
+  <meta name="description" content="Hermes GPT v0.8.0 Fabric adds authenticated cross-machine Swarm execution, capability-aware routing, verified remote evidence and artifacts, reconciliation, and Fabric Flight Deck visibility while preserving local-first authority and human approval.">
   <meta name="theme-color" content="#030303">
-  <meta property="og:title" content="Hermes GPT v0.7.0 — Flight Deck: Review Evidence, Event History & Durable Tokens">
-  <meta property="og:description" content="Production review evidence, a structured redacted event timeline, durable encrypted token storage, and restart-safe swarm continuity for Hermes Agent via MCP.">
-  <meta property="og:image" content="./assets/hermes-gpt-v0.7.0-readme-hero.jpg">
+  <meta property="og:title" content="Hermes GPT v0.8.0 | Fabric">
+  <meta property="og:description" content="Authenticated cross-machine Swarm execution with capability-aware routing, verified evidence and artifacts, reconciliation, and preserved coordinator authority.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.8.0-readme-hero.jpg">
   <meta name="twitter:card" content="summary_large_image">
-  
+  <meta name="twitter:title" content="Hermes GPT v0.8.0 | Fabric">
+  <meta name="twitter:description" content="A local-first distributed execution fabric for Hermes Agent.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.8.0-readme-hero.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-
-  <!-- Floating Toast Notification -->
   <div class="toast" role="alert" aria-live="polite"></div>
-
   <main class="page" id="top">
-    <!-- Navigation Bar -->
     <header class="topbar reveal">
       <a class="brand" href="#top" aria-label="Hermes GPT Home">
         <span class="brand-mark" aria-hidden="true">HG</span>
-        <span class="brand-copy">
-          <strong>Hermes GPT</strong>
-          <small>local-dev sidecar</small>
-        </span>
+        <span class="brand-copy"><strong>Hermes GPT</strong><small>v0.8.0 Fabric</small></span>
       </a>
-
       <nav class="topnav" aria-label="Primary navigation">
-        <a href="#how-it-works">How it works</a>
-        <a href="#simulator">Simulator</a>
-        <a href="#features">Features</a>
-        <a href="#install">Install</a>
+        <a href="#fabric">Fabric</a><a href="#how-it-works">How it works</a><a href="#simulator">Simulator</a><a href="#features">Features</a><a href="#install">Install</a>
       </nav>
-
       <a class="ghost-link" href="https://github.com/asimons81/hermes-gpt" rel="noreferrer noopener" target="_blank">GitHub</a>
     </header>
 
-    <!-- Hero Section -->
     <section class="hero section-pad reveal">
       <div class="hero-copy">
-        <p class="eyebrow">Local-first MCP Sidecar &bull; Python &bull; FastMCP</p>
-        <h1>Two-way bridge between <span>Hermes and Codex</span>.</h1>
-        <p class="lede">
-          Hermes GPT v0.7.0 connects your local Hermes Agent to ChatGPT, Cursor, Claude Desktop, and Codex CLI with production review evidence, a structured redacted event timeline, durable encrypted token storage, and restart-safe swarm continuity. A standalone companion sidecar that imports Hermes internals at runtime to let you search files, execute local commands, read memories, view skills, and delegate work to Codex — safely, without copying files or code.
-        </p>
-
+        <p class="eyebrow">v0.8.0 Fabric &bull; Local-first &bull; Authenticated cross-machine execution</p>
+        <h1>Hermes Agent now has a <span>distributed execution fabric</span>.</h1>
+        <p class="lede">Hermes GPT v0.8.0 turns the v0.7 control plane into Fabric. Bounded Swarm stages can execute on authenticated remote Hermes machines while the coordinator keeps Work Contract semantics, server-controlled authority, observed-state evidence, independent review, and final human approval on the trusted side of the boundary.</p>
         <div class="cta-row">
-          <a class="button button-primary" href="#install">
-            <span>Install Server</span>
-            <span class="btn-arrow" aria-hidden="true">→</span>
-          </a>
-          <a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt#readme" rel="noreferrer noopener" target="_blank">View GitHub Repo</a>
+          <a class="button button-primary" href="#install"><span>Install v0.8.0</span><span class="btn-arrow" aria-hidden="true">→</span></a>
+          <a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/blob/master/docs/release-notes-v0.8.0.md" rel="noreferrer noopener" target="_blank">Read release notes</a>
         </div>
-
         <div class="hero-metrics">
-          <div class="metric-card">
-            <span>Runtime Bridge</span>
-            <strong>FastMCP + SSE</strong>
-            <small>Supports both stdio mode for local editors and HTTP streaming SSE transport for remote ChatGPT developer connections.</small>
-          </div>
-          <div class="metric-card">
-            <span>Security posture</span>
-            <strong>Tiered Operator Policy</strong>
-            <small>Tiered safety levels (read_only up to owner). Mutating calls require explicit opt-in apply modes and dry-run override tags.</small>
-          </div>
-          <div class="metric-card">
-            <span>Hermes Home</span>
-            <strong>Auto-detected</strong>
-            <small>Automatically scans AppData / local paths on Windows and UNIX systems to load Hermes Agent internals dynamically.</small>
-          </div>
+          <div class="metric-card"><span>Execution</span><strong>Cross-Machine Swarms</strong><small>Authenticated Fabric peers can execute bounded stages without widening coordinator-controlled authority.</small></div>
+          <div class="metric-card"><span>Routing</span><strong>Capability-Aware Auto</strong><small><code>execution.backend=auto</code> ranks eligible local and remote runtimes using current capability, health, freshness, policy, workspace, and authority constraints.</small></div>
+          <div class="metric-card"><span>Validation</span><strong>Verified Evidence</strong><small>Required remote evidence fails closed and admitted artifact bytes are hash-verified by the coordinator.</small></div>
         </div>
       </div>
-
-      <!-- Hero Visual (Double Bezel Design) -->
       <div class="hero-visual reveal">
-        <div class="double-bezel-outer">
-          <div class="double-bezel-inner">
-            <figure class="brand-image-wrapper">
-              <img src="./assets/hermes-gpt-v0.7.0-readme-hero.jpg" alt="Hermes GPT v0.7.0 — Flight Deck: Review Evidence, Event History, and Encrypted Tokens connecting ChatGPT to the Hermes Agent Fleet">
-            </figure>
-          </div>
-        </div>
+        <div class="double-bezel-outer"><div class="double-bezel-inner"><figure class="brand-image-wrapper">
+          <img src="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.8.0-readme-hero.jpg" alt="Hermes GPT v0.8.0 Fabric connecting ChatGPT to an authenticated Hermes Agent fleet with cross-machine Swarms, capability-aware routing, verified evidence, artifact hashing, and reconciliation">
+        </figure></div></div>
       </div>
     </section>
 
-    <!-- How it works (Architecture timeline) -->
-    <section class="section reveal" id="how-it-works">
-      <div class="section-head">
-        <p class="eyebrow">System Architecture</p>
-        <h2>Sidecar runtime integration.</h2>
-        <p>
-          Hermes GPT acts as a lightweight sidecar. It runs locally alongside your Hermes Agent installation, calling tools dynamically and passing the structured outputs back to your LLM clients.
-        </p>
-      </div>
-
-      <div class="timeline-container">
-        <div class="timeline-step">
-          <span class="step-num">01</span>
-          <strong>Client Request</strong>
-          <p>You ask ChatGPT to "list my skills" or "run build". ChatGPT resolves this request into a Model Context Protocol tool call.</p>
-        </div>
-        <div class="timeline-step">
-          <span class="step-num">02</span>
-          <strong>SSE/Stdio Bridge</strong>
-          <p>The call is routed to Hermes GPT. Stdio for local apps like Cursor, or HTTP SSE through a secure Cloudflare tunnel for ChatGPT.</p>
-        </div>
-        <div class="timeline-step">
-          <span class="step-num">03</span>
-          <strong>Dynamic Import</strong>
-          <p>Hermes GPT locates the local Hermes Agent directory, imports its core python tool code, and runs the action locally.</p>
-        </div>
-        <div class="timeline-step">
-          <span class="step-num">04</span>
-          <strong>Gated Response</strong>
-          <p>Execution is evaluated against your active Operator Level (e.g. read_only, skills, workspace) and server apply mode before returning results.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Live Interactive Simulator Section -->
-    <section class="section reveal" id="simulator">
-      <div class="section-head">
-        <p class="eyebrow">Interactive Sandbox</p>
-        <h2>Live MCP tunnel & safety gate simulator.</h2>
-        <p>
-          Toggle local environment configurations and simulate how ChatGPT requests local commands, reads files, and fetches skills through the FastMCP server.
-        </p>
-      </div>
-
-      <!-- Simulator Block (Double Bezel Container) -->
-      <div class="double-bezel-outer simulator-outer-container">
-        <div class="double-bezel-inner simulator-inner-container">
-          
-          <!-- Control Panel: Toggles and Tools -->
-          <div class="sim-control-panel">
-            <div class="control-section">
-              <h4>1. Configure Environment Security Gates</h4>
-              <div class="toggle-grid">
-                <div class="control-group">
-                  <label for="gate-level" class="control-label">
-                    <code>HERMES_GPT_OPERATOR_LEVEL</code>
-                    <small>Define permitted action tiers</small>
-                  </label>
-                  <select id="gate-level" class="sim-select">
-                    <option value="read_only">read_only (Safe status/reads)</option>
-                    <option value="cron">cron (plus cron mutations)</option>
-                    <option value="skills">skills (plus skill edits)</option>
-                    <option value="skills_config">skills_config (plus config edits)</option>
-                    <option value="workspace">workspace (plus scoped writes/tests)</option>
-                    <option value="owner">owner (break-glass shell/writes)</option>
-                  </select>
-                </div>
-                
-                <div class="control-group">
-                  <label class="toggle-switch" style="background: none; border: none; padding: 0; width: 100%;">
-                    <input type="checkbox" id="gate-apply-mode">
-                    <span class="toggle-slider"></span>
-                    <span class="toggle-label">
-                      <code>HERMES_GPT_OPERATOR_APPLY_MODE</code>
-                      <small>Toggle dry-run previews vs direct writes</small>
-                    </span>
-                  </label>
-                  <span class="mode-indicator dry-run" id="apply-mode-label">dry_run</span>
-                </div>
-              </div>
-              
-              <!-- Owner Ack Box (Shown/enabled when level=owner) -->
-              <div class="control-group owner-ack-container" id="owner-ack-container" style="display: none; margin-top: 16px; border-color: rgba(239, 68, 68, 0.2); background: rgba(239, 68, 68, 0.02);">
-                <label class="toggle-switch" style="background: none; border: none; padding: 0; width: 100%;">
-                  <input type="checkbox" id="gate-owner-ack">
-                  <span class="toggle-slider" style="background-color: rgba(255, 255, 255, 0.1);"></span>
-                  <span class="toggle-label">
-                    <code>HERMES_GPT_OWNER_ACK</code>
-                    <small>Acknowledge risk: "I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"</small>
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            <div class="control-section">
-              <h4>2. Select MCP Tool to Execute</h4>
-              <div class="tool-select-grid">
-                <button class="tool-btn is-active" data-tool="status" type="button">
-                  <strong>hermes_operator_status</strong>
-                  <span class="tool-desc">View policy and logs (read_only)</span>
-                </button>
-                <button class="tool-btn" data-tool="cron" type="button">
-                  <strong>hermes_cron_run</strong>
-                  <span class="tool-desc">Run profile cron task (cron)</span>
-                </button>
-                <button class="tool-btn" data-tool="workspace" type="button">
-                  <strong>hermes_workspace_write</strong>
-                  <span class="tool-desc">Write file in workspace (workspace)</span>
-                </button>
-                <button class="tool-btn" data-tool="command" type="button">
-                  <strong>hermes_run_command</strong>
-                  <span class="tool-desc">Run shell command (owner)</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="sim-action-row">
-              <button class="button button-primary" id="btn-run-simulation" type="button">
-                <span>Run MCP Simulation</span>
-                <span class="btn-arrow" aria-hidden="true">→</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Dual Display Console & Chat -->
-          <div class="sim-display-grid">
-            <!-- Left Pane: Mock ChatGPT Window -->
-            <div class="sim-pane pane-chat">
-              <div class="pane-header">
-                <div class="header-dots">
-                  <span></span><span></span><span></span>
-                </div>
-                <span>ChatGPT (MCP client)</span>
-              </div>
-              <div class="pane-body chat-messages" id="chat-box">
-                <div class="chat-bubble bot-message initial-message">
-                  <p>Welcome! I'm connected to your local machine via the <strong>Hermes GPT</strong> MCP server. Select a tool above and run the simulation to see how I fetch data from your local environment.</p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Right Pane: Local Sidecar Server Logs -->
-            <div class="sim-pane pane-server">
-              <div class="pane-header">
-                <div class="header-dots">
-                  <span></span><span></span><span></span>
-                </div>
-                <span>local-server.py (FastMCP SSE)</span>
-              </div>
-              <div class="pane-body server-logs" id="server-logs">
-                <div class="log-line system">[SYSTEM] Server started on 127.0.0.1:4750</div>
-                <div class="log-line system">[SYSTEM] Tunnel active: https://hermes-gpt-tunnel.trycloudflare.com/mcp</div>
-                <div class="log-line waiting">[WAITING] Waiting for incoming ChatGPT requests...</div>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </section>
-
-    <!-- Bento Features Grid Section -->
-    <section class="section reveal" id="features">
-      <div class="section-head">
-        <p class="eyebrow">Capabilities</p>
-        <h2>Built for secure, headless local automation.</h2>
-        <p>
-          Hermes GPT is engineered with zero-trust local constraints. It stays out of your project directories and relies on loopback controls to protect your machine.
-        </p>
-      </div>
-
+    <section class="section reveal" id="fabric">
+      <div class="section-head"><p class="eyebrow">Fabric</p><h2>Remote execution without surrendering authority.</h2><p>Remote worker self-report is transport data, not proof of completion. Fabric keeps placement, evidence admission, reconciliation, contract validation, and approval anchored to the coordinator.</p></div>
       <div class="bento-grid">
-        <article class="bento-card col-span-2">
-          <span class="card-num">01</span>
-          <h3>Zero-Config Sidecar</h3>
-          <p>
-            Does not install as a fork of Hermes Agent or copy files. It imports your active local installation at runtime, preventing code drift.
-          </p>
-        </article>
-
-        <article class="bento-card">
-          <span class="card-num">02</span>
-          <h3>Double Transport Mode</h3>
-          <p>
-            Supports stdio mode for local IDE integrations (Cursor, Claude Desktop) and SSE transport for streaming web hooks.
-          </p>
-        </article>
-
-        <article class="bento-card">
-          <span class="card-num">03</span>
-          <h3>Private Session History</h3>
-          <p>
-            The four read-only history tools originally available only to ChatGPT now have native Codex parity through the Hermes GPT Session History integration. Lists, searches, reads, and in-memory Markdown/JSON exports stay bounded, while internal roles remain filtered by default.
-          </p>
-        </article>
-
-        <article class="bento-card col-span-2">
-          <span class="card-num">04</span>
-          <h3>Tiered Safety Gating</h3>
-          <p>
-            Action tiers (from read_only to workspace and owner) restrict mutating tools unless the server apply mode is explicitly set to direct.
-          </p>
-        </article>
-
-        <article class="bento-card col-span-3">
-          <span class="card-num">05</span>
-          <h3>Local-dev Warning Engine</h3>
-          <p>
-            Binds to loopback (127.0.0.1) by default. If bound to a public interface without authentication enabled, the server alerts you on startup.
-          </p>
-        </article>
-
-        <article class="bento-card col-span-3">
-          <span class="card-num">06</span>
-          <h3>Operator Diagnostics Suite</h3>
-          <p>
-            Proactive health checks (<code>hermes_operator_doctor</code>), state snapshots (<code>hermes_operator_snapshot</code>), release readiness assessment (<code>hermes_release_doctor</code>), and safe dry-run-first recovery (<code>hermes_operator_recover</code>). Structured error envelopes provide <code>{success, ok, error, layer, code, safe_message, suggested_action, trace_id}</code> on every failure, with PASS/WARN/FAIL/UNSUPPORTED statuses and automatic secret/path redaction.
-          </p>
-        </article>
+        <article class="bento-card col-span-2"><span class="card-num">01</span><h3>Authenticated Fabric Peers</h3><p>The packaged <code>hermes-gpt-fabric-peer</code> runtime handles remote execution. Non-loopback peer serving requires direct TLS with both certificate and key.</p></article>
+        <article class="bento-card"><span class="card-num">02</span><h3>Capability-Aware Routing</h3><p>Durable capability manifests, health and freshness state, deterministic ranking, exclusion reasons, backend availability, profile policy, workspace constraints, and authority ceilings all feed placement.</p></article>
+        <article class="bento-card"><span class="card-num">03</span><h3>Verified Artifacts</h3><p>Remote artifact admission uses immutable manifests and content hashing. The coordinator verifies received bytes instead of trusting a worker claim.</p></article>
+        <article class="bento-card col-span-2"><span class="card-num">04</span><h3>Same-Attempt Reconciliation</h3><p>Restart, timeout, and cancellation recovery reconcile the original distributed attempt when possible. Write-ownership and write-epoch guards block duplicate or ambiguous mutation paths.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">05</span><h3>Fabric Flight Deck</h3><p>Read-only node, placement, attempt, evidence, and routing views expose the authoritative selected route, including health, capability freshness, eligibility, transport backend, and authority ceiling.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Real Two-Machine Acceptance</h3><p>The final Fabric target passed fresh G6 acceptance on distinct Linux machines with authenticated remote execution, induced transport loss, same-attempt recovery, artifact re-hash, fail-closed missing evidence, Work Contract validation, approval gating, and independent review.</p></article>
       </div>
     </section>
 
-    <!-- Installation & Connection Section -->
+    <section class="section reveal" id="how-it-works">
+      <div class="section-head"><p class="eyebrow">System Architecture</p><h2>Coordinator authority, distributed execution.</h2><p>Hermes GPT remains a local-first sidecar. Fabric adds authenticated remote placement while keeping the trusted coordinator authoritative.</p></div>
+      <div class="timeline-container">
+        <div class="timeline-step"><span class="step-num">01</span><strong>Client Request</strong><p>ChatGPT, Codex, Cursor, Claude Desktop, or another trusted MCP client submits a bounded request to Hermes GPT.</p></div>
+        <div class="timeline-step"><span class="step-num">02</span><strong>Policy + Placement</strong><p>The coordinator evaluates Operator level, workspace, backend, node health, capability freshness, and authority ceiling before selecting an eligible route.</p></div>
+        <div class="timeline-step"><span class="step-num">03</span><strong>Local or Remote Execution</strong><p>The bounded stage runs locally or through an authenticated Fabric peer. Explicit operator overrides remain preserved.</p></div>
+        <div class="timeline-step"><span class="step-num">04</span><strong>Evidence + Validation</strong><p>Evidence and artifacts return to the coordinator, which performs admission, hashing, Work Contract validation, reconciliation when needed, and final approval gating.</p></div>
+      </div>
+    </section>
+
+    <section class="section reveal" id="simulator">
+      <div class="section-head"><p class="eyebrow">Interactive Sandbox</p><h2>Operator safety gate simulator.</h2><p>Explore the policy model without touching a real Hermes installation. The simulator mirrors dry-run-first behavior and Owner acknowledgment requirements.</p></div>
+      <div class="double-bezel-outer simulator-outer-container"><div class="double-bezel-inner simulator-inner-container">
+        <div class="sim-control-panel">
+          <div class="control-section"><h4>1. Configure Environment Security Gates</h4><div class="toggle-grid">
+            <div class="control-group"><label for="gate-level" class="control-label"><code>HERMES_GPT_OPERATOR_LEVEL</code><small>Define permitted action tiers</small></label><select id="gate-level" class="sim-select"><option value="read_only">read_only</option><option value="cron">cron</option><option value="skills">skills</option><option value="skills_config">skills_config</option><option value="workspace">workspace</option><option value="owner">owner</option></select></div>
+            <div class="control-group"><label class="toggle-switch" style="background:none;border:none;padding:0;width:100%;"><input type="checkbox" id="gate-apply-mode"><span class="toggle-slider"></span><span class="toggle-label"><code>HERMES_GPT_OPERATOR_APPLY_MODE</code><small>Toggle dry-run preview vs direct mode</small></span></label><span class="mode-indicator dry-run" id="apply-mode-label">dry_run</span></div>
+          </div><div class="control-group owner-ack-container" id="owner-ack-container" style="display:none;margin-top:16px;"><label class="toggle-switch" style="background:none;border:none;padding:0;width:100%;"><input type="checkbox" id="gate-owner-ack"><span class="toggle-slider"></span><span class="toggle-label"><code>HERMES_GPT_OWNER_ACK</code><small>Acknowledge owner-level mutation risk</small></span></label></div></div>
+          <div class="control-section"><h4>2. Select MCP Tool</h4><div class="tool-select-grid"><button class="tool-btn is-active" data-tool="status" type="button"><strong>hermes_operator_status</strong><span class="tool-desc">Read policy state</span></button><button class="tool-btn" data-tool="cron" type="button"><strong>hermes_cron_run</strong><span class="tool-desc">Cron mutation</span></button><button class="tool-btn" data-tool="workspace" type="button"><strong>hermes_workspace_write</strong><span class="tool-desc">Scoped workspace write</span></button><button class="tool-btn" data-tool="command" type="button"><strong>hermes_run_command</strong><span class="tool-desc">Owner command</span></button></div></div>
+          <div class="sim-action-row"><button class="button button-primary" id="btn-run-simulation" type="button"><span>Run MCP Simulation</span><span class="btn-arrow" aria-hidden="true">→</span></button></div>
+        </div>
+        <div class="sim-display-grid"><div class="sim-pane pane-chat"><div class="pane-header"><div class="header-dots"><span></span><span></span><span></span></div><span>ChatGPT (MCP client)</span></div><div class="pane-body chat-messages" id="chat-box"><div class="chat-bubble bot-message initial-message"><p>Connected to the Hermes GPT simulator. Pick a tool and policy posture, then run the request.</p></div></div></div><div class="sim-pane pane-server"><div class="pane-header"><div class="header-dots"><span></span><span></span><span></span></div><span>Hermes GPT (Streamable HTTP)</span></div><div class="pane-body server-logs" id="server-logs"><div class="log-line system">[SYSTEM] Server started on 127.0.0.1:7677</div><div class="log-line system">[SYSTEM] Private MCP path available</div><div class="log-line waiting">[WAITING] Waiting for incoming MCP requests...</div></div></div></div>
+      </div></div>
+    </section>
+
+    <section class="section reveal" id="features">
+      <div class="section-head"><p class="eyebrow">Capabilities</p><h2>Local-first control plane, now distributed.</h2><p>v0.8 adds Fabric without weakening the security and evidence invariants shipped in earlier releases.</p></div>
+      <div class="bento-grid">
+        <article class="bento-card col-span-2"><span class="card-num">01</span><h3>Operator and Owner Policy</h3><p>Tiered authority from <code>read_only</code> through <code>owner</code>, with explicit direct mode, confirmation gates, and dry-run-first mutation.</p></article>
+        <article class="bento-card"><span class="card-num">02</span><h3>Work Contracts</h3><p>Completion is validated from observed state. Missing required evidence cannot become <code>SATISFIED</code>.</p></article>
+        <article class="bento-card"><span class="card-num">03</span><h3>Swarm Orchestration</h3><p>Bounded DAG workflows with explicit ownership, capped concurrency, review independence, rework limits, and final human approval.</p></article>
+        <article class="bento-card col-span-2"><span class="card-num">04</span><h3>OpenAI Secure MCP Tunnel</h3><p>Supported OpenAI products can reach loopback Hermes GPT through an outbound-only private tunnel path without publishing a public Hermes GPT hostname.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">05</span><h3>Bounded Binary Export</h3><p><code>hermes_export_file</code> provides workspace-authorized binary transfer with denied-path enforcement, symlink escape refusal, size caps, extension controls, and safe audit metadata.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Flight Deck + Diagnostics</h3><p>Mission Control, event history, review evidence, diagnostics, recovery tools, and Fabric routing views keep long-running autonomy inspectable without creating a bypass.</p></article>
+      </div>
+    </section>
+
     <section class="section reveal" id="install">
-      <div class="section-head">
-        <p class="eyebrow">How to setup</p>
-        <h2>Get up and running in minutes.</h2>
-        <p>
-          Hermes GPT runs in Python. Install dependencies, run the server, and add the config block to your editor or web clients.
-        </p>
-      </div>
-
-      <div class="install-container">
-        <div class="install-tabs" role="tablist" aria-label="Installation steps">
-          <div class="tab-glider" id="tab-glider-install"></div>
-          <button class="tab-btn-install is-active" type="button" role="tab" aria-selected="true" aria-controls="panel-setup" id="tab-setup" data-tab="setup">1. Server Setup</button>
-          <button class="tab-btn-install" type="button" role="tab" aria-selected="false" aria-controls="panel-desktop" id="tab-desktop" data-tab="desktop">2. Local Desktop Apps</button>
-          <button class="tab-btn-install" type="button" role="tab" aria-selected="false" aria-controls="panel-chatgpt" id="tab-chatgpt" data-tab="chatgpt">3. ChatGPT Web Tunnel</button>
-        </div>
-
-        <div class="install-content-wrapper">
-          <!-- Tab 1: Server Setup -->
-          <div class="install-panel-view is-active" id="panel-setup" role="tabpanel" aria-labelledby="tab-setup" data-panel="setup">
-            <div class="code-terminal">
-              <div class="terminal-bar">
-                <span>PowerShell / Bash</span>
-                <button class="btn-copy-code" type="button" data-copy-target="setup-code">Copy</button>
-              </div>
-              <pre><code id="setup-code"># Clone the repository
-git clone https://github.com/asimons81/hermes-gpt.git
+      <div class="section-head"><p class="eyebrow">Install</p><h2>Get Hermes GPT running.</h2><p>Install from PyPI or run the current checkout. Keep the HTTP server on loopback unless you deliberately configure an authenticated private boundary.</p></div>
+      <div class="install-shell double-bezel-outer"><div class="double-bezel-inner">
+        <div class="tabs" role="tablist"><div class="tab-glider" id="tab-glider-install"></div><button class="tab-btn-install is-active" data-tab="pypi" type="button" aria-selected="true">PyPI</button><button class="tab-btn-install" data-tab="source" type="button" aria-selected="false">Source</button><button class="tab-btn-install" data-tab="http" type="button" aria-selected="false">Local HTTP</button></div>
+        <div class="tab-panels">
+          <div class="tab-panel is-active" data-panel="pypi"><div class="code-head"><span>Install package</span><button data-copy-target="code-pypi" type="button">Copy</button></div><pre><code id="code-pypi">python -m pip install hermes-gpt</code></pre><p>Check the PyPI badge in the repository README before relying on version-specific features.</p></div>
+          <div class="tab-panel" data-panel="source" hidden><div class="code-head"><span>Run current source</span><button data-copy-target="code-source" type="button">Copy</button></div><pre><code id="code-source">git clone https://github.com/asimons81/hermes-gpt.git
 cd hermes-gpt
-
-# Install required dependencies
-python -m pip install -r requirements.txt
-
-# Run the local server in stdio mode (default)
-python server.py</code></pre>
-            </div>
-            <div class="tab-details">
-              <h3>Run verification</h3>
-              <p>The server will launch in stdio mode by default, scanning for your local Hermes installation. Set the <code>HERMES_HOME</code> environment variable if you have a custom folder location.</p>
-            </div>
-          </div>
-
-          <!-- Tab 2: Desktop Client Integration -->
-          <div class="install-panel-view" id="panel-desktop" role="tabpanel" aria-labelledby="tab-desktop" data-panel="desktop" hidden>
-            <div class="code-terminal">
-              <div class="terminal-bar">
-                <span>Claude Desktop / Cursor config.json</span>
-                <button class="btn-copy-code" type="button" data-copy-target="desktop-code">Copy</button>
-              </div>
-              <pre><code id="desktop-code">{
-  "mcpServers": {
-    "hermes-gpt": {
-      "command": "python",
-      "args": ["C:\\Users\\asimo\\hermes-gpt\\server.py"]
-    }
-  }
-}</code></pre>
-            </div>
-            <div class="tab-details">
-              <h3>Desktop Config</h3>
-              <p>To connect local apps like Cursor or Claude Desktop, append this configuration block to your JSON settings file. Make sure to use the absolute path to your <code>server.py</code> file.</p>
-            </div>
-          </div>
-
-          <!-- Tab 3: ChatGPT Tunnel Integration -->
-          <div class="install-panel-view" id="panel-chatgpt" role="tabpanel" aria-labelledby="tab-chatgpt" data-panel="chatgpt" hidden>
-            <div class="code-terminal">
-              <div class="terminal-bar">
-                <span>Terminal 1: Start SSE Server</span>
-                <button class="btn-copy-code" type="button" data-copy-target="tunnel-code-1">Copy</button>
-              </div>
-              <pre><code id="tunnel-code-1">python server.py --http --host 127.0.0.1 --port 4750</code></pre>
-              
-              <div class="terminal-bar" style="margin-top: 16px;">
-                <span>Terminal 2: Start Cloudflare Tunnel</span>
-                <button class="btn-copy-code" type="button" data-copy-target="tunnel-code-2">Copy</button>
-              </div>
-              <pre><code id="tunnel-code-2">cloudflared tunnel --url http://127.0.0.1:4750 --http-host-header 127.0.0.1:4750</code></pre>
-            </div>
-            <div class="tab-details">
-              <h3>Connecting ChatGPT Web</h3>
-              <p>Because the ChatGPT web client runs remotely in the cloud, you must expose your local Hermes GPT server through a tunnel. Copy the generated <code>trycloudflare.com</code> URL and configure a Streaming HTTP connection in ChatGPT developer mode.</p>
-            </div>
-          </div>
+python -m pip install .
+hermes-gpt</code></pre></div>
+          <div class="tab-panel" data-panel="http" hidden><div class="code-head"><span>Loopback Streamable HTTP</span><button data-copy-target="code-http" type="button">Copy</button></div><pre><code id="code-http">python server.py --http --host 127.0.0.1 --port 7677</code></pre><p>Endpoint: <code>http://127.0.0.1:7677/mcp</code>. For supported OpenAI products, prefer the OpenAI Secure MCP Tunnel path documented in the repository.</p></div>
         </div>
+      </div></div>
+    </section>
+
+    <section class="section reveal" id="changelog">
+      <div class="section-head"><p class="eyebrow">Changelog</p><h2>Release history.</h2><p>The current release is v0.8.0 Fabric.</p></div>
+      <div class="timeline-container">
+        <div class="timeline-step"><span class="step-num">v0.8.0</span><strong>Fabric</strong><p>Authenticated cross-machine Swarm execution, capability-aware routing, remote evidence and artifact admission, restart/timeout/cancel reconciliation, write-ownership safeguards, and Fabric Flight Deck visibility. Final implementation passed fresh real two-machine G6 acceptance and independent review.</p></div>
+        <div class="timeline-step"><span class="step-num">v0.7.0</span><strong>Flight Deck</strong><p>Production review evidence, structured redacted event history, durable encrypted token storage, and restart-safe Swarm continuity.</p></div>
+        <div class="timeline-step"><span class="step-num">v0.6.0</span><strong>Mission Control + Work Contracts + Swarms</strong><p>Read-only operational views, observed-state completion validation, and bounded DAG orchestration with explicit ownership and human approval.</p></div>
+        <div class="timeline-step"><span class="step-num">v0.5.0</span><strong>Two-Way Codex Bridge</strong><p>Codex as MCP client plus policy-gated delegated Codex CLI work and review.</p></div>
       </div>
     </section>
 
-    <!-- Release timeline history -->
-    <section class="section reveal" id="releases">
-      <div class="section-head">
-        <p class="eyebrow">Changelog</p>
-        <h2>Release history & updates.</h2>
-        <p>Keep track of server version additions, security overrides, and feature releases.</p>
-      </div>
-
-      <div class="release-list">
-        <div class="release-item">
-          <div class="release-meta">
-            <span class="rel-version">Unreleased</span>
-            <span class="rel-date">2026-08-17</span>
-          </div>
-          <div class="release-content">
-            <h4>Bounded Session History and Control</h4>
-            <p>Added native Codex parity for the four gated, read-only session-history tools previously available only to ChatGPT: list, search, safe message reads, and in-memory JSON/Markdown export. Separately gated asynchronous session continue/send jobs remain bounded and fail closed.</p>
-          </div>
-        </div>
-        <div class="release-item">
-          <div class="release-meta">
-            <span class="rel-version">v0.7.0</span>
-            <span class="rel-date">2026-08-15</span>
-          </div>
-          <div class="release-content">
-            <h4>Flight Deck: Review Evidence, Event History & Durable Tokens</h4>
-            <p>Added the production review-accept writer <code>hermes_review_accept</code> (owner-gated, distinct-reviewer enforced, referenced-not-copied evidence) that feeds <code>hermes_contract_validate</code>; the read-only redacted <code>hermes_events_query</code> / <code>hermes_events_tail</code> timeline across audit, swarm, codex, cron, and kanban stores; durable AES-256-GCM encrypted OAuth token storage that survives restarts (<code>hermes_oauth_status</code> / <code>hermes_oauth_revoke</code>); and restart-safe <code>hermes_swarm_reconcile</code> that marks interrupted stages blocked and never auto-advances. Plus the MCP compatibility manifest and a CI hermeticity fix.</p>
-          </div>
-        </div>
-        <div class="release-item">
-          <div class="release-meta">
-            <span class="rel-version">v0.6.0</span>
-            <span class="rel-date">2026-08-14</span>
-          </div>
-          <div class="release-content">
-            <h4>Mission Control, Work Contracts & Swarms</h4>
-            <p>Added <code>hermes_mission_*</code> read-only Mission Control (deny-by-default, audited, PII-stripped fleet view), fail-closed <code>hermes_contract_*</code> Work Contracts that validate completion from observed state rather than worker self-report, and bounded <code>hermes_swarm_*</code> DAG-validated orchestration with capped scheduling and explicit ownership gates. Codex is never an implementation owner and receives only bounded verdict material. Documented retention windows and auto-cleanup for Codex job artifacts.</p>
-          </div>
-        </div>
-        <div class="release-item">
-          <div class="release-meta">
-            <span class="rel-version">v0.5.0</span>
-            <span class="rel-date">2026-07-10</span>
-          </div>
-          <div class="release-content">
-            <h4>Two-Way Codex Bridge</h4>
-            <p>Codex can opt into a namespaced Hermes Operator toolset, while trusted Hermes GPT clients can run asynchronous, policy-gated Codex tasks and reviews. Core stays the default; updates and mutations stay check-first and dry-run-first.</p>
-          </div>
-        </div>
-        <div class="release-item">
-          <div class="release-meta">
-            <span class="rel-version">v0.4.0</span>
-            <span class="rel-date">2026-07-09</span>
-          </div>
-          <div class="release-content">
-            <h4>Tool Surface Expansion</h4>
-            <p>Added env-gated Hermes tool wrappers: <code>hermes_vision_analyze</code>, <code>hermes_web_search</code>, <code>hermes_web_extract</code>. Added <code>hermes_cron_create</code> operator tool with full field support. Shipped first external contribution — macOS gateway PID fallback from <code>gateway_state.json</code>. Expanded gateway diagnostics fields. Fixed Vercel deploy and flaky test. Published to PyPI, GitHub Release, and GitHub Actions publish workflow.</p>
-          </div>
-        </div>
-        <div class="release-item">
-          <div class="release-meta">
-            <span class="rel-version">v0.3.0</span>
-            <span class="rel-date">2026-06-25</span>
-          </div>
-          <div class="release-content">
-            <h4>Operator Reliability Release</h4>
-            <p>Added four new operator diagnostics tools: <code>hermes_operator_doctor</code> (deep health check), <code>hermes_operator_snapshot</code> (single state summary), <code>hermes_release_doctor</code> (release readiness with PASS/WARN/BLOCKED classification), and <code>hermes_operator_recover</code> (conservative dry-run-first recovery). Introduced structured error envelopes with <code>{success, ok, error, layer, code, safe_message, suggested_action, trace_id}</code> and PASS/WARN/FAIL/UNSUPPORTED status vocabulary across all operator surfaces.</p>
-          </div>
-        </div>
-        <div class="release-item">
-          <div class="release-meta">
-            <span class="rel-version">v0.2.0</span>
-            <span class="rel-date">2026-06-21</span>
-          </div>
-          <div class="release-content">
-            <h4>Operator & Owner Modes</h4>
-            <p>Introduced tiered Operator and Owner safety postures (read_only, cron, skills, skills_config, workspace, owner) expanding the interface to 39 tools. Added dry-run previews for mutating operations, break-glass acknowledgements, cron tools, workspace scoped file actions, configuration editing, and audit logging.</p>
-          </div>
-        </div>
-        <div class="release-item">
-          <div class="release-meta">
-            <span class="rel-version">v0.1.0</span>
-            <span class="rel-date">2026-06-18</span>
-          </div>
-          <div class="release-content">
-            <h4>Initial local-dev release</h4>
-            <p>Added FastMCP stdio and streamable HTTP server support. Imports local Hermes file read/search, memory search, and skill list/view capabilities. Provides opt-in environment safety gates for terminal, writes, patches, and session history searches.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="footer">
-      <div class="footer-top">
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true">HG</span>
-          <span class="brand-copy">
-            <strong>Hermes GPT</strong>
-            <small>local-dev sidecar</small>
-          </span>
-        </div>
-        <p>A local-first project by Tony Simons. Built with FastMCP.</p>
-      </div>
-      <div class="footer-bottom">
-        <p>&copy; <span id="footer-year">2026</span> Tony Simons. All rights reserved.</p>
-        <div class="footer-links">
-          <a href="https://github.com/asimons81/hermes-gpt" rel="noreferrer noopener" target="_blank">GitHub</a>
-          <a href="#top">Back to top</a>
-        </div>
-      </div>
-    </footer>
+    <footer class="footer reveal"><div><strong>HG Hermes GPT</strong><p>A local-first project by Tony Simons. Built with FastMCP.</p></div><div><span>© <span id="footer-year">2026</span> Tony Simons.</span> <a href="https://github.com/asimons81/hermes-gpt" target="_blank" rel="noreferrer noopener">GitHub</a> <a href="#top">Back to top</a></div></footer>
   </main>
-
   <script src="./app.js"></script>
 </body>
 </html>
