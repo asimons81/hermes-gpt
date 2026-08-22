@@ -34,6 +34,7 @@ import operator_session as op_session
 import operator_mission as op_mission
 import operator_mission_runtime as op_mission_runtime
 import operator_contract as op_contract
+import operator_delegations as op_delegations
 import operator_runners as op_runners
 import operator_review as op_review
 import operator_events as op_events
@@ -1426,6 +1427,11 @@ def hermes_operator_status() -> str:
             "hermes_runner_list",
             "hermes_runner_status",
             "hermes_runner_cancel",
+            "hermes_delegation_dispatch",
+            "hermes_delegation_get",
+            "hermes_delegation_list",
+            "hermes_delegation_reconcile",
+            "hermes_delegation_cancel",
         ]
         result = {
             "success": True,
@@ -2150,6 +2156,74 @@ def hermes_runner_cancel(
     )
 
 
+# --- Unified Delegation Lifecycle (v0.9) -----------------------------------
+
+
+def hermes_delegation_dispatch(
+    contract_json: str,
+    mission_id: str = "",
+    delegation_id: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+    timeout: int = 30,
+) -> str:
+    return op_delegations.hermes_delegation_dispatch(
+        contract_json=contract_json,
+        mission_id=mission_id,
+        delegation_id=delegation_id,
+        confirm=confirm,
+        dry_run=dry_run,
+        timeout=timeout,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_delegation_get(delegation_id: str) -> str:
+    return op_delegations.hermes_delegation_get(
+        delegation_id=delegation_id,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_delegation_list(
+    mission_id: str = "",
+    state: str = "",
+    limit: int = 50,
+) -> str:
+    return op_delegations.hermes_delegation_list(
+        mission_id=mission_id,
+        state=state,
+        limit=limit,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_delegation_reconcile(
+    delegation_id: str,
+    contract_json: str = "",
+    apply: bool = False,
+) -> str:
+    return op_delegations.hermes_delegation_reconcile(
+        delegation_id=delegation_id,
+        contract_json=contract_json,
+        apply=apply,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_delegation_cancel(
+    delegation_id: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    return op_delegations.hermes_delegation_cancel(
+        delegation_id=delegation_id,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
 def hermes_review_accept(
     contract_sha256: str,
     task_id: str,
@@ -2659,6 +2733,18 @@ def register_tools(server: FastMCP) -> None:
         hermes_runner_cancel,
     ):
         server.add_tool(_runner_tool, meta=tool_meta())
+
+    # Unified delegation lifecycle (v0.9): normalized durable lineage over
+    # runner/Fabric execution. Get/list are read-only; dispatch/cancel/reconcile
+    # preserve the underlying authority and dry-run gates.
+    for _delegation_tool in (
+        hermes_delegation_dispatch,
+        hermes_delegation_get,
+        hermes_delegation_list,
+        hermes_delegation_reconcile,
+        hermes_delegation_cancel,
+    ):
+        server.add_tool(_delegation_tool, meta=tool_meta())
 
     # Review-evidence writer (v0.7 S3): owner-gated, distinct reviewer.
     server.add_tool(

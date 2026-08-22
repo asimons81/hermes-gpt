@@ -32,10 +32,18 @@ def test_confinement_requires_os_tool(monkeypatch: pytest.MonkeyPatch):
 def test_confinement_requires_successful_capability_probe(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(confinement.CONFINEMENT_ENABLE_ENV, "1")
     monkeypatch.setattr(confinement, "confinement_tool", lambda: "/usr/bin/fake-confinement")
-    monkeypatch.setattr(confinement, "_probe_confinement", lambda tool, *, writable=True: False)
+    monkeypatch.setattr(
+        confinement,
+        "_probe_confinement",
+        lambda tool, *, writable=True, expose_proc=False: False,
+    )
     assert confinement.confinement_available() is False
 
-    monkeypatch.setattr(confinement, "_probe_confinement", lambda tool, *, writable=True: True)
+    monkeypatch.setattr(
+        confinement,
+        "_probe_confinement",
+        lambda tool, *, writable=True, expose_proc=False: True,
+    )
     assert confinement.confinement_available() is True
     assert confinement.confinement_available(writable=False) is True
 
@@ -44,7 +52,7 @@ def test_probe_failure_is_fail_closed(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         confinement,
         "_wrap_argv_with_tool",
-        lambda argv, workspace, tool, *, writable=True: ["/usr/bin/fake-confinement", *argv],
+        lambda argv, workspace, tool, *, writable=True, expose_proc=False: ["/usr/bin/fake-confinement", *argv],
     )
     monkeypatch.setattr(
         confinement.subprocess,
@@ -58,7 +66,7 @@ def test_probe_timeout_is_fail_closed(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         confinement,
         "_wrap_argv_with_tool",
-        lambda argv, workspace, tool, *, writable=True: ["/usr/bin/fake-confinement", *argv],
+        lambda argv, workspace, tool, *, writable=True, expose_proc=False: ["/usr/bin/fake-confinement", *argv],
     )
 
     def timeout(*args, **kwargs):
@@ -254,6 +262,16 @@ def test_wrap_argv_linux_read_only_shape(tmp_path: Path):
         wrapped.index(workspace) - 1:wrapped.index(workspace) + 2
     ]
     assert ["--bind", workspace, workspace] not in [wrapped[index:index + 3] for index in range(len(wrapped) - 2)]
+
+
+@pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="requires bwrap on linux")
+def test_wrap_argv_linux_secret_free_proc_shape(tmp_path: Path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    wrapped = confinement.wrap_argv(["/usr/bin/true"], ws, writable=False, expose_proc=True)
+    assert ["--proc", "/proc"] in [wrapped[index:index + 2] for index in range(len(wrapped) - 1)]
+    assert ["--dir", "/proc"] not in [wrapped[index:index + 2] for index in range(len(wrapped) - 1)]
+    assert "--unshare-pid" in wrapped
 
 
 @pytest.mark.skipif(sys.platform != "linux" or shutil.which("bwrap") is None, reason="requires bwrap on linux")
