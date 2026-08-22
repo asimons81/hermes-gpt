@@ -9,6 +9,7 @@ import operator_delegations as delegations
 import operator_live_events as live_events
 import operator_mission_runtime as missions
 import operator_policy as op
+import operator_runners as runners
 
 
 def _enable_workspace(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
@@ -105,7 +106,7 @@ def _dispatch_running(
             }
         ),
     )
-    return json.loads(
+    result = json.loads(
         delegations.hermes_delegation_dispatch(
             json.dumps(_contract(workspace, task_id=task_id)),
             mission_id=mission_id,
@@ -115,6 +116,24 @@ def _dispatch_running(
             hermes_root=root,
         )
     )
+    _observe_job(root, task_id, "running")
+    return result
+
+
+def _observe_job(root: Path, task_id: str, state: str) -> None:
+    meta_path, _, _ = runners._job_paths(task_id, root)
+    terminal = state in {"completed", "cancelled", "failed"}
+    runners._atomic_json(meta_path, {
+        "schema_version": runners.SCHEMA_VERSION,
+        "task_id": task_id,
+        "backend": "pi_rpc",
+        "state": state,
+        "outcome": state,
+        "created_at": "2026-08-22T00:00:00+00:00",
+        "started_at": "2026-08-22T00:00:01+00:00",
+        "ended_at": "2026-08-22T00:00:02+00:00" if terminal else "",
+        "error": "",
+    })
 
 
 def test_dispatch_reserves_mission_child_before_backend_execution(
@@ -205,7 +224,9 @@ def test_terminal_mission_rejects_reservation_before_backend_is_called(
     assert out["success"] is False
     assert out["code"] == "DELEGATION_DISPATCH_REJECTED"
     assert called is False
-    assert not (root / "delegations" / "delegations.db").exists()
+    reserved = json.loads(delegations.hermes_delegation_get("dlg-terminal-parent", hermes_root=root))["delegation"]
+    assert reserved["state"] == "reserved"
+    assert reserved["dispatch_phase"] == "reserved"
 
 
 def test_public_mission_attach_cannot_forge_delegation_cancellation(
@@ -355,16 +376,7 @@ def test_reconcile_bridge_failure_surfaces_then_mission_can_reobserve_authority(
         )
     )
     assert created["success"] is True
-    monkeypatch.setattr(
-        delegations,
-        "_latest_observation",
-        lambda *args, **kwargs: {"status": "completed", "state": "completed", "outcome": "completed"},
-    )
-    monkeypatch.setattr(
-        delegations.contract_mod,
-        "hermes_contract_validate",
-        lambda *args, **kwargs: json.dumps({"success": True, "verdict": "SATISFIED"}),
-    )
+    _observe_job(root, "system-reconcile-sync-fail", "completed")
     monkeypatch.setattr(missions, "record_attachment_state", lambda *args, **kwargs: False)
 
     out = json.loads(
@@ -424,6 +436,7 @@ def test_cancel_bridge_failure_surfaces_and_mission_reconcile_reads_cancelled_li
             {"success": True, "changed": True, "backend": "pi_rpc", "state": "cancelled"}
         ),
     )
+    _observe_job(root, "system-cancel-sync-fail", "cancelled")
     monkeypatch.setattr(missions, "record_attachment_state", lambda *args, **kwargs: False)
 
     out = json.loads(
@@ -484,16 +497,7 @@ def test_owner_approval_reobserves_delegation_lifecycle_not_cached_attachment(
         )
     )
     assert created["success"] is True
-    monkeypatch.setattr(
-        delegations,
-        "_latest_observation",
-        lambda *args, **kwargs: {"status": "completed", "state": "completed", "outcome": "completed"},
-    )
-    monkeypatch.setattr(
-        delegations.contract_mod,
-        "hermes_contract_validate",
-        lambda *args, **kwargs: json.dumps({"success": True, "verdict": "SATISFIED"}),
-    )
+    _observe_job(root, "system-approval-reobserve", "completed")
     succeeded = json.loads(
         delegations.hermes_delegation_reconcile(
             "dlg-approval-reobserve",
@@ -514,12 +518,7 @@ def test_owner_approval_reobserves_delegation_lifecycle_not_cached_attachment(
     )
     assert mission_ready["status"] == "awaiting_approval"
 
-    with delegations._connect(delegations._db_path(root), write=True) as db:
-        db.execute(
-            "UPDATE delegations SET state='running',backend_state='running',terminal_at=NULL WHERE delegation_id=?",
-            ("dlg-approval-reobserve",),
-        )
-        db.commit()
+    _observe_job(root, "system-approval-reobserve", "running")
 
     _owner(monkeypatch)
     denied = json.loads(

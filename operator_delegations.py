@@ -25,10 +25,11 @@ import operator_mission_runtime as mission_runtime
 import operator_policy as op
 import operator_runners as runners
 
-SCHEMA_VERSION = "0.9-delegation.1"
+SCHEMA_VERSION = "0.9-delegation.2"
 DELEGATION_SCHEMA = "hermes.delegation/v1"
 DELEGATION_ID_RE = re.compile(r"^dlg-[A-Za-z0-9][A-Za-z0-9._-]{0,59}$")
-STATES = frozenset({"queued", "running", "reconciling", "succeeded", "failed", "cancelled"})
+STATES = frozenset({"reserved", "queued", "running", "reconciling", "succeeded", "failed", "cancelled"})
+DISPATCH_PHASES = frozenset({"reserved", "invoking", "dispatched"})
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled"})
 MAX_LIST = 200
 
@@ -87,6 +88,7 @@ def _init(db: sqlite3.Connection) -> None:
             backend_ref_json TEXT NOT NULL DEFAULT '{}',
             validation_verdict TEXT NOT NULL DEFAULT '',
             cancel_requested INTEGER NOT NULL DEFAULT 0,
+            dispatch_phase TEXT NOT NULL DEFAULT 'dispatched',
             created_at TEXT NOT NULL,
             dispatched_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -106,8 +108,20 @@ def _init(db: sqlite3.Connection) -> None:
             FOREIGN KEY (delegation_id) REFERENCES delegations(delegation_id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_delegation_events ON delegation_events(delegation_id, seq);
+        CREATE TABLE IF NOT EXISTS delegation_validation_manifests (
+            delegation_id TEXT PRIMARY KEY,
+            schema TEXT NOT NULL,
+            context_sha256 TEXT NOT NULL,
+            manifest_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (delegation_id) REFERENCES delegations(delegation_id) ON DELETE CASCADE
+        );
         """
     )
+    columns = {str(row[1]) for row in db.execute("PRAGMA table_info(delegations)").fetchall()}
+    if "dispatch_phase" not in columns:
+        db.execute("ALTER TABLE delegations ADD COLUMN dispatch_phase TEXT NOT NULL DEFAULT 'dispatched'")
     db.commit()
 
 
@@ -269,8 +283,8 @@ def _ensure_mission(mission_id: str, hermes_root: Path | None) -> None:
 
 
 def _mission_state(state: str) -> str:
-    if state in {"queued", "reconciling"}:
-        return "pending" if state == "queued" else "blocked"
+    if state in {"reserved", "queued", "reconciling"}:
+        return "pending" if state in {"reserved", "queued"} else "blocked"
     return state
 
 
@@ -323,13 +337,46 @@ def _latest_observation(task_id: str, hermes_root: Path) -> dict[str, Any] | Non
         return None
 
     def key(run: dict[str, Any]) -> tuple[str, str, str]:
-        return (
+        latest = max(
             str(run.get("ended_at") or run.get("completed_at") or ""),
             str(run.get("started_at") or run.get("dispatched_at") or ""),
+            str(run.get("created_at") or run.get("updated_at") or ""),
+        )
+        return (
+            latest,
+            str(run.get("ended_at") or run.get("completed_at") or ""),
             str(run.get("status") or run.get("state") or ""),
         )
 
     return max(runs, key=key)
+
+
+def _manifest_row(db: sqlite3.Connection, delegation_id: str) -> dict[str, Any]:
+    row = db.execute(
+        "SELECT schema,context_sha256,manifest_json,created_at,updated_at FROM delegation_validation_manifests WHERE delegation_id=?",
+        (delegation_id,),
+    ).fetchone()
+    if row is None:
+        raise LookupError("delegation validation manifest is missing")
+    try:
+        manifest = json.loads(row["manifest_json"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("delegation validation manifest is corrupt") from exc
+    if manifest.get("schema") != row["schema"] or manifest.get("context_sha256") != row["context_sha256"]:
+        raise ValueError("delegation validation manifest metadata mismatch")
+    return manifest
+
+
+def _mission_dispatch_guard(mission_id: str, delegation_id: str, contract_sha: str, root: Path) -> None:
+    if not mission_id:
+        return
+    payload = json.loads(mission_runtime.hermes_mission_get(mission_id, hermes_root=root))
+    if not payload.get("success") or payload.get("status") in mission_runtime.TERMINAL_STATUSES:
+        raise RuntimeError("Mission is not dispatchable")
+    expected = f"contract:{contract_sha}"
+    attached = next((a for a in payload.get("attachments", []) if a.get("kind") == "delegation" and a.get("ref") == delegation_id), None)
+    if not attached or attached.get("evidence_ref") != expected or attached.get("state") != "pending":
+        raise RuntimeError("Mission delegation reservation is not current")
 
 
 def hermes_delegation_dispatch(
@@ -343,14 +390,15 @@ def hermes_delegation_dispatch(
 ) -> str:
     """Dispatch a Work Contract and create one normalized delegation record."""
     policy = op.OperatorPolicy()
-    mission_reserved = False
-    backend_dispatched = False
+    invocation_claimed = False
+    backend_called = False
     contract_sha = ""
     root: Path | None = None
     try:
         policy.require_level("workspace")
         policy.require_mutation(dry_run)
         canonical, contract, contract_sha = contract_mod._parse_contract(contract_json)
+        manifest = contract_mod._validation_manifest(contract, contract_sha)
         task_id = contract["task_id"]
         backend = runners.selected_backend(contract)
         delegation_id = delegation_id.strip() or _new_id(contract_sha, task_id)
@@ -360,41 +408,10 @@ def hermes_delegation_dispatch(
         root = _root(hermes_root)
         path = _db_path(hermes_root)
         effective_dry = policy.effective_dry_run(dry_run)
-        if path.is_file():
-            with _connect(path, write=False) as db:
-                existing = db.execute(
-                    "SELECT delegation_id FROM delegations WHERE delegation_id=? OR task_id=?",
-                    (delegation_id, task_id),
-                ).fetchone()
-                if existing is not None:
-                    raise ValueError("delegation_id/task_id already has a lifecycle record")
-        if mission_id:
-            reserved = json.loads(mission_runtime.hermes_mission_attach(
-                mission_id,
-                "delegation",
-                delegation_id,
-                relationship="contains",
-                state="pending",
-                evidence_ref=f"contract:{contract_sha}",
-                confirm=confirm,
-                dry_run=effective_dry,
-                hermes_root=root,
-            ))
-            if not reserved.get("success"):
-                raise RuntimeError("Mission delegation reservation was rejected")
-            mission_reserved = not effective_dry
-        dispatch = json.loads(
-            contract_mod.hermes_contract_dispatch(
-                canonical,
-                confirm=confirm,
-                dry_run=effective_dry,
-                timeout=timeout,
-                hermes_root=root,
-            )
-        )
-        ambiguous = bool(dispatch.get("submission_may_have_succeeded") or (dispatch.get("changed") and not dispatch.get("success")))
-        backend_dispatched = bool(dispatch.get("success") or ambiguous)
         if effective_dry:
+            dispatch = json.loads(contract_mod.hermes_contract_dispatch(
+                canonical, confirm=confirm, dry_run=True, timeout=timeout, hermes_root=root,
+            ))
             _audit(tool="hermes_delegation_dispatch", policy=policy, dry_run=True, success=bool(dispatch.get("success")), changed=False, delegation_id=delegation_id, task_id=task_id, backend=backend)
             return json.dumps({
                 "success": bool(dispatch.get("success")),
@@ -408,26 +425,89 @@ def hermes_delegation_dispatch(
                 "changed": False,
                 "dispatch": dispatch,
             }, ensure_ascii=False, indent=2)
-        if not dispatch.get("success") and not ambiguous:
-            if mission_reserved:
-                mission_runtime.record_attachment_state(
-                    mission_id,
-                    "delegation",
-                    delegation_id,
-                    "blocked",
-                    evidence_ref=f"contract:{contract_sha}",
-                    hermes_root=root,
+
+        now = _now()
+        with _connect(path, write=True) as db:
+            _init(db)
+            db.execute("BEGIN IMMEDIATE")
+            collisions = db.execute(
+                "SELECT * FROM delegations WHERE delegation_id=? OR task_id=?",
+                (delegation_id, task_id),
+            ).fetchall()
+            if collisions:
+                if len(collisions) != 1:
+                    raise ValueError("delegation_id/task_id collision has conflicting lineage")
+                existing = dict(collisions[0])
+                exact = (
+                    existing["delegation_id"] == delegation_id and existing["task_id"] == task_id
+                    and existing["contract_sha256"] == contract_sha and existing["mission_id"] == mission_id
+                    and existing["backend"] == backend
                 )
-            _audit(tool="hermes_delegation_dispatch", policy=policy, dry_run=False, success=False, changed=False, delegation_id=delegation_id, task_id=task_id, backend=backend)
-            return json.dumps({
-                "success": False,
-                "schema_version": SCHEMA_VERSION,
-                "delegation_id": delegation_id,
-                "task_id": task_id,
-                "backend": backend,
-                "changed": False,
-                "dispatch": dispatch,
-            }, ensure_ascii=False, indent=2)
+                if not exact:
+                    raise ValueError("delegation_id/task_id already belongs to different lineage")
+                stored_manifest = _manifest_row(db, delegation_id)
+                if stored_manifest["context_sha256"] != manifest["context_sha256"]:
+                    raise ValueError("delegation validation lineage mismatch")
+                if existing["dispatch_phase"] != "reserved":
+                    db.commit()
+                    return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": False, "idempotent": True, "delegation": _surface(existing)}, ensure_ascii=False, indent=2)
+            else:
+                db.execute(
+                    "INSERT INTO delegations(delegation_id,schema,mission_id,task_id,contract_sha256,backend,state,backend_state,outcome,backend_ref_json,validation_verdict,cancel_requested,dispatch_phase,created_at,dispatched_at,updated_at,terminal_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (delegation_id, DELEGATION_SCHEMA, mission_id, task_id, contract_sha, backend, "reserved", "", "", "{}", "", 0, "reserved", now, "", now, None),
+                )
+                db.execute(
+                    "INSERT INTO delegation_validation_manifests(delegation_id,schema,context_sha256,manifest_json,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                    (delegation_id, manifest["schema"], manifest["context_sha256"], json.dumps(manifest, sort_keys=True, separators=(",", ":")), now, now),
+                )
+                _event(db, delegation_id, "delegation.reserved", to_state="reserved")
+            db.commit()
+
+        if mission_id and not mission_runtime.reserve_delegation_attachment(
+            mission_id, delegation_id, evidence_ref=f"contract:{contract_sha}", hermes_root=root,
+        ):
+            raise RuntimeError("Mission delegation reservation was rejected")
+
+        with _connect(path, write=True) as db:
+            _init(db)
+            db.execute("BEGIN IMMEDIATE")
+            changed = db.execute(
+                "UPDATE delegations SET dispatch_phase='invoking',updated_at=? WHERE delegation_id=? AND dispatch_phase='reserved'",
+                (_now(), delegation_id),
+            ).rowcount
+            if changed != 1:
+                row = dict(_get_row(db, delegation_id))
+                db.commit()
+                return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": False, "idempotent": True, "delegation": _surface(row)}, ensure_ascii=False, indent=2)
+            _event(db, delegation_id, "delegation.invoking", from_state="reserved", to_state="reserved")
+            db.commit()
+        invocation_claimed = True
+
+        try:
+            _mission_dispatch_guard(mission_id, delegation_id, contract_sha, root)
+        except Exception:
+            with _connect(path, write=True) as db:
+                _init(db)
+                db.execute("UPDATE delegations SET dispatch_phase='reserved',updated_at=? WHERE delegation_id=? AND dispatch_phase='invoking'", (_now(), delegation_id))
+                db.commit()
+            invocation_claimed = False
+            raise
+
+        backend_called = True
+        dispatch = json.loads(contract_mod.hermes_contract_dispatch(
+            canonical, confirm=confirm, dry_run=False, timeout=timeout, hermes_root=root,
+        ))
+        ambiguous = bool(dispatch.get("submission_may_have_succeeded") or (dispatch.get("changed") and not dispatch.get("success")))
+        if not dispatch.get("success") and not ambiguous:
+            with _connect(path, write=True) as db:
+                _init(db)
+                db.execute("UPDATE delegations SET dispatch_phase='reserved',updated_at=? WHERE delegation_id=? AND dispatch_phase='invoking'", (_now(), delegation_id))
+                _event(db, delegation_id, "delegation.dispatch_rejected", from_state="reserved", to_state="reserved")
+                db.commit()
+            invocation_claimed = False
+            return json.dumps({"success": False, "schema_version": SCHEMA_VERSION, "delegation_id": delegation_id, "task_id": task_id, "backend": backend, "changed": False, "dispatch": dispatch}, ensure_ascii=False, indent=2)
+
         now = _now()
         backend_state = str(dispatch.get("state") or dispatch.get("status") or ("ambiguous" if ambiguous else "queued"))
         state = "reconciling" if ambiguous else _normalize_state(backend_state)
@@ -439,29 +519,12 @@ def hermes_delegation_dispatch(
             state = "queued"
         with _connect(path, write=True) as db:
             _init(db)
-            db.execute(
-                "INSERT INTO delegations(delegation_id,schema,mission_id,task_id,contract_sha256,backend,state,backend_state,outcome,backend_ref_json,created_at,dispatched_at,updated_at,terminal_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    delegation_id,
-                    DELEGATION_SCHEMA,
-                    mission_id,
-                    task_id,
-                    contract_sha,
-                    backend,
-                    state,
-                    _bounded(backend_state, 128),
-                    "",
-                    json.dumps(_backend_ref(dispatch), sort_keys=True),
-                    now,
-                    now,
-                    now,
-                    now if state in TERMINAL_STATES else None,
-                ),
-            )
+            phase = "invoking" if ambiguous else "dispatched"
+            db.execute("UPDATE delegations SET state=?,backend_state=?,backend_ref_json=?,dispatch_phase=?,dispatched_at=?,updated_at=? WHERE delegation_id=? AND dispatch_phase='invoking'", (state, _bounded(backend_state, 128), json.dumps(_backend_ref(dispatch), sort_keys=True), phase, now, now, delegation_id))
             _event(db, delegation_id, "delegation.dispatched", to_state=state, backend_state=backend_state)
             db.commit()
             row = dict(_get_row(db, delegation_id))
+        invocation_claimed = False
         mission_linked = True
         if mission_id:
             mission_linked = _sync_mission_attachment(
@@ -489,17 +552,17 @@ def hermes_delegation_dispatch(
             "dispatch": dispatch,
         }, ensure_ascii=False, indent=2)
     except (ValueError, TypeError, LookupError, PermissionError, RuntimeError, OSError, sqlite3.Error) as exc:
-        if mission_reserved and mission_id and delegation_id and root is not None:
-            mission_runtime.record_attachment_state(
-                mission_id,
-                "delegation",
-                delegation_id,
-                "blocked",
-                evidence_ref=f"contract:{contract_sha}",
-                hermes_root=root,
-            )
+        if invocation_claimed and backend_called and root is not None:
+            try:
+                with _connect(_db_path(root), write=True) as db:
+                    _init(db)
+                    db.execute("UPDATE delegations SET state='reconciling',backend_state='ambiguous',updated_at=? WHERE delegation_id=? AND dispatch_phase='invoking'", (_now(), delegation_id))
+                    _event(db, delegation_id, "delegation.dispatch_ambiguous", from_state="reserved", to_state="reconciling", backend_state="ambiguous")
+                    db.commit()
+            except (OSError, sqlite3.Error):
+                pass
         envelope = _error(exc, "DELEGATION_DISPATCH_REJECTED", "Check Work Contract, Mission linkage, runner availability, and mutation policy.")
-        if backend_dispatched:
+        if invocation_claimed and backend_called:
             # Backend already accepted the submission; the failure was local
             # persistence, not dispatch rejection. Surface the ambiguity so
             # callers reconcile instead of treating this as a safe no-op.
@@ -507,8 +570,7 @@ def hermes_delegation_dispatch(
             payload["submission_may_have_succeeded"] = True
             payload["changed"] = True
             payload["suggested_action"] = (
-                "Backend dispatch was accepted but the Delegation lifecycle record may not be durable. "
-                "Reconcile the delegation via hermes_delegation_reconcile before retrying or completing."
+                "Backend invocation outcome is ambiguous. Reconcile the durable delegation; it will not be redispatched."
             )
             envelope = json.dumps(payload, ensure_ascii=False, indent=2)
         return envelope
@@ -595,6 +657,16 @@ def hermes_delegation_reconcile(
         path = _db_path(hermes_root)
         with _connect(path, write=False) as db:
             stored = dict(_get_row(db, delegation_id))
+            manifest = _manifest_row(db, delegation_id)
+
+        if contract_json:
+            _canonical, contract, sha = contract_mod._parse_contract(contract_json)
+            supplied = contract_mod._validation_manifest(contract, sha)
+            if sha != stored["contract_sha256"] or contract["task_id"] != stored["task_id"] or supplied["context_sha256"] != manifest["context_sha256"]:
+                raise ValueError("contract_json does not match delegation validation lineage")
+        manifest_contract, manifest_sha = contract_mod._contract_from_validation_manifest(manifest)
+        if manifest_sha != stored["contract_sha256"] or manifest_contract["task_id"] != stored["task_id"]:
+            raise ValueError("delegation validation manifest does not match lineage")
 
         observed = _latest_observation(stored["task_id"], root)
         if observed is None:
@@ -608,16 +680,11 @@ def hermes_delegation_reconcile(
             if observed.get("error"):
                 observed_desired = "failed"
 
-        verdict = str(stored.get("validation_verdict") or "")
-        if contract_json:
-            canonical, contract, sha = contract_mod._parse_contract(contract_json)
-            if sha != stored["contract_sha256"] or contract["task_id"] != stored["task_id"]:
-                raise ValueError("contract_json does not match delegation lineage")
-            validation = json.loads(contract_mod.hermes_contract_validate(canonical, hermes_root=root))
-            verdict = str(validation.get("verdict") or "")
+        validation = contract_mod._validate_manifest_impl(manifest, None, root)
+        verdict = str(validation.get("verdict") or "")
 
         desired = observed_desired
-        if observed_desired == "succeeded" and verdict != "SATISFIED":
+        if observed is None or (observed_desired == "succeeded" and verdict != "SATISFIED"):
             desired = "reconciling"
         verified_success = desired == "succeeded" and verdict == "SATISFIED"
 
@@ -641,6 +708,7 @@ def hermes_delegation_reconcile(
                 "applied": False,
                 "delegation": _surface(preview),
                 "observed": observed,
+                "evidence_ref": f"contract:{stored['contract_sha256']}" if verified_success else "",
             }, ensure_ascii=False, indent=2)
 
         now = _now()
@@ -674,7 +742,7 @@ def hermes_delegation_reconcile(
             _audit(tool="hermes_delegation_reconcile", policy=policy, dry_run=False, success=False, changed=changed, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
             return _mission_sync_failure("reconciliation", row, changed=changed, extra={"applied": True, "observed": observed})
         _audit(tool="hermes_delegation_reconcile", policy=policy, dry_run=False, success=True, changed=changed, delegation_id=delegation_id, task_id=row["task_id"], backend=row["backend"])
-        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": changed, "applied": True, "delegation": _surface(row), "observed": observed}, ensure_ascii=False, indent=2)
+        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": changed, "applied": True, "delegation": _surface(row), "observed": observed, "evidence_ref": f"contract:{row['contract_sha256']}" if verified_success else ""}, ensure_ascii=False, indent=2)
     except (ValueError, TypeError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "DELEGATION_RECONCILE_FAILED", "Check delegation lineage, observed backend state, and mutation policy.")
 
@@ -695,6 +763,19 @@ def hermes_delegation_cancel(
             stored = dict(_get_row(db, delegation_id))
         if stored["state"] in TERMINAL_STATES:
             return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": False, "delegation": _surface(stored)}, ensure_ascii=False, indent=2)
+        if stored.get("dispatch_phase") == "reserved":
+            if dry_run or policy.effective_dry_run(dry_run):
+                return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": False, "dry_run": True, "delegation_id": delegation_id}, ensure_ascii=False, indent=2)
+            now = _now()
+            with _connect(path, write=True) as db:
+                _init(db)
+                db.execute("UPDATE delegations SET state='cancelled',backend_state='not_invoked',outcome='cancelled',cancel_requested=1,updated_at=?,terminal_at=? WHERE delegation_id=? AND dispatch_phase='reserved'", (now, now, delegation_id))
+                _event(db, delegation_id, "delegation.cancelled", from_state="reserved", to_state="cancelled", backend_state="not_invoked")
+                db.commit()
+                row = dict(_get_row(db, delegation_id))
+            if row.get("mission_id"):
+                _sync_mission_attachment(row, "cancelled", evidence_ref=f"delegation:{delegation_id}", hermes_root=root)
+            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "changed": True, "delegation": _surface(row)}, ensure_ascii=False, indent=2)
         result = json.loads(runners.hermes_runner_cancel(
             stored["task_id"],
             backend=stored["backend"],

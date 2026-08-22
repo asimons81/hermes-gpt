@@ -208,6 +208,25 @@ def _run_status(contract: dict, root: Path) -> dict:
     return json.loads(out)
 
 
+def test_validation_manifest_uses_public_validation_algorithm_with_parity(hermes_root: Path):
+    contract = _contract_for_ws(hermes_root.parent / "ws")
+    contract["forbidden_actions"] = [{"action": "publish", "class": "HIGH", "reason": "RAW_REASON_MUST_NOT_PERSIST"}]
+    contract["review_requirements"]["evidence"] = "RAW_REVIEW_BODY_MUST_NOT_PERSIST"
+    canonical, parsed, sha = contract_mod._parse_contract(json.dumps(contract))
+    public = json.loads(contract_mod.hermes_contract_validate(canonical, hermes_root=hermes_root))
+    manifest = contract_mod._validation_manifest(parsed, sha)
+    private = contract_mod._validate_manifest_impl(manifest, None, hermes_root)
+    assert private["contract_sha256"] == public["contract_sha256"] == sha
+    assert private["verdict"] == public["verdict"]
+    assert private["checks"] == public["checks"]
+    encoded = json.dumps(manifest)
+    assert parsed["objective"] not in encoded
+    assert "RAW_REASON_MUST_NOT_PERSIST" not in encoded
+    assert "RAW_REVIEW_BODY_MUST_NOT_PERSIST" not in encoded
+    assert "inputs" not in manifest["context"]
+    assert "constraints" not in manifest["context"]
+
+
 def _add_review_evidence(contract: dict, *, reviewer: str = "default") -> None:
     """Write an audit acceptance record for a contract by a distinct reviewer."""
     canonical, _, sha = contract_mod._parse_contract(json.dumps(contract))

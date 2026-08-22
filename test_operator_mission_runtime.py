@@ -318,3 +318,19 @@ def test_acceptance_and_owner_profile_freeze_after_work_attached(hermes_root: Pa
         )
     )
     assert denied["success"] is False
+
+
+@pytest.mark.parametrize("kind", sorted(mission.ATTACHMENT_KINDS))
+def test_public_attach_cannot_claim_cancellation_for_any_kind(hermes_root: Path, kind: str):
+    assert _j(mission.hermes_mission_create(_spec(), confirm=True, dry_run=False, hermes_root=hermes_root))["success"]
+    ref = "sw-cancelled" if kind == "workflow" else "cancelled-ref"
+    out = _j(mission.hermes_mission_attach("msn-test", kind, ref, state="cancelled", confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert not out["success"]
+
+
+def test_parent_cancellation_blocked_by_reserved_delegation(hermes_root: Path):
+    assert _j(mission.hermes_mission_create(_spec(), confirm=True, dry_run=False, hermes_root=hermes_root))["success"]
+    assert mission.reserve_delegation_attachment("msn-test", "dlg-reserved", evidence_ref="contract:" + "a" * 64, hermes_root=hermes_root)
+    out = _j(mission.hermes_mission_transition("msn-test", "cancelled", confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert not out["success"]
+    assert _j(mission.hermes_mission_get("msn-test", hermes_root=hermes_root))["status"] != "cancelled"
