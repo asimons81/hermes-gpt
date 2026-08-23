@@ -538,11 +538,34 @@ def _observation_sha256(observed: dict[str, Any] | None) -> str:
 def _observation_is_fresh_for_cancellation(stored: dict[str, Any], observed: dict[str, Any] | None) -> bool:
     if observed is None or not bool(stored.get("cancellation_watermark_ready")):
         return False
-    # The watermark is captured only after the cancellation claim commits and
-    # before the backend cancellation call.  A different authoritative record
-    # therefore constitutes a post-claim observation generation without relying
-    # on backend clocks; an unchanged record can never prove freshness.
-    return _observation_sha256(observed) != str(stored.get("cancellation_observation_sha256") or "")
+
+    def ordered_time(value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            return None
+        return parsed.astimezone(timezone.utc)
+
+    claimed_at = ordered_time(stored.get("cancellation_claimed_at"))
+    if claimed_at is None:
+        return False
+    # Only backend terminal timestamps are ordering authority. created/started,
+    # generic updated/observed times, and payload/hash changes can describe when
+    # a record became visible without proving that terminality followed the
+    # cancellation attempt. Supported sources currently normalize to ended_at or
+    # completed_at; the additional names preserve the same terminal-only rule for
+    # backends that expose an equivalent field directly.
+    terminal_times = [
+        parsed
+        for key in ("ended_at", "completed_at", "finished_at", "terminal_at")
+        if (parsed := ordered_time(observed.get(key))) is not None
+    ]
+    terminal_at = max(terminal_times) if terminal_times else None
+    return terminal_at is not None and terminal_at > claimed_at
 
 
 def _manifest_row(db: sqlite3.Connection, delegation_id: str) -> dict[str, Any]:
