@@ -26,13 +26,19 @@ Hermes GPT audit records contain only bounded metadata such as input length and 
 
 ## Activation
 
-The tool is disabled by default. Enable it only on the trusted Hermes GPT server process:
+The tool is disabled by default. Enable it only after the local `finance` profile has passed its acceptance checks. Either set the trusted-server environment gate:
 
 ```bash
 HERMES_GPT_ENABLE_FINANCE=1
 ```
 
-When the variable is not exactly `1`, `hermes_finance_analyze` is not registered on the MCP server and direct module calls fail closed with `FINANCE_DISABLED`.
+or create the profile-local marker:
+
+```text
+~/.hermes/profiles/finance/.finance-enabled
+```
+
+The marker is the preferred persistent local activation because it contains no secret material, survives service restarts/reboots, and stays scoped to the Finance profile. If neither activation is present, `hermes_finance_analyze` is not registered on the MCP server and direct module calls fail closed with `FINANCE_DISABLED`.
 
 The local Hermes installation must contain a `finance` profile with a `SOUL.md`. The bridge uses the Hermes Agent virtual-environment Python when available so the isolated child has the same runtime dependencies as Hermes Agent.
 

@@ -82,6 +82,26 @@ def test_gate_off_refuses_before_subprocess(monkeypatch):
     assert result["code"] == "FINANCE_DISABLED"
 
 
+def test_profile_marker_enables_without_environment(tmp_path, monkeypatch):
+    monkeypatch.delenv(finance.ENABLE_FINANCE_ENV, raising=False)
+    root, agent_root, profile = runtime(tmp_path, monkeypatch)
+    (profile / finance.FINANCE_ENABLE_MARKER).write_text("enabled\n", encoding="utf-8")
+
+    def fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(decision()), stderr="")
+
+    monkeypatch.setattr(finance.subprocess, "run", fake_run)
+    monkeypatch.setattr(finance.op, "audit_record", lambda **kwargs: None)
+    result = json.loads(
+        finance.hermes_finance_analyze(
+            evidence(),
+            hermes_root=root,
+            agent_root=agent_root,
+        )
+    )
+    assert result["schema"] == finance.DECISION_SCHEMA
+
+
 def test_invalid_schema_rejected(monkeypatch):
     enable(monkeypatch)
     payload = json.loads(evidence())

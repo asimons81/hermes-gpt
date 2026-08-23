@@ -2593,7 +2593,7 @@ def register_tools(server: FastMCP) -> None:
     if env_enabled(ENABLE_WEB_ENV):
         server.add_tool(hermes_web_search, meta=tool_meta())
         server.add_tool(hermes_web_extract, meta=tool_meta())
-    if env_enabled(op_finance.ENABLE_FINANCE_ENV):
+    if op_finance.finance_enabled(_default_hermes_root()):
         server.add_tool(hermes_finance_analyze, meta=tool_meta())
 
     # --- Operator / Owner Mode tools -----------------------------------

@@ -21,6 +21,7 @@ import operator_policy as op
 
 ENABLE_FINANCE_ENV = "HERMES_GPT_ENABLE_FINANCE"
 FINANCE_PROFILE = "finance"
+FINANCE_ENABLE_MARKER = ".finance-enabled"
 EVIDENCE_SCHEMA = "finance.evidence/v1"
 DECISION_SCHEMA = "finance.decision/v1"
 MAX_EVIDENCE_CHARS = 48_000
@@ -34,6 +35,22 @@ _SECRET_KEY_RE = re.compile(
 _PRIVATE_MATERIAL_RE = re.compile(
     r"(?i)(?:^\s*bearer\s+|-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----)"
 )
+
+
+def finance_enabled(hermes_root: Path | None = None) -> bool:
+    """Return whether the bounded Finance broker is explicitly enabled."""
+    if op.env_truthy(ENABLE_FINANCE_ENV):
+        return True
+    if hermes_root is None:
+        return False
+    try:
+        root = op.normalize_hermes_data_root(hermes_root)
+        if root is None:
+            return False
+        marker = Path(root) / "profiles" / FINANCE_PROFILE / FINANCE_ENABLE_MARKER
+        return marker.is_file()
+    except Exception:
+        return False
 
 
 def _error(code: str, message: str, action: str) -> str:
@@ -254,11 +271,11 @@ def hermes_finance_analyze(
     agent_root: Path | None = None,
 ) -> str:
     """Analyze one bounded Finances evidence packet with the local Finance profile."""
-    if not op.env_truthy(ENABLE_FINANCE_ENV):
+    if not finance_enabled(hermes_root):
         return _error(
             "FINANCE_DISABLED",
             "Hermes Finance analysis is disabled.",
-            f"Set {ENABLE_FINANCE_ENV}=1 on the trusted local MCP server after Finance QA passes.",
+            f"Set {ENABLE_FINANCE_ENV}=1 or create the approved Finance enable marker after QA passes.",
         )
 
     checked = _validate_evidence(evidence_json)
