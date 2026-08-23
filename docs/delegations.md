@@ -22,7 +22,7 @@ Mission linkage uses the existing `delegation` attachment kind. Dispatch creates
 
 An exact cancellation retry does not invoke backend cancellation again while `cancellation_in_progress` is set for that lineage. It returns an explicit in-progress/ambiguous idempotent response and leaves the latch in place for the first caller or authoritative reconciliation.
 
-Authoritative reconciliation resolves that provisional latch only from a fresh terminal backend observation. Explicit `cancelled`/`canceled` observation promotes durable cancellation; terminal failure clears the latch and records failure; terminal completion clears the latch but still requires the normal matching Work Contract validation before success. Missing, ambiguous, unknown, or nonterminal observation retains `cancellation_in_progress` and remains fail-closed as `reconciling`.
+Authoritative reconciliation resolves that provisional latch only from a terminal backend observation demonstrably newer than the durable cancellation-attempt watermark. The watermark records the claim time and the authoritative observation generation captured before the backend cancellation call, without relying on backend clock synchronization. An unchanged pre-cancellation terminal observation cannot release the latch. A fresh explicit `cancelled`/`canceled` observation promotes durable cancellation; fresh terminal failure clears the latch and records failure; fresh terminal completion clears the latch but still requires the normal matching Work Contract validation before success. Missing, stale, ambiguous, unknown, or nonterminal observation retains `cancellation_in_progress` and remains fail-closed as `reconciling`.
 
 ## OpenCode backend
 
