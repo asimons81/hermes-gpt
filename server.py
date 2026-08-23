@@ -42,6 +42,7 @@ import operator_live_events as op_live_events
 import operator_oauth as op_oauth
 import operator_swarm as op_swarm
 import operator_recovery as op_recovery
+import operator_finance as op_finance
 from versioning import VERSION
 
 
@@ -1252,6 +1253,16 @@ def hermes_web_extract(
         return result
     except Exception as exc:
         raise clean_error("hermes_web_extract", exc) from exc
+
+
+def hermes_finance_analyze(evidence_json: str, timeout: int = 120) -> str:
+    """Analyze a bounded finance.evidence/v1 packet with the local Finance profile."""
+    return op_finance.hermes_finance_analyze(
+        evidence_json=evidence_json,
+        timeout=timeout,
+        hermes_root=_default_hermes_root(),
+        agent_root=HERMES_ROOT,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2582,6 +2593,8 @@ def register_tools(server: FastMCP) -> None:
     if env_enabled(ENABLE_WEB_ENV):
         server.add_tool(hermes_web_search, meta=tool_meta())
         server.add_tool(hermes_web_extract, meta=tool_meta())
+    if env_enabled(op_finance.ENABLE_FINANCE_ENV):
+        server.add_tool(hermes_finance_analyze, meta=tool_meta())
 
     # --- Operator / Owner Mode tools -----------------------------------
     #
