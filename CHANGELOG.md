@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-08-24
+
+First-class Missions, unified delegation lineage, durable live events, runner-neutral job supervision, and the bounded Finance bridge.
+
+- Added the first-class durable Mission runtime: `hermes_mission_create/get/list/update/attach/reconcile/transition/approve` with bounded context/skills manifests, attachments, observed-state reconciliation, and Owner-gated final approval.
+- Added the unified delegation lifecycle `hermes_delegation_dispatch/get/list/reconcile/cancel`: normalized durable lineage across runner/Fabric execution preserving underlying authority and dry-run gates.
+- Added the durable v0.9 live-event surface `hermes_live_events_cursor`/`hermes_live_events_since` plus runner-neutral `hermes_job_status`/`hermes_job_wait` background-job polling contract.
+- Fixed `hermes_cron_create` model serialization to match the Hermes Agent scheduler contract: `model_name` now persists as the string `model` field and `model_provider` as the sibling `provider` field (previously an invalid nested `model` dict).
+- Fixed the MCP initialize handshake to advertise the app version (`serverInfo.version`) from `versioning.VERSION` instead of the SDK distribution version, so clients can detect stale processes.
+
 
 - Added an opt-in `hermes_finance_analyze` bridge for the local `finance` profile. The bridge accepts bounded `finance.evidence/v1` JSON, rejects credential-like material, passes evidence over stdin to a fixed tool-free child, disables Hermes persistence/memory/background review for the turn, requires a matching `finance.decision/v1` response, and records only metadata hashes/lengths in Operator audit. The tool is disabled unless `HERMES_GPT_ENABLE_FINANCE=1`.
 

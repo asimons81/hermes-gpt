@@ -9,8 +9,8 @@
 
 ## Current status
 
-- **Repository version:** 0.8.0
-- **GitHub release target:** v0.8.0
+- **Repository version:** 0.9.0
+- **GitHub release target:** v0.9.0
 - **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
 - **Deployment posture:** local-dev / trusted-machine only

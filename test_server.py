@@ -16,6 +16,7 @@ from starlette.testclient import TestClient
 
 import oauth_auth
 import server
+import versioning
 
 
 GATE_ENVS = [
@@ -1260,3 +1261,48 @@ def test_http_initialize_smoke(monkeypatch):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+
+
+# ---------------------------------------------------------------------------
+# v0.9 connector acceptance
+# ---------------------------------------------------------------------------
+
+V09_CONNECTOR_ADDITIONS = [
+    "hermes_mission_create",
+    "hermes_mission_get",
+    "hermes_mission_list",
+    "hermes_mission_update",
+    "hermes_mission_attach",
+    "hermes_mission_reconcile",
+    "hermes_mission_transition",
+    "hermes_mission_approve",
+    "hermes_delegation_dispatch",
+    "hermes_delegation_get",
+    "hermes_delegation_list",
+    "hermes_delegation_reconcile",
+    "hermes_delegation_cancel",
+    "hermes_live_events_cursor",
+    "hermes_live_events_since",
+    "hermes_job_status",
+    "hermes_job_wait",
+    "hermes_finance_analyze",
+]
+
+V09_CONNECTOR_TOOL_COUNT = 110
+
+
+def test_v09_connector_surface_acceptance(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setenv(server.op_finance.ENABLE_FINANCE_ENV, "1")
+    monkeypatch.setenv("HERMES_HOME", str(Path(server.__file__).resolve().parent))
+
+    built = server.build_server()
+    names = tool_names(built)
+
+    assert len(names) == V09_CONNECTOR_TOOL_COUNT
+    for required in V09_CONNECTOR_ADDITIONS:
+        assert required in names, f"missing v0.9 connector tool: {required}"
+    assert len(set(names)) == len(names), "duplicate tool registration"
+
+    # serverInfo.version must track the checkout version, not the SDK version.
+    assert built._mcp_server.version == versioning.VERSION == "0.9.0"
