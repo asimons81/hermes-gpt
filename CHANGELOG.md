@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added an opt-in `hermes_finance_analyze` bridge for the local `finance` profile. The bridge accepts bounded `finance.evidence/v1` JSON, rejects credential-like material, passes evidence over stdin to a fixed tool-free child, disables Hermes persistence/memory/background review for the turn, requires a matching `finance.decision/v1` response, and records only metadata hashes/lengths in Operator audit. The tool is disabled unless `HERMES_GPT_ENABLE_FINANCE=1`.
+
 ## 0.8.0 - 2026-08-21
 
 Fabric: authenticated cross-machine Swarm execution with capability-aware routing, remote evidence/artifacts, reconciliation, and Flight Deck visibility.
