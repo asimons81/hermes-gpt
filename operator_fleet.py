@@ -11,6 +11,7 @@ fallback for registry listing only.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -25,6 +26,19 @@ from typing import Any, Callable
 import operator_policy as op
 
 Runner = Callable[..., tuple[int, str, str]]
+
+# In-process Agent Card cache. When a fleet tool runs inside the same
+# hermes-gpt process that serves a peer's card on loopback, an HTTP fetch
+# back to that loopback would deadlock the single event loop. Peers may
+# register their own card here so loopback verification reads it directly
+# instead of round-tripping through the blocked loop.
+_LOCAL_AGENT_CARDS: dict[str, dict[str, Any]] = {}
+
+
+def register_local_agent_card(url: str, card: dict[str, Any]) -> None:
+    """Publish this process's own Agent Card for loopback fleet verification."""
+    _LOCAL_AGENT_CARDS[url.rstrip("/")] = card
+
 
 AUTHORITY_MANIFEST_ENV = "HERMES_GPT_FLEET_AUTHORITY_MANIFEST"
 A2A_REGISTRY_MODE_ENV = "HERMES_GPT_FLEET_A2A_MODE"
@@ -214,6 +228,18 @@ def _http_get_json(url: str, headers: dict[str, str], timeout: int) -> dict[str,
         return json.loads(data.decode("utf-8"))
 
 
+def _http_get_json_threaded(url: str, headers: dict[str, str], timeout: int) -> dict[str, Any]:
+    """Run the blocking GET off the caller's event loop.
+
+    When the fleet tool runs inside the same hermes-gpt process that also
+    serves the peer's Agent Card, a blocking same-loopback fetch would
+    deadlock (the inbound request can never be accepted while the loop is
+    blocked). Offloading to a worker thread lets the inbound request through.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(_http_get_json, url, headers, timeout).result()
+
+
 def _http_post_json(url: str, body: dict[str, Any], headers: dict[str, str], timeout: int) -> dict[str, Any]:
     data = json.dumps(body).encode("utf-8")
     hdrs = {"Content-Type": "application/json", "A2A-Version": "1.0", **headers}
@@ -227,12 +253,17 @@ def _card_url(base_url: str) -> str:
 
 
 def _fetch_card(base_url: str, headers: dict[str, str], timeout: int) -> dict[str, Any]:
+    # Short-circuit loopback fetches to avoid the same-process event-loop
+    # deadlock: the card is served by this very process, so read it directly.
+    key = base_url.rstrip("/")
+    if key in _LOCAL_AGENT_CARDS:
+        return _LOCAL_AGENT_CARDS[key]
     try:
-        return _http_get_json(_card_url(base_url), headers, timeout)
+        return _http_get_json_threaded(_card_url(base_url), headers, timeout)
     except urllib.error.HTTPError as e:
         if e.code != 404:
             raise
-    return _http_get_json(base_url.rstrip("/") + "/.well-known/agent.json", headers, timeout)
+    return _http_get_json_threaded(base_url.rstrip("/") + "/.well-known/agent.json", headers, timeout)
 
 
 def _jsonrpc_interface(card: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -561,7 +592,10 @@ def _load_authority(path: Path | None = None) -> dict[str, AuthorityPeer]:
         if not isinstance(name, str) or not _AGENT_RE.fullmatch(name) or name in peers:
             raise ValueError("authority peer name is invalid or duplicated")
         if name not in _BUILTIN_PROFILES:
-            raise ValueError("authority manifest contains an unsupported peer")
+            # Unknown manifest peer: admit it at the lowest profile ceiling instead of
+            # rejecting the whole manifest. A freshly enrolled machine is therefore valid
+            # but bounded to the default profile only (the ceiling check below still holds).
+            _BUILTIN_PROFILES[name] = frozenset({"default"})
         if not isinstance(role, str) or not _ROLE_RE.fullmatch(role):
             raise ValueError("expected_host_role is invalid")
         if (

@@ -2412,6 +2412,96 @@ async def health_root(_request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "server": "hermes-gpt", "mcp_path": "/mcp"})
 
 
+def _fleet_peer_name() -> str:
+    return os.environ.get("HERMES_GPT_FLEET_PEER_NAME", "").strip() or "hermes-peer"
+
+
+def _fleet_peer_url() -> str:
+    return (
+        os.environ.get("HERMES_GPT_FLEET_PEER_URL", "").strip()
+        or f"http://{os.environ.get('HERMES_GPT_HOST', '127.0.0.1')}:{os.environ.get('HERMES_GPT_PORT', '4750')}"
+    )
+
+
+async def _fleet_agent_card(_request: Request) -> JSONResponse:
+    """Agent Card for this Fleet peer. The fleet authority manifest pins
+    expected_card_identity to HERMES_GPT_FLEET_PEER_NAME; this route attests
+    that identity. No secrets, tokens, or credentials are returned."""
+    peer_name = _fleet_peer_name()
+    peer_url = _fleet_peer_url()
+    return JSONResponse(
+        {
+            "protocolVersion": "1.0",
+            "name": peer_name,
+            "description": "Hermes Fleet peer",
+            "version": os.environ.get("HERMES_GPT_FLEET_PEER_VERSION", "0.20.5"),
+            "url": peer_url,
+            "capabilities": {},
+            "defaultInputModes": ["application/json"],
+            "defaultOutputModes": ["application/json"],
+            "skills": [
+                {
+                    "id": "hermes-agent-v1",
+                    "name": "Hermes Agent",
+                    "description": "Local-first Hermes Agent",
+                    "tags": ["hermes", "fleet"],
+                }
+            ],
+            "supportedInterfaces": [
+                {
+                    "url": peer_url,
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "1.0",
+                }
+            ],
+        }
+    )
+
+
+def _register_fleet_local_card() -> None:
+    """Publish this peer's own Agent Card for in-process loopback verification.
+
+    Keeps the fleet drift/status tools from deadlocking when they fetch the
+    card of a co-located peer over 127.0.0.1. The identity here must match the
+    fleet authority manifest entry (expected_card_identity = HERMES_GPT_FLEET_PEER_NAME).
+    """
+    try:
+        import operator_fleet as _op
+
+        peer_name = _fleet_peer_name()
+        peer_url = _fleet_peer_url()
+        _op.register_local_agent_card(
+            peer_url,
+            {
+                "protocolVersion": "1.0",
+                "name": peer_name,
+                "description": "Hermes Fleet peer",
+                "version": os.environ.get("HERMES_GPT_FLEET_PEER_VERSION", "0.20.5"),
+                "url": peer_url,
+                "capabilities": {},
+                "defaultInputModes": ["application/json"],
+                "defaultOutputModes": ["application/json"],
+                "skills": [
+                    {
+                        "id": "hermes-agent-v1",
+                        "name": "Hermes Agent",
+                        "description": "Local-first Hermes Agent",
+                        "tags": ["hermes", "fleet"],
+                    }
+                ],
+                "supportedInterfaces": [
+                    {
+                        "url": peer_url,
+                        "protocolBinding": "JSONRPC",
+                        "protocolVersion": "1.0",
+                    }
+                ],
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def build_asgi_app(server: FastMCP, *, http: bool) -> Any:
     oauth_state = getattr(server, "_hermes_oauth_state", None)
     if oauth_state is not None and not http:
@@ -2463,6 +2553,14 @@ def build_asgi_app(server: FastMCP, *, http: bool) -> Any:
         return admitted
 
     routes: list[BaseRoute] = [Route("/", health_root, methods=["GET", "POST", "OPTIONS"])]
+    # Fleet Agent Card (env-driven identity; generic across peers). Behind the
+    # same outer Bearer/OAuth middleware as MCP. No secret material returned.
+    routes.extend(
+        [
+            Route("/.well-known/agent-card.json", _fleet_agent_card, methods=["GET"]),
+            Route("/.well-known/agent.json", _fleet_agent_card, methods=["GET"]),
+        ]
+    )
     if oauth_state is not None:
         async def resource_metadata(request: Request) -> JSONResponse:
             return oauth_auth.protected_resource_metadata(request, oauth_state)
@@ -3031,6 +3129,7 @@ def _run_legacy_server(argv: list[str]) -> None:
         # local-only testing when cert/key are provided.
         import uvicorn
         app = build_asgi_app(server, http=args.http)
+        _register_fleet_local_card()
 
         uvicorn.run(
             app,
