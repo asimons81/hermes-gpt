@@ -9,6 +9,7 @@ First-class Missions, unified delegation lineage, durable live events, runner-ne
 - Added the durable v0.9 live-event surface `hermes_live_events_cursor`/`hermes_live_events_since` plus runner-neutral `hermes_job_status`/`hermes_job_wait` background-job polling contract.
 - Fixed `hermes_cron_create` model serialization to match the Hermes Agent scheduler contract: `model_name` now persists as the string `model` field and `model_provider` as the sibling `provider` field (previously an invalid nested `model` dict).
 - Fixed the MCP initialize handshake to advertise the app version (`serverInfo.version`) from `versioning.VERSION` instead of the SDK distribution version, so clients can detect stale processes.
+- Fixed clustered ChatGPT MCP authentication: access tokens are now HMAC-signed so a bearer issued by one origin of `gpt.tonysimons.dev` is accepted by the other without a shared process-memory token table. Unauthenticated `/mcp` challenges advertise `resource_metadata`. Opaque legacy access tokens remain valid on the issuing origin until expiry.
 
 
 - Added an opt-in `hermes_finance_analyze` bridge for the local `finance` profile. The bridge accepts bounded `finance.evidence/v1` JSON, rejects credential-like material, passes evidence over stdin to a fixed tool-free child, disables Hermes persistence/memory/background review for the turn, requires a matching `finance.decision/v1` response, and records only metadata hashes/lengths in Operator audit. The tool is disabled unless `HERMES_GPT_ENABLE_FINANCE=1`.
