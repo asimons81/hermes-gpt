@@ -1,6 +1,6 @@
 # Operator Mode for Hermes GPT
 
-Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.8.0 behavior, including Fabric-backed cross-machine Swarm execution.
+Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.9.0 behavior, including the durable Mission lifecycle, unified delegation lineage, live-event bus, and Fabric-backed cross-machine Swarm execution.
 
 For documentation authority and historical-artifact rules, see [docs/README.md](README.md).
 
@@ -170,6 +170,36 @@ Prompt-like text is represented by bounded metadata such as `prompt_len` and `pr
 Do not describe the unset state as deny-by-default. The implementation deliberately makes all read-only Mission surfaces available when the variable is absent.
 
 Mission Control requires only `read_only` authority and never needs direct apply mode.
+
+## Missions lifecycle (v0.9)
+
+Beyond the read-only Mission Control overview, v0.9 adds a first-class durable Mission object as the bounded parent record for a larger objective. A Mission groups an objective, acceptance criteria, bounded context references, an explicit skills manifest, Swarm/work/delegation attachments, lifecycle state, and a final Owner approval that defaults on.
+
+Lifecycle: `draft -> running -> awaiting_approval -> completed`, plus `paused` / `blocked`. `final_approval_required` defaults to true and is immutable after creation; disabling it is an Owner-only creation-time decision.
+
+Tools: `hermes_mission_create`, `hermes_mission_get`, `hermes_mission_list`, `hermes_mission_update`, `hermes_mission_attach`, `hermes_mission_transition`, `hermes_mission_reconcile`, `hermes_mission_approve`.
+
+Reads are read-only. Mutations preserve the normal workspace/direct/confirm gates; direct completion is Owner-gated, and approval-required Missions complete only through explicit Owner approval. A public attachment call can never assert `succeeded`. Completion stays based on coordinator-observed evidence and explicit approval, preserving the v0.8 Fabric safety model.
+
+See [Missions (v0.9)](missions.md).
+
+## Delegations (v0.9)
+
+v0.9 adds a durable, normalized delegation lifecycle above Work Contracts and existing runner/Fabric execution. The delegation record is lineage and state metadata, not a second execution authority; runner, Fabric, Work Contract validation, and Operator policy remain authoritative.
+
+Tools: `hermes_delegation_dispatch`, `hermes_delegation_get`, `hermes_delegation_list`, `hermes_delegation_reconcile`, `hermes_delegation_cancel`. Normalized states are `queued`, `running`, `reconciling`, `blocked`, `succeeded`, `failed`, and `cancelled`.
+
+A delegation never marks work successful from a worker's claim: terminal backend success stays `reconciling` until the matching immutable Work Contract lineage has a `SATISFIED` verdict; missing, unreadable, or `UNVERIFIED` evidence fails closed. `opencode` is a first-class local runner backend.
+
+See [Delegations (v0.9)](delegations.md).
+
+## Live events (v0.9)
+
+v0.9 adds a durable, bounded live-event bus for clients and parent orchestrators that need completion/wake-up delivery without polling every underlying store.
+
+MCP tools: `hermes_live_events_cursor()` and `hermes_live_events_since(cursor, mission_id, topic, kind, limit, wait_ms)`. The same durable stream is available over `/events/ws` (Operator mode must be enabled; OAuth-only deployments fail closed for WebSocket). Reads are non-creating.
+
+Live events are notifications, not proof. Mission, Swarm, Work Contract, runner, and Fabric journals remain authoritative; a missing, delayed, duplicated, or reconnected event never advances work. See [Live events (v0.9)](live-events.md).
 
 ## Binary file export
 
@@ -524,6 +554,9 @@ $env:HERMES_GPT_OWNER_ACK="I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE"
 ## Related docs
 
 - [Documentation map](README.md)
+- [Missions (v0.9)](missions.md)
+- [Delegations (v0.9)](delegations.md)
+- [Live events (v0.9)](live-events.md)
 - [Codex integration](codex.md)
 - [Windows ChatGPT -> Codex](windows-chatgpt-codex.md)
 - [Updating](updating.md)

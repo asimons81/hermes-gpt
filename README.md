@@ -21,6 +21,18 @@
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
 
+## What v0.9.0 adds
+
+v0.9.0 completes the control-plane layer with first-class durable Missions, a unified delegation lifecycle, and a durable live-event bus:
+
+1. **First-class Mission lifecycle** - a bounded, restart-safe parent record that groups an objective, acceptance criteria, bounded context references, an explicit skills manifest, Swarm/work/delegation attachments, and a final Owner approval that defaults on. Tools: `hermes_mission_create/get/list/update/attach/transition/reconcile/approve`. See [Missions (v0.9)](docs/missions.md).
+2. **Unified delegation lineage** - a durable, normalized delegation lifecycle (`hermes_delegation_dispatch/get/list/reconcile/cancel`) above existing Work Contract and runner/Fabric execution. It is lineage/state metadata, not a second execution authority; terminal success stays `reconciling` until the matching immutable contract has a `SATISFIED` verdict. Adds `opencode` as a first-class local runner backend. See [Delegations (v0.9)](docs/delegations.md).
+3. **Durable live events** - an authenticated, bounded event bus with `hermes_live_events_cursor` / `hermes_live_events_since` plus an `/events/ws` WebSocket stream, for completion and wake-up delivery without polling every underlying store. Events are notifications, never proof. See [Live events (v0.9)](docs/live-events.md).
+4. **Runner-neutral job supervision** - `hermes_job_status` / `hermes_job_wait` background-job polling regardless of backend.
+5. **Bounded Finance bridge** - opt-in `hermes_finance_analyze` for the local `finance` profile (`HERMES_GPT_ENABLE_FINANCE=1`).
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.9 change list and the individual surface guides linked below.
+
 ## What v0.8.0 adds
 
 v0.8.0 "Fabric" turns the v0.7 control plane into a local-first distributed execution fabric:
@@ -66,6 +78,9 @@ See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention poli
 | Verify the MCP protocol surface | [MCP compatibility manifest](docs/mcp-compatibility.md) |
 | Use Codex as an MCP client | [Codex guide](docs/codex.md) |
 | Use ChatGPT or another trusted client to operate Hermes | [Operator Mode](docs/operator-mode.md) |
+| Group and approve a larger objective under one lifecycle | [Missions (v0.9)](docs/missions.md) |
+| Understand unified delegation lineage across runners | [Delegations (v0.9)](docs/delegations.md) |
+| Consume durable live events / wake-up stream | [Live events (v0.9)](docs/live-events.md) |
 | Send bounded financial evidence to the local Finance profile | [Finance bridge](docs/finance.md) |
 | Understand cross-machine Fabric execution and its release boundary | [v0.8.0 Fabric release notes](docs/release-notes-v0.8.0.md) |
 | Let ChatGPT dispatch bounded work to the Codex CLI on Windows | [Windows ChatGPT -> Codex guide](docs/windows-chatgpt-codex.md) |
@@ -311,9 +326,14 @@ Git checkout updates require a clean checkout on the default branch and use fast
 Current operational documentation:
 
 - [Documentation map and source-of-truth rules](docs/README.md)
+- [Runtime checkout pin (which checkout is live)](docs/runtime-checkout.md)
+- [Reuse / do-not-rebuild boundary](BOUNDARY.md)
 - [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md)
 - [OAuth and bearer authentication](docs/oauth.md)
 - [Operator Mode](docs/operator-mode.md)
+- [Missions (v0.9)](docs/missions.md)
+- [Delegations (v0.9)](docs/delegations.md)
+- [Live events (v0.9)](docs/live-events.md)
 - [Codex integration](docs/codex.md)
 - [Windows ChatGPT -> Codex deployment](docs/windows-chatgpt-codex.md)
 - [Updating](docs/updating.md)
