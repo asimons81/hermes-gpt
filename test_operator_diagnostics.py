@@ -131,6 +131,30 @@ def test_doctor_passes_for_valid_hermes_root(hermes_root, clean_env, audit_overr
     assert parsed["trace_id"]
 
 
+def test_gateway_status_falls_back_to_json_gateway_state_pid(hermes_root):
+    (hermes_root / "gateway.pid").write_text(
+        json.dumps({
+            "pid": os.getpid(),
+            "kind": "hermes-gateway",
+            "gateway_state": "running",
+        }),
+        encoding="utf-8",
+    )
+    (hermes_root / "gateway_state.json").write_text(
+        json.dumps({
+            "pid": os.getpid(),
+            "kind": "hermes-gateway",
+            "gateway_state": "running",
+        }),
+        encoding="utf-8",
+    )
+    result = od._check_gateway_status(hermes_root)
+    assert result["status"] == od.STATUS_PASS
+    assert result["code"] == "GATEWAY_OK"
+    assert result["pid"] == os.getpid()
+    assert result["running"] is True
+
+
 def test_doctor_fails_for_dead_pid(hermes_root, clean_env, audit_override):
     pid_path = hermes_root / "gateway.pid"
     pid_path.write_text("99999999", encoding="utf-8")
