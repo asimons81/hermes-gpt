@@ -1276,6 +1276,14 @@ V09_CONNECTOR_ADDITIONS = [
     "hermes_mission_reconcile",
     "hermes_mission_transition",
     "hermes_mission_approve",
+    "hermes_plan_create",
+    "hermes_plan_get",
+    "hermes_plan_list",
+    "hermes_plan_validate",
+    "hermes_plan_decompose",
+    "hermes_plan_review",
+    "hermes_plan_node_transition",
+    "hermes_plan_set_status",
     "hermes_delegation_dispatch",
     "hermes_delegation_get",
     "hermes_delegation_list",
@@ -1283,12 +1291,39 @@ V09_CONNECTOR_ADDITIONS = [
     "hermes_delegation_cancel",
     "hermes_live_events_cursor",
     "hermes_live_events_since",
+    "hermes_capability_manifest",
+    "hermes_mission_ledger",
+    "hermes_mission_ledger_replay",
+    "hermes_budget_set",
+    "hermes_budget_get",
+    "hermes_budget_check",
+    "hermes_budget_record",
+    "hermes_placement_score",
+    "hermes_placement_candidates",
+    "hermes_placement_get",
+    "hermes_placement_list",
     "hermes_job_status",
     "hermes_job_wait",
     "hermes_finance_analyze",
+    # §11.1 / §17 item 7 Ops 8-class failure taxonomy + §11.2 deterministic
+    # smallest-first recovery matrix (decision output only) — t_49bbc143
+    "hermes_failure_classify",
+    "hermes_failure_taxonomy",
+    "hermes_recovery_matrix",
+    "hermes_controller_plan_list",
+    # §17 item 6 / §7 supervised mission controller (shadow/observe) — t_ad1e6d07
+    "hermes_controller_reconcile",
+    "hermes_controller_status",
+    "hermes_controller_lease_list",
+    "hermes_controller_trigger",
 ]
 
-V09_CONNECTOR_TOOL_COUNT = 110
+# Merged slice surface: baseline 110 + 8 MissionPlan tools (sibling t_c165a240)
+# + 3 capability-manifest / mission-ledger tools (sibling derivation-views card)
+# + 4 mission-budget envelope tools (sibling t_78e597c6) + 4 placement-scoring
+# tools (sibling t_167ac591) + 4 failure-semantics tools (t_49bbc143) + 4
+# supervised-mission-controller tools (t_ad1e6d07).
+V09_CONNECTOR_TOOL_COUNT = 137
 
 
 def test_v09_connector_surface_acceptance(monkeypatch):
@@ -1305,4 +1340,4 @@ def test_v09_connector_surface_acceptance(monkeypatch):
     assert len(set(names)) == len(names), "duplicate tool registration"
 
     # serverInfo.version must track the checkout version, not the SDK version.
-    assert built._mcp_server.version == versioning.VERSION == "0.9.0"
+    assert built._mcp_server.version == versioning.VERSION == "0.10.0"

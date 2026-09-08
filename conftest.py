@@ -65,6 +65,27 @@ for _name in _ISOLATED_ENV_VARS:
 # official A2A registry empty so injected test runners stay authoritative.
 os.environ["HERMES_HOME"] = str(_hermes_sandbox())
 
+# Deterministic MIME type database. The minimal Arch/Python mimetypes DB does
+# not map common office MIME types (e.g. .xlsx), which makes
+# test_operator_export.py::test_export_returns_mcp_embedded_blob_without_local_path
+# environment-dependent (it asserted the canonical spreadsheet type while the
+# module fell back to application/octet-stream). CI images ship the full DB.
+# Seed the standard office types so the local suite behaves like a standard
+# desktop/CI host; this only ADDS mappings and never weakens an assertion.
+import mimetypes as _mimetypes
+
+_OFFICE_MIME = {
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".ppt": "application/vnd.ms-powerpoint",
+}
+for _ext, _mime in _OFFICE_MIME.items():
+    if _mimetypes.guess_type(f"report{_ext}")[0] != _mime:
+        _mimetypes.add_type(_mime, _ext)
+
 
 @pytest.fixture(autouse=True)
 def isolate_operator_environment(monkeypatch):
