@@ -257,12 +257,15 @@ def _check_gateway_status(profile_home: Path) -> dict[str, Any]:
     pid_path = _gateway_pid_path(profile_home)
     heartbeat_path = _ticker_heartbeat_path(profile_home)
 
-    pid: int | None = None
-    if pid_path.exists():
-        try:
-            pid = int(pid_path.read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
-            pid = None
+    # Fix 2026-09-08 (see MEMORY.md / HANDOFF.md, hermes-gpt v0.8.0 @ fc1f68c):
+    # gateway.pid can hold JSON (newer gateway versions) instead of a plain
+    # int. Reuse the already-battle-tested fallback from operator_workspace
+    # (pid file -> gateway_state.json) instead of failing outright on
+    # ValueError, which previously caused false-negative GATEWAY_PID_MISSING.
+    pid: int | None = op_workspace._read_gateway_pid_from_pid_file(pid_path)
+    if pid is None:
+        _state = op_workspace._read_gateway_state(_gateway_state_path(profile_home))
+        pid = op_workspace._read_gateway_pid_from_state(_state)
 
     running = _is_process_alive(pid) if pid is not None else False
 
