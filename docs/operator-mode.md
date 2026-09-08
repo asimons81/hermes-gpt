@@ -1,6 +1,6 @@
 # Operator Mode for Hermes GPT
 
-Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.9.0 behavior, including the durable Mission lifecycle, unified delegation lineage, live-event bus, and Fabric-backed cross-machine Swarm execution.
+Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.10.0 behavior, including the durable Mission lifecycle, unified delegation lineage, live-event bus, and Fabric-backed cross-machine Swarm execution, plus the vNext slice-1 additive surfaces (MissionPlan DAG, derived capability-manifest / mission-ledger views, budget envelope, placement scoring, failure classification + recovery matrix, and the shadow/observe mission controller). The vNext surfaces are decision-only and documented further in [vnext-capability-manifest-and-mission-ledger.md](vnext-capability-manifest-and-mission-ledger.md) and [design/](design/).
 
 For documentation authority and historical-artifact rules, see [docs/README.md](README.md).
 

@@ -9,8 +9,8 @@
 
 ## Current status
 
-- **Repository version:** 0.9.0
-- **GitHub release target:** v0.9.0
+- **Repository version:** 0.10.0
+- **GitHub release target:** v0.10.0
 - **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
 - **Deployment posture:** local-dev / trusted-machine only
@@ -20,6 +20,19 @@
 > GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.8 features unless the badge reports v0.8.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.10.0 adds
+
+v0.10.0 is the vNext slice-1 release: additive, decision-only derived mission views plus a shadow/observe mission controller, preserving the read-only / dry-run / shadow authority ladder. It adds ~27 MCP tools; none can mutate a Mission, dispatch work, or approve anything in this release.
+
+1. **MissionPlan (decomposition DAG)** - `hermes_plan_create/get/list/validate/decompose/review/node_transition/set_status`: a deterministic, bounded decomposition DAG over a MissionSpec. Plan create/node-transition/set-status mutate only the isolated plan store (dry-run-first) and are read-only with respect to the Mission lifecycle.
+2. **Derived capability-manifest and mission-ledger views (read-only)** - `hermes_capability_manifest`, `hermes_mission_ledger`, `hermes_mission_ledger_replay`: a queryable capability index and a merged, replayable, cursor-paginated per-mission event timeline, both with explicit read-only hints and no mutation path.
+3. **Mission budget envelope (dry-run)** - `hermes_budget_set/get/check/record`: a per-mission spend envelope and read-only `budget_check` evaluation surface. The D3 hard-block path is designed but flag-default-off.
+4. **Deterministic placement scoring (dry-run)** - `hermes_placement_score/candidates/get/list`: filter-and-score over the derived capability index; decision output only (`would_assign` always `False`), no assignment executes.
+5. **Semantic failure classification + recovery matrix** - `hermes_failure_classify`, `hermes_failure_taxonomy`, `hermes_recovery_matrix`, `hermes_controller_plan_list`: the Ops 8-class taxonomy and deterministic smallest-first recovery matrix; decision output only (`would_execute` always `False`).
+6. **Supervised mission controller — shadow/observe reconciler loop** - `hermes_controller_reconcile/status/lease_list/trigger`: a T1-T5 trigger model, per-mission pass lease, and a single shadow reconcile pass that emits the smallest recovery action as a proposal only. `controller_telemetry` reports deterministic GREEN / YELLOW / RED health.
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.10 change list; the vNext design notes are in [docs/design/](docs/design/) and the manifest/ledger guide is [docs/vnext-capability-manifest-and-mission-ledger.md](docs/vnext-capability-manifest-and-mission-ledger.md).
 
 ## What v0.9.0 adds
 
