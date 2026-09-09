@@ -563,3 +563,40 @@ def test_new_tools_registered():
         "hermes_operator_recover",
     ]:
         assert name in names
+
+
+def test_gateway_state_with_invalid_utf8_reports_not_running(hermes_root):
+    """Undecodable gateway_state.json must not crash the doctor pass."""
+    (hermes_root / "gateway_state.json").write_bytes(
+        b'{"pid": 1\xff\xfe, "kind": "x"}'
+    )
+    (hermes_root / "gateway.pid").write_text(
+        json.dumps({"pid": os.getpid(), "kind": "hermes-gateway"}),
+        encoding="utf-8",
+    )
+    result = od._check_gateway_status(hermes_root)
+    assert result["status"] in (od.STATUS_FAIL, od.STATUS_WARN)
+    assert result["code"] != "DOCTOR_INTERNAL_ERROR"
+
+
+def test_mission_profile_summary_uses_state_pid_for_json_pid_file(hermes_root):
+    """_profile_summary detects a running gateway from gateway_state.json
+    when gateway.pid is JSON (the PR #62 scenario)."""
+    import operator_mission as om
+
+    (hermes_root / "gateway.pid").write_text(
+        json.dumps({"pid": os.getpid(), "kind": "hermes-gateway"}),
+        encoding="utf-8",
+    )
+    (hermes_root / "gateway_state.json").write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "kind": "hermes-gateway",
+                "gateway_state": "running",
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = om._profile_summary("default", hermes_root, [])
+    assert summary.get("gateway_running") is True
