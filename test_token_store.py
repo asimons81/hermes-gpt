@@ -43,20 +43,19 @@ def test_ciphertext_on_disk_no_plaintext(hermes_root):
     state.access_tokens["tok-1234567890abcdef"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": 10**12}
     state.persist_tokens(hermes_root)
 
-    raw = (hermes_root / "secrets" / "hermes_gpt_tokens.json").read_text(encoding="utf-8")
-    assert "tok-1234567890abcdef" not in raw
-    envelope = json.loads(raw)
-    assert envelope["version"] == 1
-    assert envelope["kid"]
-    assert envelope["ciphertext"]
-    assert envelope["nonce"]
+    db_path = hermes_root / "secrets" / "hermes_gpt_tokens.db"
+    assert db_path.exists()
+    raw = db_path.read_bytes()
+    assert b"tok-1234567890abcdef" not in raw
+    # The row key is a hash, the body is AES-GCM ciphertext.
+    assert ts.lookup_token(hermes_root, "access", "tok-1234567890abcdef") is not None
 
 
-def test_envelope_file_mode_is_0600(hermes_root):
+def test_store_file_mode_is_0600(hermes_root):
     state = _oauth_state()
     state.access_tokens["tok-1234567890abcdef"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": 10**12}
     state.persist_tokens(hermes_root)
-    mode = os.stat(hermes_root / "secrets" / "hermes_gpt_tokens.json").st_mode & 0o777
+    mode = os.stat(hermes_root / "secrets" / "hermes_gpt_tokens.db").st_mode & 0o777
     assert mode == 0o600
 
 
@@ -81,24 +80,28 @@ def time_far() -> float:
     return time.time() + 3600 * 24 * 30
 
 
-def test_corrupt_envelope_fails_closed(hermes_root):
-    path = hermes_root / "secrets" / "hermes_gpt_tokens.json"
-    path.write_text("{not json", encoding="utf-8")
+def test_corrupt_store_fails_closed(hermes_root):
+    path = hermes_root / "secrets" / "hermes_gpt_tokens.db"
+    path.write_bytes(b"not a sqlite database at all" * 10)
     with pytest.raises(ts.TokenStoreError):
         ts.load_tokens(hermes_root)
+    with pytest.raises(ts.TokenStoreError):
+        ts.lookup_token(hermes_root, "access", "tok")
 
 
-def test_revoke_deletes_envelope_and_rotates_key(hermes_root):
+def test_revoke_retires_everything_and_rotates_key(hermes_root):
     state = _oauth_state()
     state.access_tokens["tok-abc"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": time_far()}
     state.persist_tokens(hermes_root)
-    assert (hermes_root / "secrets" / "hermes_gpt_tokens.json").exists()
+    assert ts.lookup_token(hermes_root, "access", "tok-abc") is not None
 
     result = ts.revoke_tokens(hermes_root, rotate_key=True)
     assert result["revoked"] is True
     assert result["key_rotated"] is True
-    assert not (hermes_root / "secrets" / "hermes_gpt_tokens.json").exists()
-    assert ts.load_tokens(hermes_root) == {}
+    assert result["epoch"] >= 1
+    assert ts.lookup_token(hermes_root, "access", "tok-abc") is None
+    assert not ts.load_tokens(hermes_root).get("access_tokens")
+    assert ts.read_revocation_epoch(hermes_root) >= 1
 
 
 def test_env_master_key_works(hermes_root, monkeypatch):
@@ -191,7 +194,7 @@ def test_revoke_dry_run_does_not_delete(hermes_root, monkeypatch):
     out = json.loads(op_oauth.hermes_oauth_revoke(dry_run=True, hermes_root=hermes_root))
     assert out["success"] is True
     assert out["dry_run"] is True
-    assert (hermes_root / "secrets" / "hermes_gpt_tokens.json").exists()
+    assert ts.lookup_token(hermes_root, "access", "tok-abc") is not None
 
 
 def test_persist_hook_writes_after_exchange(hermes_root, monkeypatch):
@@ -215,10 +218,10 @@ def test_persist_hook_writes_after_exchange(hermes_root, monkeypatch):
         code_verifier="dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
     )
     assert resp["access_token"]
-    envelope = hermes_root / "secrets" / "hermes_gpt_tokens.json"
-    assert envelope.exists()
-    raw = envelope.read_text(encoding="utf-8")
-    assert resp["access_token"] not in raw
+    db_path = hermes_root / "secrets" / "hermes_gpt_tokens.db"
+    assert db_path.exists()
+    assert resp["access_token"] not in db_path.read_bytes().decode("latin-1")
+    assert ts.lookup_token(hermes_root, "access", resp["access_token"]) is not None
 
 
 def test_restore_populates_after_restart(hermes_root):

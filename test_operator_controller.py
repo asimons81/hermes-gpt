@@ -278,7 +278,7 @@ def run_conflation() -> None:
                 # a pass on a held lease does NOT steal and reports stale
                 res = _j(
                     ctl.hermes_controller_reconcile(
-                        "msn-ctrl", ctl.TRIGGER_PERIODIC, hermes_root=root
+                        "msn-ctrl", ctl.TRIGGER_PERIODIC, dry_run=False, hermes_root=root
                     )
                 )
                 check(
@@ -344,7 +344,7 @@ def run_shadow_pass_zero_side_effect() -> None:
 
             res = _j(
                 ctl.hermes_controller_reconcile(
-                    "msn-ctrl", ctl.TRIGGER_MANUAL, hermes_root=root
+                    "msn-ctrl", ctl.TRIGGER_MANUAL, dry_run=False, hermes_root=root
                 )
             )
             eq(

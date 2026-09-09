@@ -22,7 +22,7 @@ Mission Control does not return raw request dumps, Codex CLI transcripts, prompt
 | failed/abandoned workflow records | same windows, measured from last state transition | maintainer cleanup |
 | review-acceptance records (`review-evidence/review-acceptances.jsonl`) | 30 days after the contract they evidence reaches terminal state (legal review pending) | maintainer cleanup; see below |
 | event timeline | derived read-model — no stored copy; query window `HERMES_GPT_EVENTS_MAX_AGE_DAYS` (default 90) | enforced at query time by the event surface |
-| durable token envelope (`secrets/hermes_gpt_tokens.json`) | until revoked/rotated; never age-purged automatically | revocation via `hermes_oauth_revoke`; see below |
+| durable token store (`secrets/hermes_gpt_tokens.db`) | live rows until expired; retirement tombstones kept permanently | revocation via `hermes_oauth_revoke`; see below |
 
 ### Review-evidence records
 
@@ -35,7 +35,7 @@ and is **subject to legal review before shipping** (ADR-006, risk R11).
 
 ### Durable token envelope
 
-The encrypted token envelope at `<hermes_data>/secrets/hermes_gpt_tokens.json`
+The encrypted token store at `<hermes_data>/secrets/hermes_gpt_tokens.db`
 (0600) is revoked through the owner-gated `hermes_oauth_revoke` surface, which
 deletes the envelope and optionally rotates the master key. It is never
 age-purged automatically, and no tool reads or writes it except the token

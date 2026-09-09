@@ -1599,11 +1599,15 @@ def hermes_capability_manifest(
 def hermes_mission_ledger(
     mission_id: str,
     source: str = "",
-    cursor: int = 0,
+    cursor: int | str = 0,
     limit: int = 100,
     replay: bool = False,
 ) -> str:
-    """Query the merged, replayable per-mission ledger (read-only, INV-9)."""
+    """Query the merged, replayable per-mission ledger (read-only, INV-9).
+
+    ``cursor`` is an opaque watermark token (the ``next_cursor`` value from a
+    previous page) or 0 to start from the beginning.
+    """
     return op_mission_ledger.hermes_mission_ledger(
         mission_id=mission_id,
         source=source,
@@ -2424,8 +2428,13 @@ def hermes_controller_reconcile(
     taxonomy, and emits the smallest recovery action as a *proposal* —
     ``would_execute`` is always False and the returned envelope carries the
     ``would_be_commands`` a higher-autonomy rung would run (D10: not this slice).
-    The only durable writes are the controller's own ``controller_plan`` +
-    ``controller_telemetry``; nothing is dispatched, completed, or approved.
+
+    ``dry_run=True`` (default) is a truthful preview: no durable writes to any
+    mission/plan/delegation/controller state (only the repo-wide Operator
+    audit trail every tool call produces).
+    ``dry_run=False`` records the pass (controller_plan + controller_telemetry
+    + pass lease + heartbeat) and requires workspace level with direct apply
+    mode. Nothing is dispatched, completed, or approved in either mode.
     """
     return op_controller.hermes_controller_reconcile(
         mission_id, trigger_kind, dry_run=dry_run, hermes_root=_default_hermes_root()
@@ -2993,13 +3002,16 @@ def build_server(
     setattr(server, "_hermes_oauth_state", oauth_state)
     if oauth_state is not None:
         # v0.7 S5: persist every token issuance/refresh through token_store.
+        # Persistence failures PROPAGATE: the strict exchange path turns them
+        # into OAuth errors instead of handing out uncommitted credentials.
         def _persist(state, kind: str) -> None:
-            try:
-                state.persist_tokens(_default_hermes_root())
-            except Exception:
-                pass
+            state.persist_tokens(_default_hermes_root())
 
         oauth_auth.set_persist_hook(_persist)
+        # Durable revocation (hermes_oauth_revoke) must also drop this
+        # process's in-memory token caches, or the next issuance would
+        # re-persist the revoked tokens through _persist.
+        oauth_auth.set_revocation_hook(oauth_state.clear_live_tokens)
     register_tools(server)
     return server
 

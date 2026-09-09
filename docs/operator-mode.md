@@ -322,13 +322,14 @@ Mission Control; prompts appear only as length/sha when present in the source.
 | Tool | Authority | Purpose |
 | --- | --- | --- |
 | `hermes_oauth_status()` | read_only | Durable token store presence/expiry only; never exposes token material. |
-| `hermes_oauth_revoke(confirm, dry_run, rotate_key)` | **owner** + direct + confirm (pending legal scope decision) | Delete the encrypted token envelope; optionally rotate the master key. |
+| `hermes_oauth_revoke(confirm, dry_run, rotate_key)` | **owner** + direct + confirm (pending legal scope decision) | Retire every durable token + advance the revocation epoch in one transaction; optionally rotate the active master key. |
 
-OAuth access/refresh tokens are persisted through `token_store` (AES-256-GCM
-envelope at `<hermes_data>/secrets/hermes_gpt_tokens.json`, 0600; keyring →
-key file → env key precedence) so a server restart does not invalidate
-credentials. No token material is ever written to the audit log or any MCP
-response. The `secrets/` directory is a denied path for all tools.
+OAuth access/refresh tokens are persisted through `token_store` (a
+transactional SQLite store at `<hermes_data>/secrets/hermes_gpt_tokens.db`,
+0600; per-row AES-256-GCM ciphertext; keyring → key file → env key
+precedence) so a server restart does not invalidate credentials. No token
+material is ever written to the audit log or any MCP response. The
+`secrets/` directory is a denied path for all tools.
 
 ### Restart reconciliation (`hermes_swarm_reconcile`)
 

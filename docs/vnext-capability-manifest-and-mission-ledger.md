@@ -41,12 +41,17 @@ query time from the existing authoritative stores (it does not replace them):
 - kanban `task_events` — `<root>/kanban/boards/<slug>/kanban.db` (for the
   tasks owned by this mission's delegations)
 
-Every event gets a monotonic merged `cursor`; the stream is deterministic
-given the same store state, so `hermes_mission_ledger_replay` reproduces the
-mission's event history.
+Every event carries an opaque per-source watermark `cursor` (prefix `ld1.`);
+each authoritative source keeps its own stable monotonic sequence
+(`mission_events.seq`, `delegation_events.seq`, audit line number, kanban
+`rowid`), and the merge orders events without ever reordering within a source,
+so a late event with an older timestamp is still delivered after the watermark.
+The stream is deterministic given the same store state, so
+`hermes_mission_ledger_replay` reproduces the mission's event history.
 
 Args: `mission_id`, `source` (mission|delegation|audit|kanban, empty = all),
-`cursor` (resume after this append-only cursor), `limit`, `replay`. Allowlist
+`cursor` (opaque `next_cursor` token from a previous page, or 0 to start),
+`limit`, `replay`. Allowlist
 env: `HERMES_GPT_LEDGER_ALLOWED_SOURCES`.
 
 Read-only by construction: all SQLite sources open `mode=ro`; no mutation path
