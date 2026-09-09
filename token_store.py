@@ -147,10 +147,18 @@ def _rotate_active_key(hermes_root: Path) -> dict[str, Any]:
         if _store_key_in_keyring(fresh):
             return {"outcome": "rotated", "source": "keyring"}
         return {"outcome": "failed", "source": "keyring"}
-    # key file (or nothing yet): remove + regenerate
+    # key file (or nothing yet): rotate ATOMICALLY — generate and write the
+    # new key to a temp file, then rename over the old one. A failure at any
+    # point leaves the old key intact, so a reported rotation failure can
+    # truthfully say the old key remains active.
     try:
-        key_file_path(hermes_root).unlink(missing_ok=True)
-        _resolve_key(hermes_root)
+        fresh = secrets.token_bytes(32)
+        path = key_file_path(hermes_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".new")
+        tmp.write_bytes(fresh)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
     except Exception:
         return {"outcome": "failed", "source": "keyfile"}
     return {"outcome": "rotated", "source": "keyfile"}
@@ -360,6 +368,52 @@ def _decrypt_record(key: bytes, nonce: bytes, ciphertext: bytes) -> dict[str, An
     return data
 
 
+def _legacy_epoch_from_ledger_or_file(
+    hermes_root: Path, ledger_path: Path, epoch_path: Path
+) -> int:
+    """Revocation epoch from the legacy ledger (validated) or epoch file.
+
+    The ledger's value is authoritative when present and well-formed
+    (including negatives/booleans being fail-closed to 1)."""
+    if ledger_path.exists():
+        try:
+            data = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise TokenStoreError("legacy retirement ledger is corrupt") from exc
+        if isinstance(data, dict):
+            raw = data.get("revocation_epoch")
+            if raw is None:
+                return _read_legacy_epoch_locked(hermes_root, epoch_path)
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                return 1  # malformed -> fail closed
+            if raw < 0 or raw > _SQLITE_MAX_INT:
+                return 1
+            return raw
+    return _read_legacy_epoch_locked(hermes_root, epoch_path)
+
+
+def _parse_legacy_retired(hermes_root: Path, ledger_path: Path) -> list[str]:
+    """Parse the legacy retirement ledger's tombstone keys (fail closed).
+
+    An absent ledger means no tombstones. A present-but-corrupt ledger is a
+    hard error (unknown retirement history must not silently import live).
+    """
+    if not ledger_path.exists():
+        return []
+    try:
+        data = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise TokenStoreError("legacy retirement ledger is corrupt") from exc
+    if not isinstance(data, dict):
+        raise TokenStoreError("legacy retirement ledger is malformed")
+    retired = data.get("retired")
+    if retired is None:
+        return []
+    if not isinstance(retired, dict):
+        raise TokenStoreError("legacy retirement ledger is malformed")
+    return [str(k) for k in retired.keys()]
+
+
 def _read_legacy_epoch_locked(hermes_root: Path, epoch_path: Path) -> int:
     """Read the legacy epoch file inside the migration transaction.
 
@@ -405,11 +459,23 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
     epoch_path = _secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME
     if not env_path.exists():
         # No envelope anywhere: close migration so later stray files cannot
-        # be imported after revocation has happened. Preserve the legacy
-        # revocation epoch FIRST: a prior revocation deleted the envelope but
-        # its epoch fence must survive, or a stale peer could repersist
-        # pre-revocation credentials.
-        legacy_epoch = _read_legacy_epoch_locked(hermes_root, epoch_path)
+        # be imported after revocation has happened. But FIRST import any
+        # retirement tombstones from the ledger (a rotated token's hash may
+        # exist ONLY there) and preserve the legacy revocation epoch — a
+        # prior revocation deleted the envelope, yet both fences must
+        # survive, or a stale peer could repersist pre-revocation
+        # credentials.
+        tombstones = _parse_legacy_retired(hermes_root, ledger_path)
+        for ledger_key in tombstones:
+            exists = db.execute(
+                "SELECT 1 FROM tokens WHERE token_key=?", (ledger_key,)
+            ).fetchone()
+            if not exists:
+                db.execute(
+                    "INSERT INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,1,?)",
+                    (ledger_key, "retired", b"", b"", 0.0, now),
+                )
+        legacy_epoch = _legacy_epoch_from_ledger_or_file(hermes_root, ledger_path, epoch_path)
         have_epoch = db.execute(
             "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
         ).fetchone()

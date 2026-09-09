@@ -1377,3 +1377,54 @@ def test_revoke_rotation_failure_reported_as_failure(tmp_path: Path, monkeypatch
     assert result["key_rotated"] is False
     assert "FAILED" in result["key_rotation_note"]
     assert "env-managed" not in result["key_rotation_note"]
+
+
+def test_ledger_tombstones_survive_without_envelope(tmp_path: Path, monkeypatch):
+    """A retirement ledger + epoch with NO envelope must still import its
+    tombstones (the envelope-absent close path)."""
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    retired_value = "rotated-long-ago-refresh-token"
+    (root / "secrets" / token_store.LEGACY_LEDGER_FILENAME).write_text(
+        json.dumps(
+            {
+                "retired": {token_store.issue_key("refresh", retired_value): {"retired_at": 1.0}},
+                "revocation_epoch": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    token_store.commit_tokens(root, source_epoch=2, issue={})
+
+    import sqlite3
+
+    conn = sqlite3.connect(token_store._db_path(root))
+    row = conn.execute(
+        "SELECT retired FROM tokens WHERE token_key=?",
+        (token_store.issue_key("refresh", retired_value),),
+    ).fetchone()
+    conn.close()
+    assert row is not None and row[0] == 1, "ledger tombstone lost (no envelope)"
+    assert token_store.read_revocation_epoch(root) == 2
+
+    # Stale reissue of the retired value stays blocked.
+    config = _oauth_config()
+    stale = oauth_auth.OAuthState(config)
+    stale._hermes_root = root
+    stale._epoch = 2
+    stale.refresh_tokens[retired_value] = {"client_id": config.client_id, "scope": config.scope, "expires_at": time.time() + 3600}
+    stale.persist_tokens(root)
+    assert token_store.lookup_token(root, "refresh", retired_value) is None
+
+
+def test_corrupt_ledger_without_envelope_fails_closed(tmp_path: Path, monkeypatch):
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    (root / "secrets" / token_store.LEGACY_LEDGER_FILENAME).write_text(
+        "{corrupt!!", encoding="utf-8"
+    )
+    with pytest.raises(token_store.TokenStoreError):
+        token_store.commit_tokens(root, source_epoch=0, issue={})
