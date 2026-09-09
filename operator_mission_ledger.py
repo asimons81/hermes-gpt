@@ -154,12 +154,14 @@ def _read_mission_events(
             cols = {r[1] for r in conn.execute("PRAGMA table_info(mission_events)")}
             if "mission_id" not in cols:
                 return events
-            # Resume from the source-local watermark so pagination eventually
-            # delivers events beyond the first MAX_PER_SOURCE window.
+            # Resume from the source-local watermark so pagination
+            # eventually delivers events beyond the first window. Fetch one
+            # extra row: a full window then proves more events exist, so the
+            # envelope's `truncated` flag cannot falsely say "complete".
             rows = conn.execute(
                 "SELECT seq, event_type, from_status, to_status, reason_sha256, details_json, created_at "
                 "FROM mission_events WHERE mission_id=? AND seq>? ORDER BY seq ASC LIMIT ?",
-                (mission_id, since, MAX_PER_SOURCE),
+                (mission_id, since, MAX_PER_SOURCE + 1),
             ).fetchall()
             for row in rows:
                 details_json = (
@@ -218,7 +220,7 @@ def _read_delegation_events(
                 rows = conn.execute(
                     "SELECT seq, event_type, from_state, to_state, backend_state, observed_sha256, created_at "
                     "FROM delegation_events WHERE delegation_id=? AND seq>? ORDER BY seq ASC LIMIT ?",
-                    (delegation_id, since, MAX_PER_SOURCE),
+                    (delegation_id, since, MAX_PER_SOURCE + 1),
                 ).fetchall()
                 for row in rows:
                     events.append(
@@ -296,7 +298,7 @@ def _read_audit_events(
                         ),
                     }
                 )
-                if len(events) >= MAX_PER_SOURCE:
+                if len(events) > MAX_PER_SOURCE:
                     break
     except OSError:
         pass
@@ -332,7 +334,7 @@ def _read_kanban_events(
                     rows = conn.execute(
                         f"SELECT rowid AS source_rowid, task_id, kind, created_at, actor, summary FROM task_events "
                         f"WHERE task_id IN ({placeholders}) AND rowid>? ORDER BY rowid ASC LIMIT ?",
-                        (*sorted(task_ids), since, MAX_PER_SOURCE),
+                        (*sorted(task_ids), since, MAX_PER_SOURCE + 1),
                     ).fetchall()
                     for row in rows:
                         task_id = str(row["task_id"])

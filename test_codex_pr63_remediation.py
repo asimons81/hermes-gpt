@@ -814,18 +814,117 @@ def test_exchange_fails_loud_when_persistence_fails(tmp_path: Path):
         resource=config.resource,
         code_challenge="",
     )
-    # Corrupt the store so the strict persist must fail.
-    token_store._db_path(root).write_bytes(b"corrupt-not-sqlite" * 8)
-    def _boom(st, kind):
-        st.persist_tokens(root)
-    oauth_auth.set_persist_hook(_boom)
+    # Break durable persistence AFTER the code decodes: the store exists
+    # (epoch readable) but commits fail.
+    calls = {"n": 0}
+
+    def _failing_persist(st, kind):
+        calls["n"] += 1
+        raise token_store.TokenStoreError("injected persistence failure")
+
+    oauth_auth.set_persist_hook(_failing_persist)
     try:
-        with pytest.raises(oauth_auth.OAuthError):
+        with pytest.raises(oauth_auth.OAuthError) as excinfo:
             state.exchange_authorization_code(
                 code=code,
                 client_id=config.client_id,
                 redirect_uri=config.redirect_uris[0],
                 code_verifier="",
             )
+        assert excinfo.value.error in ("temporarily_unavailable", "invalid_grant")
     finally:
         oauth_auth.set_persist_hook(None)
+    assert calls["n"] >= 1, "strict hook must have been invoked"
+    # No uncommitted credentials remain in the live caches.
+    assert not state.access_tokens
+
+
+def test_startup_restore_migrates_legacy_envelope(tmp_path: Path):
+    """restore_tokens() must run the legacy migration BEFORE loading, so an
+    upgrade restores existing credentials without needing a prior write."""
+    import pytest as _pytest
+
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True)
+    config = _oauth_config()
+    mp = _pytest.MonkeyPatch()
+    mp.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    try:
+        refresh, ritem = oauth_auth.OAuthState(config)._new_refresh_token(
+            client_id=config.client_id, scope=config.scope
+        )
+        token_store.save_tokens(
+            root, {"refresh_tokens": {refresh: dict(ritem)}}
+        )
+        # Startup restore on the legacy root migrates + restores.
+        state = oauth_auth.OAuthState(config)
+        summary = state.restore_tokens(root)
+        assert summary["restored"] >= 1, summary
+        assert refresh in state.refresh_tokens
+        # The legacy artifact is gone after the migration committed.
+        assert not token_store._legacy_envelope_path(root).exists()
+    finally:
+        mp.undo()
+
+
+def test_ledger_full_window_reports_truncated(tmp_path: Path):
+    """A source holding exactly MAX_PER_SOURCE+1 events must not claim
+    completeness at limit=MAX_PER_SOURCE (lookahead signal)."""
+    import operator_mission_ledger as ld
+    import operator_mission_runtime as mission
+
+    root = tmp_path / "hermes"
+    root.mkdir(parents=True)
+    mid = "msn-trunc"
+    conn = mission._connect(mission._db_path(root), write=True)
+    conn.execute(
+        "INSERT INTO missions (mission_id, spec_json, status, version, approval_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+        (mid, "{}", "running", 1, "{}", "2026-09-08T00:00:00+00:00", "2026-09-08T00:00:00+00:00"),
+    )
+    n = ld.MAX_PER_SOURCE + 1
+    for i in range(1, n + 1):
+        conn.execute(
+            "INSERT INTO mission_events (mission_id, event_type, from_status, to_status, reason_sha256, details_json, created_at) VALUES (?,?,?,?,?,?,?)",
+            (mid, f"ev.{i}", "running", "running", "f" * 64, "{}", f"2026-09-08T00:{i//60:02d}:{i%60:02d}+00:00"),
+        )
+    conn.commit()
+    conn.close()
+
+    out = json.loads(ld.hermes_mission_ledger(mid, cursor=0, limit=ld.MAX_PER_SOURCE, hermes_root=root))
+    assert out["count_returned"] == ld.MAX_PER_SOURCE
+    assert out["truncated"] is True
+    # Resuming from next_cursor must deliver the remaining event.
+    out2 = json.loads(ld.hermes_mission_ledger(mid, cursor=out["next_cursor"], limit=100, hermes_root=root))
+    assert out2["count_returned"] == 1
+    assert out2["truncated"] is False
+
+
+def test_structurally_invalid_legacy_ledger_fails_closed(tmp_path: Path):
+    """A legacy ledger whose 'retired' key parses as JSON but is not a dict
+    must abort the import (no silent fail-open)."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    token, item = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[token] = item
+    state.persist_tokens(root)
+
+    root2 = tmp_path / "hermes2"
+    (root2 / "secrets").mkdir(parents=True)
+    import pytest as _pytest
+
+    mp = _pytest.MonkeyPatch()
+    mp.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    try:
+        token_store.save_tokens(root2, {"access_tokens": {token: dict(item)}})
+        (root2 / "secrets" / token_store.LEGACY_LEDGER_FILENAME).write_text(
+            json.dumps({"retired": [], "revocation_epoch": 0}), encoding="utf-8"
+        )
+        with pytest.raises(token_store.TokenStoreError):
+            token_store.commit_tokens(root2, source_epoch=0, issue={})
+        assert token_store.lookup_token(root2, "access", token) is None
+    finally:
+        mp.undo()

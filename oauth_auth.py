@@ -491,7 +491,22 @@ class OAuthState:
             self.refresh_tokens[refresh_value] = refresh_item
         # Durable persistence is part of the exchange contract in server
         # mode: never hand out credentials that were not durably committed.
-        _run_persist_hook_strict(self, "authorization_code")
+        try:
+            _run_persist_hook_strict(self, "authorization_code")
+        except OAuthError:
+            self.access_tokens.pop(access_value, None)
+            if refresh_item is not None:
+                self.refresh_tokens.pop(refresh_value, None)
+            raise
+        except Exception as exc:
+            self.access_tokens.pop(access_value, None)
+            if refresh_item is not None:
+                self.refresh_tokens.pop(refresh_value, None)
+            raise OAuthError(
+                "temporarily_unavailable",
+                "Token persistence failed; no credentials were issued.",
+                status_code=503,
+            ) from exc
         return response
 
     def validate_refresh_token_grant(self, refresh_token: str, client_id: str) -> dict[str, Any]:
@@ -734,6 +749,13 @@ class OAuthState:
         if not hermes_root:
             hermes_root = Path.home() / ".hermes"
         self._hermes_root = Path(hermes_root)
+        # Complete the legacy -> SQLite migration BEFORE loading, so an
+        # upgrade restores existing credentials instead of seeing an empty
+        # store (an empty no-op commit runs the transactional migration).
+        try:
+            token_store.commit_tokens(hermes_root, source_epoch=0, issue={})
+        except token_store.TokenStoreError:
+            pass  # corrupt/unmigratable store: fail closed below
         self._epoch = token_store.read_revocation_epoch(hermes_root)
         bundle = token_store.load_live_tokens(hermes_root)
         if not bundle:
@@ -1028,3 +1050,14 @@ async def token(request: Request, state: OAuthState) -> JSONResponse:
         return _error_response(OAuthError("invalid_request", "Token request is malformed."))
     except OAuthError as exc:
         return _error_response(exc)
+    except Exception as exc:  # noqa: BLE001
+        # Strict durable persistence failures (and anything else unexpected)
+        # surface as a bounded OAuth error, never an unhandled 500 after the
+        # authorization code was consumed.
+        return _error_response(
+            OAuthError(
+                "temporarily_unavailable",
+                "The authorization server could not persist the token.",
+                status_code=503,
+            )
+        )

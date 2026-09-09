@@ -358,7 +358,19 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
         # Fail closed: retirement history cannot be established.
         raise TokenStoreError("legacy retirement ledger is corrupt; refusing to import")
     retired_keys = legacy_ledger.get("retired")
-    retired = retired_keys if isinstance(retired_keys, dict) else {}
+    if retired_keys is None:
+        retired = {}
+    elif not isinstance(retired_keys, dict):
+        # Parsed but structurally invalid: retirement history cannot be
+        # established. Fail closed instead of importing everything live.
+        raise TokenStoreError("legacy retirement ledger is malformed; refusing to import")
+    else:
+        retired = retired_keys
+    legacy_epoch_raw = legacy_ledger.get("revocation_epoch")
+    if legacy_epoch_raw is not None and (
+        isinstance(legacy_epoch_raw, bool) or not isinstance(legacy_epoch_raw, int)
+    ):
+        raise TokenStoreError("legacy retirement ledger is malformed; refusing to import")
     migrated = 0
     for kind in ("access", "refresh"):
         section = bundle.get(f"{kind}_tokens")
