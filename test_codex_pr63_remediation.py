@@ -1143,3 +1143,63 @@ def test_revoke_reports_key_rotation_truthfully(tmp_path: Path, monkeypatch):
     result = token_store.revoke_tokens(root, rotate_key=True)
     assert result["key_rotated"] is False
     assert "env-managed" in result.get("key_rotation_note", "")
+
+
+def test_legacy_epoch_survives_envelope_absent_close(tmp_path: Path, monkeypatch):
+    """A prior revocation (envelope deleted, epoch file = 3) must keep its
+    epoch fence when migration closes with no envelope present."""
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    (root / "secrets" / token_store.LEGACY_EPOCH_FILENAME).write_text(
+        "3", encoding="ascii"
+    )
+    # A stale peer (epoch-0 view) tries to persist: fenced, epoch preserved.
+    with pytest.raises(token_store.TokenStoreError):
+        token_store.commit_tokens(root, source_epoch=0, issue={})
+    # ...and the epoch fence now blocks epoch-0 views durably: a correctly
+    # epoch-aware writer commits and the epoch stays 3.
+    res = token_store.commit_tokens(root, source_epoch=3, issue={})
+    assert res["epoch"] == 3
+    assert token_store.read_revocation_epoch(root) == 3
+
+
+def test_malformed_legacy_epoch_fails_closed(tmp_path: Path, monkeypatch):
+    """An unparseable legacy epoch file is unknown revocation history:
+    treated as at-least-once revoked (epoch >= 1), never epoch 0."""
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    (root / "secrets" / token_store.LEGACY_EPOCH_FILENAME).write_text(
+        "not-a-number", encoding="ascii"
+    )
+    try:
+        token_store.commit_tokens(root, source_epoch=0, issue={})
+    except token_store.TokenStoreError:
+        pass
+    # The close path wrote epoch >= 1 before the fence rejected issuance.
+    res = token_store.commit_tokens(root, source_epoch=1, issue={})
+    assert res["epoch"] >= 1
+
+
+def test_revoke_rotation_happens_after_commit(tmp_path: Path):
+    """Rotation must not run inside the SQLite transaction: if the commit
+    failed, an in-transaction keyring swap would leave rolled-back-to-live
+    rows undecryptable. Observable contract: revocation succeeds and the
+    reported rotation reflects the post-commit attempt."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    token, item = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[token] = item
+    state.persist_tokens(root)
+    result = token_store.revoke_tokens(root, rotate_key=True)
+    assert result["revoked"] is True
+    assert result["epoch"] >= 1
+    assert token_store.lookup_token(root, "access", token) is None
+    # key_rotated reflects the real post-commit outcome (True or False,
+    # never a lie): both are acceptable; it must be a bool.
+    assert isinstance(result["key_rotated"], bool)

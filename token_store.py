@@ -323,6 +323,24 @@ def _decrypt_record(key: bytes, nonce: bytes, ciphertext: bytes) -> dict[str, An
     return data
 
 
+def _read_legacy_epoch_locked(hermes_root: Path, epoch_path: Path) -> int:
+    """Read the legacy epoch file inside the migration transaction.
+
+    Fail-closed on malformed data: an unparseable epoch means unknown
+    revocation history, which is treated as at-least-once revoked (epoch 1)
+    rather than never-revoked (epoch 0).
+    """
+    if not epoch_path.exists():
+        return 0
+    try:
+        value = int(epoch_path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return 1
+    if value < 0 or value > _SQLITE_MAX_INT:
+        return 1
+    return value
+
+
 def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes, kid: str, now: float) -> int:
     """One-time import of the legacy JSON envelope (and hash ledger) into the DB.
 
@@ -350,7 +368,19 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
     epoch_path = _secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME
     if not env_path.exists():
         # No envelope anywhere: close migration so later stray files cannot
-        # be imported after revocation has happened.
+        # be imported after revocation has happened. Preserve the legacy
+        # revocation epoch FIRST: a prior revocation deleted the envelope but
+        # its epoch fence must survive, or a stale peer could repersist
+        # pre-revocation credentials.
+        legacy_epoch = _read_legacy_epoch_locked(hermes_root, epoch_path)
+        have_epoch = db.execute(
+            "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        if not have_epoch and legacy_epoch > 0:
+            db.execute(
+                "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
+                (str(legacy_epoch),),
+            )
         db.execute(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:empty')"
         )
@@ -359,12 +389,31 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
         envelope = load_envelope(hermes_root)
         bundle = decrypt_envelope(envelope, hermes_root) if envelope else {}
     except TokenStoreError:
-        # Corrupt/undecryptable legacy store: close migration, keep files.
+        # Corrupt/undecryptable legacy store: close migration, keep files,
+        # but still preserve any legacy revocation epoch.
+        legacy_epoch = _read_legacy_epoch_locked(hermes_root, epoch_path)
+        have_epoch = db.execute(
+            "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        if not have_epoch and legacy_epoch > 0:
+            db.execute(
+                "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
+                (str(legacy_epoch),),
+            )
         db.execute(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:corrupt')"
         )
         return 0
     if not isinstance(bundle, dict):
+        legacy_epoch = _read_legacy_epoch_locked(hermes_root, epoch_path)
+        have_epoch = db.execute(
+            "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        if not have_epoch and legacy_epoch > 0:
+            db.execute(
+                "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
+                (str(legacy_epoch),),
+            )
         db.execute(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:corrupt')"
         )
@@ -915,10 +964,14 @@ def _legacy_flat_records(bundle: dict[str, Any]) -> list[dict[str, Any]]:
 def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, Any]:
     """Revoke durable tokens in one SQLite transaction.
 
-    Marks every live token retired, advances the durable revocation epoch,
-    and (when requested) rotates the master key INSIDE the same write
-    transaction, so no commit can slip between the epoch bump and the key
-    swap and leave an undecryptable envelope behind. Also removes legacy
+    Marks every live token retired and advances the durable revocation epoch
+    in one SQLite transaction; when requested, rotates the ACTIVE master-key
+    source AFTER the commit (SQLite cannot roll back an external key
+    mutation, and a failed commit after an in-transaction rotation would
+    leave resurrected live rows undecryptable). Post-commit there are no
+    live rows left to lose. A grant racing the rotation window either
+    completes under the old key and fails closed on lookup, or starts after
+    and uses the new key — never a silent bypass. Also removes legacy
     artifacts. Returns a bounded summary; never exposes token material.
     """
     now = time.time()
@@ -941,15 +994,17 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
         db.execute(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:revoked')"
         )
+        db.execute("COMMIT")
         rotated = False
         if rotate_key:
-            # Rotate the ACTIVE key source while still holding the write
-            # lock: any concurrent commit either completed before us (its
-            # tokens are now retired) or waits and then sees the bumped
-            # epoch and is refused. Honest reporting: env-managed keys
+            # Rotate the ACTIVE key source only AFTER the transaction
+            # committed: SQLite cannot roll back an external key mutation,
+            # and rotating mid-transaction would leave still-live rows
+            # undecryptable if the commit then failed. Post-commit there are
+            # no live rows left to lose (every token was retired above), so
+            # the new key starts clean. Honest reporting: env-managed keys
             # cannot be rotated from here.
             rotated = _rotate_active_key(hermes_root)
-        db.execute("COMMIT")
     except sqlite3.Error as exc:
         try:
             db.execute("ROLLBACK")
