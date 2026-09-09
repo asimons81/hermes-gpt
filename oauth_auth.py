@@ -84,6 +84,19 @@ def _run_persist_hook(state: "OAuthState", kind: str) -> None:
         pass
 
 
+def _run_persist_hook_strict(state: "OAuthState", kind: str) -> None:
+    """Persist or fail the exchange.
+
+    Durable persistence is part of the exchange contract in server mode:
+    returning credentials that were never persisted would hand the client
+    tokens that die on the next validation. When no store is bound the call
+    is a no-op (pure in-memory mode).
+    """
+    if _persist_hook is None:
+        return
+    _persist_hook(state, kind)
+
+
 def _base64url_encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
@@ -100,6 +113,14 @@ def _base64url_decode(value: str) -> bytes:
 
 ACCESS_TOKEN_PREFIX = "hg.at.v1."
 _ACCESS_TOKEN_MAC_CONTEXT = b"hermes-gpt.oauth.access.v1\0"
+
+
+def _durable_record(kind: str, value: str, item: dict[str, Any]) -> dict[str, Any]:
+    """Token item carrying the internal markers the store needs to file it."""
+    record = dict(item)
+    record["_kind"] = kind
+    record["_token_value"] = value
+    return record
 
 
 class OAuthError(RuntimeError):
@@ -492,11 +513,37 @@ class OAuthState:
             resource=self.config.resource,
         )
         rotated_value, rotated_item = self._new_refresh_token(client_id=client_id, scope=scope)
+
+        if self._hermes_root is not None:
+            # Atomic consume+issue: the presented refresh token is retired
+            # and its replacements published in ONE transaction, so racing
+            # peers cannot both spend the same token.
+            import token_store
+
+            try:
+                token_store.exchange_commit(
+                    self._hermes_root,
+                    source_epoch=self._epoch,
+                    presented_kind="refresh",
+                    presented_value=refresh_token,
+                    issue={
+                        token_store.issue_key("access", access_value): _durable_record("access", access_value, access_item),
+                        token_store.issue_key("refresh", rotated_value): _durable_record("refresh", rotated_value, rotated_item),
+                    },
+                )
+            except token_store.TokenStoreError as exc:
+                # Revoked/stale/spent: the exchange fails without publishing.
+                self.refresh_tokens.pop(refresh_token, None)
+                self.access_tokens.pop(access_value, None)
+                self._sync_epoch_for_fresh_grant()
+                raise OAuthError(
+                    "invalid_grant",
+                    "Refresh token could not be durably exchanged.",
+                ) from exc
         self.refresh_tokens.pop(refresh_token, None)
         self._retired_refresh_tokens.add(refresh_token)
         self.refresh_tokens[rotated_value] = rotated_item
         self.access_tokens[access_value] = access_item
-        _run_persist_hook(self, "refresh")
         return {
             "access_token": access_value,
             "token_type": "Bearer",
@@ -614,16 +661,10 @@ class OAuthState:
         issue: dict[str, dict[str, Any]] = {}
         for value, item in self.access_tokens.items():
             if item.get("expires_at", 0) > now:
-                record = dict(item)
-                record["_kind"] = "access"
-                record["_token_value"] = value
-                issue[token_store.issue_key("access", value)] = record
+                issue[token_store.issue_key("access", value)] = _durable_record("access", value, item)
         for value, item in self.refresh_tokens.items():
             if item.get("expires_at", 0) > now:
-                record = dict(item)
-                record["_kind"] = "refresh"
-                record["_token_value"] = value
-                issue[token_store.issue_key("refresh", value)] = record
+                issue[token_store.issue_key("refresh", value)] = _durable_record("refresh", value, item)
         retire: dict[str, list[str]] = {}
         if self._retired_refresh_tokens:
             retire["refresh"] = list(self._retired_refresh_tokens)

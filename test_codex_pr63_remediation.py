@@ -333,7 +333,8 @@ def test_peer_cannot_resurrect_revoked_tokens_after_revocation(tmp_path: Path):
     with pytest.raises(token_store.TokenStoreError):
         peer.persist_tokens(root)
     # Nothing was resurrected durably.
-    assert token_store.load_tokens(root) == {}
+    durable = token_store.load_tokens(root)
+    assert token not in (durable.get("access_tokens") or {})
 
 
 def test_revocation_rotates_authorization_code_key(tmp_path: Path):
@@ -558,6 +559,7 @@ def test_stale_peer_cannot_reissue_retired_refresh(tmp_path: Path):
     with pytest.raises(oauth_auth.OAuthError) as excinfo:
         b.validate_refresh_token_grant(refresh, config.client_id)
     assert excinfo.value.error == "invalid_grant"
+    assert token_store.lookup_token(root, "refresh", refresh) is None
     # The new rotated token is the one that works (a peer that syncs from
     # the durable store picks it up).
     fresh_peer = oauth_auth.OAuthState(config)
@@ -581,11 +583,17 @@ def test_expired_tokens_are_pruned_from_durable_store(tmp_path: Path):
     state.persist_tokens(root)
     assert old in token_store.load_tokens(root)["refresh_tokens"]
 
-    # Force-expire it inside the durable envelope only (simulating the
-    # passage of time with no further access by this process).
-    bundle = token_store.load_tokens(root)
-    bundle["refresh_tokens"][old]["expires_at"] = time.time() - 100
-    token_store.save_tokens(root, bundle)
+    # Force-expire it inside the durable store only (simulating the passage
+    # of time with no further access by this process).
+    import sqlite3
+
+    conn = sqlite3.connect(token_store._db_path(root))
+    conn.execute(
+        "UPDATE tokens SET expires_at=? WHERE token_key=?",
+        (time.time() - 100, token_store.issue_key("refresh", old)),
+    )
+    conn.commit()
+    conn.close()
 
     other = oauth_auth.OAuthState(config)
     other.restore_tokens(root)
@@ -595,9 +603,8 @@ def test_expired_tokens_are_pruned_from_durable_store(tmp_path: Path):
     other.access_tokens[tn] = tin
     other.persist_tokens(root)
 
-    bundle2 = token_store.load_tokens(root)
-    assert old not in bundle2["refresh_tokens"], "expired token survived a commit"
-    assert tn in bundle2["access_tokens"]
+    assert token_store.lookup_token(root, "refresh", old) is None, "expired token survived a commit"
+    assert token_store.lookup_token(root, "access", tn) is not None
 
 
 def test_concurrent_commits_and_revocation_are_serialized(tmp_path: Path):

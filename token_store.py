@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import secrets
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -211,133 +212,195 @@ def save_tokens(hermes_root: Path, tokens: dict[str, Any]) -> dict[str, Any]:
     return {"kid": kid, "source": source, "path": str(envelope_path(hermes_root))}
 
 
-REVOCATION_EPOCH_FILENAME = "hermes_gpt_token_epoch"
-LEDGER_FILENAME = "hermes_gpt_token_ledger"
+DB_FILENAME = "hermes_gpt_tokens.db"
+LEGACY_ENVELOPE_FILENAME = "hermes_gpt_tokens.json"
+LEGACY_EPOCH_FILENAME = "hermes_gpt_token_epoch"
+LEGACY_LEDGER_FILENAME = "hermes_gpt_token_ledger"
 _SQLITE_MAX_INT = 2**63 - 1
-
-
-def _ledger_path(hermes_root: Path) -> Path:
-    return _secrets_dir(hermes_root) / LEDGER_FILENAME
-
-
-def _ledger_lock_path(hermes_root: Path) -> Path:
-    return _secrets_dir(hermes_root) / (LEDGER_FILENAME + ".lock")
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS token_meta (
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tokens (
+    token_key TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    nonce BLOB NOT NULL,
+    ciphertext BLOB NOT NULL,
+    expires_at REAL NOT NULL,
+    retired INTEGER NOT NULL DEFAULT 0,
+    retired_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_tokens_expiry ON tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_tokens_kind ON tokens(kind, retired);
+"""
 
 
 def _token_key(kind: str, token_value: str) -> str:
-    """Stable ledger key: opaque hash of the token value (never the value)."""
+    """Stable row key: opaque hash of the token value (never the value)."""
     digest = hashlib.sha256(f"{kind}\0{token_value}".encode("utf-8")).hexdigest()
     return "sha256:" + digest
 
 
-class _FileLock:
-    """Advisory interprocess lock via O_CREAT|O_EXCL with stale breaking.
+def issue_key(kind: str, token_value: str) -> str:
+    """Row key for an access/refresh token value."""
+    return _token_key(kind, token_value)
 
-    Adequate for the sidecar's low write rate: a lock older than the TTL is
-    treated as crashed and broken. Every critical section is short, and all
-    mutation of the envelope + ledger happens while holding it, which is
-    what makes revoke-vs-commit interleavings impossible.
+
+def _db_path(hermes_root: Path) -> Path:
+    return _secrets_dir(hermes_root) / DB_FILENAME
+
+
+def _legacy_envelope_path(hermes_root: Path) -> Path:
+    return _secrets_dir(hermes_root) / LEGACY_ENVELOPE_FILENAME
+
+
+def _connect(hermes_root: Path) -> sqlite3.Connection:
+    """Open the token DB read-write; initializes the schema. Fails closed.
+
+    Raises TokenStoreError when the database is unreadable/corrupt — callers
+    treat tokens as invalid rather than falling back to permissive behavior.
     """
-
-    def __init__(self, path: Path, ttl: float = 10.0) -> None:
-        self.path = path
-        self.ttl = ttl
-        self.acquired = False
-
-    def __enter__(self) -> "_FileLock":
-        deadline = time.monotonic() + self.ttl
-        while True:
-            try:
-                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode("ascii"))
-                os.close(fd)
-                self.acquired = True
-                return self
-            except FileExistsError:
-                try:
-                    age = time.time() - self.path.stat().st_mtime
-                except OSError:
-                    age = 0.0
-                if age > self.ttl:
-                    try:
-                        self.path.unlink()
-                    except OSError:
-                        pass
-                    continue
-                if time.monotonic() > deadline:
-                    raise TokenStoreError("token ledger lock is busy")
-                time.sleep(0.01)
-
-    def __exit__(self, *exc: Any) -> None:
-        if self.acquired:
-            try:
-                self.path.unlink()
-            except OSError:
-                pass
-
-
-def _read_ledger_raw(hermes_root: Path) -> dict[str, Any]:
-    """Read the ledger file; {} when absent or corrupt."""
-    path = _ledger_path(hermes_root)
-    if not path.exists():
-        return {}
+    path = _db_path(hermes_root)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(path, timeout=15.0, isolation_level=None)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=FULL")
+        db.execute("PRAGMA busy_timeout=15000")
+        db.executescript(_SCHEMA)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return db
+    except sqlite3.Error as exc:
+        raise TokenStoreError(f"token database unavailable: {exc}") from exc
 
 
-def _write_ledger_raw(hermes_root: Path, ledger: dict[str, Any]) -> None:
-    d = _secrets_dir(hermes_root)
-    d.mkdir(parents=True, exist_ok=True)
-    path = _ledger_path(hermes_root)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(
-        json.dumps(ledger, ensure_ascii=False, sort_keys=True), encoding="utf-8"
+def _encrypt_record(key: bytes, record: dict[str, Any]) -> tuple[bytes, bytes]:
+    nonce = secrets.token_bytes(12)
+    ct = AESGCM(key).encrypt(
+        nonce,
+        json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+        None,
     )
-    os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    return nonce, ct
+
+
+def _decrypt_record(key: bytes, nonce: bytes, ciphertext: bytes) -> dict[str, Any]:
+    plaintext = AESGCM(key).decrypt(nonce, ciphertext, None)
+    data = json.loads(plaintext.decode("utf-8"))
+    if not isinstance(data, dict):
+        raise TokenStoreError("token record plaintext is not an object")
+    return data
+
+
+def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes, kid: str, now: float) -> int:
+    """One-time import of the legacy JSON envelope (and hash ledger) into the DB.
+
+    Runs inside the caller's write transaction. The legacy envelope's raw
+    values are preserved as encrypted rows; legacy ledger retirement marks
+    are preserved so rotated/revoked tokens stay dead.
+    """
+    env_path = _legacy_envelope_path(hermes_root)
+    if not env_path.exists():
+        return 0
     try:
-        os.chmod(path, 0o600)
+        envelope = load_envelope(hermes_root)
+        bundle = decrypt_envelope(envelope, hermes_root) if envelope else {}
+    except TokenStoreError:
+        # Corrupt/undecryptable legacy store: keep it dead (fail closed).
+        return 0
+    if not isinstance(bundle, dict):
+        return 0
+    legacy_ledger: dict[str, Any] = {}
+    ledger_path = _secrets_dir(hermes_root) / LEGACY_LEDGER_FILENAME
+    if ledger_path.exists():
+        try:
+            data = json.loads(ledger_path.read_text(encoding="utf-8"))
+            legacy_ledger = data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            # Retire everything we cannot reason about: fail closed.
+            legacy_ledger = {"retired": "__corrupt__"}
+    retired_keys = legacy_ledger.get("retired")
+    retired = retired_keys if isinstance(retired_keys, dict) else {}
+    migrated = 0
+    for kind in ("access", "refresh"):
+        section = bundle.get(f"{kind}_tokens")
+        if not isinstance(section, dict):
+            continue
+        for value, item in section.items():
+            if not (isinstance(item, dict) and item.get("expires_at", 0) > now):
+                continue
+            row_key = _token_key(kind, value)
+            exists = db.execute(
+                "SELECT 1 FROM tokens WHERE token_key=?", (row_key,)
+            ).fetchone()
+            if exists:
+                continue
+            if row_key in retired:
+                db.execute(
+                    "INSERT OR REPLACE INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,1,?)",
+                    (row_key, kind, b"", b"", item.get("expires_at", 0), now),
+                )
+                continue
+            nonce, ct = _encrypt_record(key, dict(item))
+            db.execute(
+                "INSERT OR REPLACE INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,0,NULL)",
+                (row_key, kind, nonce, ct, item.get("expires_at", 0)),
+            )
+            migrated += 1
+    # Preserve the legacy revocation epoch when the DB has none.
+    have_epoch = db.execute(
+        "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
+    ).fetchone()
+    if not have_epoch:
+        legacy_epoch = 0
+        if isinstance(legacy_ledger.get("revocation_epoch"), int):
+            legacy_epoch = legacy_ledger["revocation_epoch"]
+        else:
+            epoch_path = _secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME
+            if epoch_path.exists():
+                try:
+                    legacy_epoch = int(epoch_path.read_text(encoding="ascii").strip())
+                except (OSError, ValueError):
+                    legacy_epoch = 1  # unknown history -> treat as revoked once
+        db.execute(
+            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
+            (str(max(0, legacy_epoch)),),
+        )
+    # Legacy artifacts are superseded; keep the secrets dir clean.
+    try:
+        env_path.unlink(missing_ok=True)
+        (_secrets_dir(hermes_root) / LEGACY_LEDGER_FILENAME).unlink(missing_ok=True)
+        (_secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME).unlink(missing_ok=True)
     except OSError:
         pass
-
-
-def _ledger_alive(hermes_root: Path, kind: str, token_value: str, now: float) -> bool:
-    """Retirement gate ONLY: the ledger records what was retired/revoked.
-
-    Presence is deliberately NOT required from the ledger: envelopes written
-    before the ledger existed (older releases) carry live tokens with no
-    ledger entry, and they must keep validating. The ledger's job is the
-    revocation/rotation tombstone, which survives envelope rewrites.
-    """
-    ledger = _read_ledger_raw(hermes_root)
-    retired = ledger.get("retired") if isinstance(ledger.get("retired"), dict) else {}
-    key = _token_key(kind, token_value)
-    if key in retired:
-        return False
-    return True
+    return migrated
 
 
 def read_revocation_epoch(hermes_root: Path) -> int:
     """Current durable revocation epoch (monotonic; 0 = never revoked).
 
-    Lives in the ledger so revocation advances it inside the same locked
-    transaction; survives envelope deletion, so any process (including a
-    clustered peer that never saw the revocation event) can detect that the
-    tokens it still holds in memory predate a revocation.
+    Fails closed on a corrupt database by raising TokenStoreError.
     """
-    ledger = _read_ledger_raw(hermes_root)
-    value = ledger.get("revocation_epoch", 0)
-    if isinstance(value, bool) or not isinstance(value, int):
+    if not _db_path(hermes_root).exists():
         return 0
-    return value if 0 <= value <= _SQLITE_MAX_INT else 0
-
-
-def issue_key(kind: str, token_value: str) -> str:
-    """Ledger key for an access/refresh token value."""
-    return _token_key(kind, token_value)
+    try:
+        db = _connect(hermes_root)
+    except TokenStoreError:
+        raise
+    try:
+        row = db.execute(
+            "SELECT value FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        return int(row["value"]) if row else 0
+    except (sqlite3.Error, ValueError) as exc:
+        raise TokenStoreError(f"token database unreadable: {exc}") from exc
+    finally:
+        db.close()
 
 
 def lookup_token(
@@ -345,43 +408,65 @@ def lookup_token(
 ) -> dict[str, Any] | None:
     """Return the durable record for a live token, or None.
 
-    The plaintext ledger decides liveness (hash present, not retired, not
-    expired); the record body (client_id/scope/resource/expiry) is read from
-    the encrypted envelope. None when the token is unknown, expired, or
-    retired (revoked/rotated).
+    None when the token is unknown, expired, or retired (revoked/rotated).
+    Raises TokenStoreError when the store is unreadable — callers fail
+    closed instead of treating corruption as permission.
     """
-    now = time.time()
-    if not _ledger_alive(hermes_root, kind, token_value, now):
+    row_key = _token_key(kind, token_value)
+    db = _connect(hermes_root)
+    try:
+        row = db.execute(
+            "SELECT nonce,ciphertext,expires_at,retired FROM tokens WHERE token_key=?",
+            (row_key,),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        raise TokenStoreError(f"token database unreadable: {exc}") from exc
+    finally:
+        db.close()
+    if not row or row["retired"] or row["expires_at"] <= time.time():
         return None
-    bundle = load_tokens(hermes_root)
-    section = bundle.get(f"{kind}_tokens") if isinstance(bundle, dict) else None
-    item = (section or {}).get(token_value) if isinstance(section, dict) else None
-    if isinstance(item, dict) and item.get("expires_at", 0) > now:
-        return item
-    return None
+    try:
+        key, _, _ = _resolve_key_parts(hermes_root)
+        return _decrypt_record(key, row["nonce"], row["ciphertext"])
+    except Exception as exc:
+        raise TokenStoreError("token record could not be decrypted") from exc
 
 
 def load_live_tokens(hermes_root: Path) -> dict[str, Any]:
-    """Envelope bundle filtered to live (unretired, unexpired) tokens."""
+    """All live records, grouped envelope-style ({access_tokens, refresh_tokens}).
+
+    Raises TokenStoreError on corruption (fail closed).
+    """
     now = time.time()
-    bundle = load_tokens(hermes_root)
-    if not isinstance(bundle, dict):
-        return {}
-    out: dict[str, Any] = {}
-    for kind in ("access", "refresh"):
-        section = bundle.get(f"{kind}_tokens")
-        if not isinstance(section, dict):
+    db = _connect(hermes_root)
+    try:
+        rows = db.execute(
+            "SELECT token_key,kind,nonce,ciphertext,expires_at FROM tokens WHERE retired=0 AND expires_at>?",
+            (now,),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise TokenStoreError(f"token database unreadable: {exc}") from exc
+    finally:
+        db.close()
+    key, _, _ = _resolve_key_parts(hermes_root)
+    out: dict[str, Any] = {"access_tokens": {}, "refresh_tokens": {}}
+    for row in rows:
+        try:
+            record = _decrypt_record(key, row["nonce"], row["ciphertext"])
+        except Exception:
             continue
-        live = {
-            value: item
-            for value, item in section.items()
-            if isinstance(item, dict)
-            and item.get("expires_at", 0) > now
-            and _ledger_alive(hermes_root, kind, value, now)
-        }
-        if live:
-            out[f"{kind}_tokens"] = live
+        section = out.get(f"{row['kind']}_tokens")
+        if isinstance(section, dict):
+            value = record.get("_token_value")
+            if isinstance(value, str) and value:
+                clean = {k: v for k, v in record.items() if not k.startswith("_")}
+                section[value] = clean
     return out
+
+
+def _resolve_key_parts(hermes_root: Path) -> tuple[bytes, str, str]:
+    key, kid, source = _resolve_key(hermes_root)
+    return key, kid, source
 
 
 def commit_tokens(
@@ -391,112 +476,172 @@ def commit_tokens(
     issue: dict[str, dict[str, Any]] | None = None,
     retire: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
-    """Atomically commit token issuance/retirement under the ledger lock.
+    """Atomically commit token issuance/retirement in one SQLite transaction.
 
-    ``issue`` maps ledger keys (:func:`issue_key`) to the caller's token
-    records. ``retire`` maps a kind (``"access"``/``"refresh"``) to the list
-    of raw token values being consumed/rotated.
-
-    The complete epoch-check + merge + write of BOTH the encrypted envelope
-    and the plaintext ledger runs while holding the interprocess lock, so it
-    can never interleave with a concurrent revocation (which takes the same
-    lock). ``source_epoch`` fences off commits built on a pre-revocation
-    view.
-
-    Retirement is authoritative and permanent: once a token hash is retired,
-    a later commit from a stale peer cache can never resurrect it. Expired
-    records are pruned from both files on every commit, so the store cannot
-    grow without bound.
+    ``issue`` maps row keys (:func:`issue_key`) to records carrying internal
+    ``_kind``/``_token_value`` markers. ``retire`` maps a kind to raw token
+    values being consumed/rotated. The epoch check, retirement, issuance,
+    expiry pruning, and legacy migration all commit (or roll back) together;
+    SQLite's write lock serializes this against every other mutation,
+    including revocation, so no interleaving can resurrect retired tokens.
     """
     issue = issue or {}
     retire = retire or {}
     now = time.time()
-    key, kid, source = _resolve_key(hermes_root)
-    _secrets_dir(hermes_root).mkdir(parents=True, exist_ok=True)
-    with _FileLock(_ledger_lock_path(hermes_root)):
-        ledger = _read_ledger_raw(hermes_root)
-        current_epoch = ledger.get("revocation_epoch", 0)
-        if isinstance(current_epoch, bool) or not isinstance(current_epoch, int):
-            current_epoch = 0
+    db = _connect(hermes_root)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        key, kid, source = _resolve_key_parts(hermes_root)
+        _migrate_legacy_locked(db, hermes_root, key, kid, now)
+        row = db.execute(
+            "SELECT value FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        current_epoch = int(row["value"]) if row else 0
         if current_epoch > source_epoch:
+            db.execute("ROLLBACK")
             raise TokenStoreError(
                 "token store was revoked after this view was built; refusing to persist"
             )
-        # --- envelope: raw values (encrypted) ---
-        try:
-            bundle = load_tokens(hermes_root)
-        except TokenStoreError:
-            bundle = {}
-        if not isinstance(bundle, dict):
-            bundle = {}
-        access = bundle.get("access_tokens")
-        refresh = bundle.get("refresh_tokens")
-        access = dict(access) if isinstance(access, dict) else {}
-        refresh = dict(refresh) if isinstance(refresh, dict) else {}
-        # retire (raw values arrive via the retire map's value list)
+        retired_count = 0
         for kind, values in retire.items():
-            section = access if kind == "access" else refresh
             for value in values or ():
-                section.pop(value, None)
-        # prune expired
-        access = {v: i for v, i in access.items() if isinstance(i, dict) and i.get("expires_at", 0) > now}
-        refresh = {v: i for v, i in refresh.items() if isinstance(i, dict) and i.get("expires_at", 0) > now}
-        # issue
-        issued_values: dict[str, dict[str, Any]] = {}
-        for ledger_key, item in issue.items():
+                row_key = _token_key(kind, value)
+                cur = db.execute(
+                    "UPDATE tokens SET retired=1, retired_at=? WHERE token_key=? AND retired=0",
+                    (now, row_key),
+                )
+                retired_count += cur.rowcount if cur.rowcount > 0 else 0
+        issued = 0
+        for row_key, item in issue.items():
             if not (isinstance(item, dict) and item.get("expires_at", 0) > now):
                 continue
-            value = str(item.get("_token_value") or "")
             kind = str(item.get("_kind") or "")
-            if not value or kind not in ("access", "refresh"):
+            value = str(item.get("_token_value") or "")
+            if kind not in ("access", "refresh") or not value:
                 continue
-            section = access if kind == "access" else refresh
-            clean = {k: w for k, w in item.items() if not k.startswith("_")}
-            section[value] = clean
-            issued_values[ledger_key] = {"expires_at": clean.get("expires_at", 0)}
-        _write_envelope(hermes_root, kid, {"access_tokens": access, "refresh_tokens": refresh}, key)
-        # --- ledger: hashes + retirement (plaintext, no token material) ---
-        records = ledger.get("tokens") if isinstance(ledger.get("tokens"), dict) else {}
-        retired = ledger.get("retired") if isinstance(ledger.get("retired"), dict) else {}
-        for kind, values in retire.items():
-            for value in values or ():
-                ledger_key = _token_key(kind, value)
-                records.pop(ledger_key, None)
-                retired[ledger_key] = {"retired_at": now}
-        for ledger_key, meta in issued_values.items():
-            if ledger_key in retired:
+            # Retirement is permanent: a tombstoned key can never be
+            # re-issued, even by a stale peer cache that still lists it.
+            tomb = db.execute(
+                "SELECT 1 FROM tokens WHERE token_key=? AND retired=1", (row_key,)
+            ).fetchone()
+            if tomb:
                 continue
-            records[ledger_key] = meta
-        records = {
-            k: v
-            for k, v in records.items()
-            if isinstance(v, dict) and v.get("expires_at", 0) > now
-        }
-        # Backfill ledger records for legacy envelope tokens (pre-ledger
-        # envelopes): they are live in the envelope but have no hash entry.
-        for kind, section in (("access", access), ("refresh", refresh)):
-            for value in section:
-                ledger_key = _token_key(kind, value)
-                if ledger_key not in retired and ledger_key not in records:
-                    item = section[value]
-                    if isinstance(item, dict):
-                        records[ledger_key] = {"expires_at": item.get("expires_at", 0)}
-        ledger["tokens"] = records
-        ledger["retired"] = retired
-        ledger["revocation_epoch"] = current_epoch
-        _write_ledger_raw(hermes_root, ledger)
+            nonce, ct = _encrypt_record(key, dict(item))
+            db.execute(
+                "INSERT OR REPLACE INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,0,NULL)",
+                (row_key, kind, nonce, ct, item["expires_at"]),
+            )
+            issued += 1
+        db.execute("DELETE FROM tokens WHERE expires_at<=? AND retired=1", (now,))
+        live = db.execute("SELECT COUNT(*) AS c FROM tokens WHERE retired=0").fetchone()
+        db.execute(
+            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
+            (str(current_epoch),),
+        )
+        db.execute("COMMIT")
         return {
             "kid": kid,
             "source": source,
-            "path": str(envelope_path(hermes_root)),
             "epoch": current_epoch,
-            "records": len(records),
-            "retired": len(retired),
+            "records": live["c"] if live else 0,
+            "retired": retired_count,
+            "issued": issued,
         }
+    except sqlite3.Error as exc:
+        try:
+            db.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise TokenStoreError(f"token commit failed: {exc}") from exc
+    finally:
+        db.close()
+
+
+def exchange_commit(
+    hermes_root: Path,
+    *,
+    source_epoch: int,
+    presented_kind: str,
+    presented_value: str,
+    issue: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Atomically CONSUME one presented token and publish replacements.
+
+    The liveness check and the retirement of the presented token happen in
+    the same transaction as the issuance of its replacements, so two peers
+    racing to exchange the same refresh token cannot both succeed: the first
+    commit retires it, the second sees the tombstone and is rejected whole
+    (no replacement credentials are published).
+    """
+    issue = issue or {}
+    now = time.time()
+    presented_key = _token_key(presented_kind, presented_value)
+    db = _connect(hermes_root)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        key, kid, source = _resolve_key_parts(hermes_root)
+        _migrate_legacy_locked(db, hermes_root, key, kid, now)
+        row = db.execute(
+            "SELECT nonce,ciphertext,expires_at,retired FROM tokens WHERE token_key=?",
+            (presented_key,),
+        ).fetchone()
+        if not row or row["retired"] or row["expires_at"] <= now:
+            db.execute("ROLLBACK")
+            raise TokenStoreError("presented token is not live")
+        meta = db.execute(
+            "SELECT value FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        current_epoch = int(meta["value"]) if meta else 0
+        if current_epoch > source_epoch:
+            db.execute("ROLLBACK")
+            raise TokenStoreError(
+                "token store was revoked after this view was built; refusing to persist"
+            )
+        presented_record = _decrypt_record(key, row["nonce"], row["ciphertext"])
+        db.execute(
+            "UPDATE tokens SET retired=1, retired_at=? WHERE token_key=?",
+            (now, presented_key),
+        )
+        issued = 0
+        for row_key, item in issue.items():
+            if not (isinstance(item, dict) and item.get("expires_at", 0) > now):
+                continue
+            kind = str(item.get("_kind") or "")
+            value = str(item.get("_token_value") or "")
+            if kind not in ("access", "refresh") or not value:
+                continue
+            nonce, ct = _encrypt_record(key, dict(item))
+            db.execute(
+                "INSERT OR REPLACE INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,0,NULL)",
+                (row_key, kind, nonce, ct, item["expires_at"]),
+            )
+            issued += 1
+        db.execute("DELETE FROM tokens WHERE expires_at<=?", (now,))
+        db.execute("COMMIT")
+        return {
+            "kid": kid,
+            "source": source,
+            "epoch": current_epoch,
+            "issued": issued,
+            "presented": presented_record,
+        }
+    except sqlite3.Error as exc:
+        try:
+            db.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise TokenStoreError(f"token exchange commit failed: {exc}") from exc
+    finally:
+        db.close()
 
 
 def load_tokens(hermes_root: Path) -> dict[str, Any]:
-    """Load + decrypt the token bundle. Raises TokenStoreError on problems."""
+    """Load the live token bundle (SQLite store first, legacy envelope fallback).
+
+    Raises TokenStoreError on unreadable stores — callers fail closed.
+    """
+    if _db_path(hermes_root).exists():
+        return load_live_tokens(hermes_root)
     envelope = load_envelope(hermes_root)
     if envelope is None:
         return {}
@@ -507,7 +652,82 @@ def load_tokens(hermes_root: Path) -> dict[str, Any]:
 
 
 def status(hermes_root: Path) -> dict[str, Any]:
-    """Read-only store status: presence, expiry, revocation epoch. No material."""
+    """Read-only store status: presence, expiry, revocation epoch. No material.
+
+    Understands both the current SQLite store and a not-yet-migrated legacy
+    envelope, so the browser account-status derivation keeps working across
+    the upgrade.
+    """
+    if not _db_path(hermes_root).exists():
+        envelope = load_envelope(hermes_root) if _legacy_envelope_path(hermes_root).exists() else None
+        if envelope is None:
+            return {
+                "available": False,
+                "presence": "absent",
+                "expires_at": None,
+                "revocation_epoch": 0,
+                "kid": "",
+            }
+        try:
+            bundle = decrypt_envelope(envelope, hermes_root)
+        except TokenStoreError:
+            return {
+                "available": True,
+                "presence": "corrupt",
+                "expires_at": None,
+                "revocation_epoch": 0,
+                "kid": envelope.get("kid", ""),
+            }
+        flat = _legacy_flat_records(bundle)
+        expiries = [v.get("expires_at") for v in flat if v.get("expires_at")]
+        return {
+            "available": True,
+            "presence": "present",
+            "expires_at": max(expiries) if expiries else None,
+            "revocation_epoch": 0,
+            "kid": envelope.get("kid", ""),
+            "client_count": len([v for v in flat if v.get("expires_at", 0) > time.time()]),
+        }
+    try:
+        db = _connect(hermes_root)
+        rows = db.execute(
+            "SELECT expires_at,retired FROM tokens"
+        ).fetchall()
+        meta = db.execute(
+            "SELECT value FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        db.close()
+    except (sqlite3.Error, TokenStoreError) as exc:
+        return {
+            "available": True,
+            "presence": "corrupt",
+            "expires_at": None,
+            "revocation_epoch": None,
+            "kid": "",
+            "error": f"{exc}"[:120],
+        }
+    now = time.time()
+    live = [r for r in rows if not r["retired"] and r["expires_at"] > now]
+    expiries = [r["expires_at"] for r in rows]
+    return {
+        "available": True,
+        "presence": "present",
+        "expires_at": max(expiries) if expiries else None,
+        "revocation_epoch": int(meta["value"]) if meta else 0,
+        "kid": "",
+        "client_count": len(live),
+    }
+
+
+def _legacy_flat_records(bundle: dict[str, Any]) -> list[dict[str, Any]]:
+    flat: list[dict[str, Any]] = []
+    sections = [v for v in bundle.values() if isinstance(v, dict)]
+    for section in sections:
+        flat.extend(i for i in section.values() if isinstance(i, dict))
+    for item in bundle.values():
+        if isinstance(item, dict) and "expires_at" in item and item not in flat:
+            flat.append(item)
+    return flat
     envelope = load_envelope(hermes_root)
     if envelope is None:
         return {
@@ -555,49 +775,57 @@ def status(hermes_root: Path) -> dict[str, Any]:
 
 
 def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, Any]:
-    """Revoke durable tokens under the ledger lock.
+    """Revoke durable tokens in one SQLite transaction.
 
-    Deletes the encrypted envelope, wipes the ledger's live records, marks
-    every previously live token hash permanently retired, and advances the
-    durable revocation epoch — all in one locked transaction. A clustered
-    peer that still holds pre-revocation tokens in memory therefore can
-    never re-persist them (epoch fencing + permanent retirement marks).
-    Optionally rotates the master key. Returns a bounded summary; never
-    exposes token material.
+    Marks every live token retired, advances the durable revocation epoch,
+    and (when requested) rotates the master key INSIDE the same write
+    transaction, so no commit can slip between the epoch bump and the key
+    swap and leave an undecryptable envelope behind. Also removes legacy
+    artifacts. Returns a bounded summary; never exposes token material.
     """
-    path = envelope_path(hermes_root)
-    existed = path.exists()
-    if existed:
+    now = time.time()
+    envelope_existed = _legacy_envelope_path(hermes_root).exists()
+    db = _connect(hermes_root)
+    epoch = 0
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT value FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        epoch = int(row["value"]) if row else 0
+        db.execute("UPDATE tokens SET retired=1, retired_at=? WHERE retired=0", (now,))
+        db.execute(
+            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
+            (str(epoch + 1),),
+        )
+        if rotate_key:
+            # Rotate while still holding the write lock: any concurrent
+            # commit either completed before us (its tokens are now retired)
+            # or waits and then sees the bumped epoch and is refused.
+            try:
+                key_file_path(hermes_root).unlink(missing_ok=True)
+                _resolve_key(hermes_root)  # regenerates
+            except Exception:
+                pass
+        db.execute("COMMIT")
+    except sqlite3.Error as exc:
         try:
-            path.unlink()
-        except OSError as exc:
-            raise TokenStoreError(f"could not remove token envelope: {exc}") from exc
-    _secrets_dir(hermes_root).mkdir(parents=True, exist_ok=True)
-    with _FileLock(_ledger_lock_path(hermes_root)):
-        ledger = _read_ledger_raw(hermes_root)
-        epoch = ledger.get("revocation_epoch", 0)
-        if isinstance(epoch, bool) or not isinstance(epoch, int):
-            epoch = 0
-        retired = ledger.get("retired") if isinstance(ledger.get("retired"), dict) else {}
-        records = ledger.get("tokens") if isinstance(ledger.get("tokens"), dict) else {}
-        now = time.time()
-        for ledger_key in records:
-            retired[ledger_key] = {"retired_at": now}
-        ledger["retired"] = retired
-        ledger["tokens"] = {}
-        ledger["revocation_epoch"] = epoch + 1
-        _write_ledger_raw(hermes_root, ledger)
-    rotated = False
-    if rotate_key:
-        try:
-            key_file_path(hermes_root).unlink(missing_ok=True)
-            _resolve_key(hermes_root)  # regenerates
-            rotated = True
-        except Exception:
-            rotated = False
+            db.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise TokenStoreError(f"token revocation failed: {exc}") from exc
+    finally:
+        db.close()
+    # Legacy artifacts are obsolete once revoked.
+    try:
+        _legacy_envelope_path(hermes_root).unlink(missing_ok=True)
+        (_secrets_dir(hermes_root) / LEGACY_LEDGER_FILENAME).unlink(missing_ok=True)
+        (_secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME).unlink(missing_ok=True)
+    except OSError:
+        pass
     return {
-        "revoked": existed,
-        "envelope_removed": existed,
-        "key_rotated": rotated,
+        "revoked": True,
+        "envelope_removed": envelope_existed,
+        "key_rotated": bool(rotate_key),
         "epoch": epoch + 1,
     }
