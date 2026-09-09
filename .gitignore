@@ -21,6 +21,7 @@ web/dist/
 .cloudflared.pid
 .hermes-gpt.pid
 tmp-operator-test/
+.qa-tmp/
 logs/
 /.vercel/
 

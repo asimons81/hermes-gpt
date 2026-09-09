@@ -76,6 +76,10 @@ def _base64url_decode(value: str) -> bytes:
     return decoded
 
 
+ACCESS_TOKEN_PREFIX = "hg.at.v1."
+_ACCESS_TOKEN_MAC_CONTEXT = b"hermes-gpt.oauth.access.v1\0"
+
+
 class OAuthError(RuntimeError):
     def __init__(self, error: str, description: str, *, status_code: int = 400) -> None:
         super().__init__(description)
@@ -243,15 +247,83 @@ class OAuthState:
             raise OAuthError("invalid_grant", "Invalid, expired, or already used authorization code.")
         return payload
 
+    def _access_token_key(self) -> bytes:
+        """Derive the clustered access-token HMAC key from the shared client secret.
+
+        Clustered origins (the same public MCP hostname served by more than one
+        process) share ``HERMES_GPT_OAUTH_CLIENT_SECRET`` but not process memory.
+        Opaque ``token_urlsafe`` access tokens therefore 401 on the origin that
+        did not issue them. HMAC-SHA256 over a versioned payload lets any origin
+        with the same confidential client secret validate the bearer without a
+        shared token table. Rotating the client secret invalidates every signed
+        access token.
+        """
+        return hashlib.sha256(_ACCESS_TOKEN_MAC_CONTEXT + self.config.client_secret.encode("utf-8")).digest()
+
     def _new_access_token(self, *, client_id: str, scope: str, resource: str) -> tuple[str, dict[str, Any]]:
-        token_value = secrets.token_urlsafe(48)
+        expires_at = int(time.time()) + ACCESS_TOKEN_TTL_SECONDS
+        payload = {
+            "v": 1,
+            "typ": "access",
+            "nonce": secrets.token_urlsafe(24),
+            "client_id": client_id,
+            "scope": scope,
+            "resource": resource,
+            "expires_at": expires_at,
+        }
+        encoded = _base64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+        signature = hmac.new(self._access_token_key(), encoded.encode("ascii"), hashlib.sha256).digest()
+        token_value = f"{ACCESS_TOKEN_PREFIX}{encoded}.{_base64url_encode(signature)}"
         item = {
             "client_id": client_id,
             "scope": scope,
             "resource": resource,
-            "expires_at": time.time() + ACCESS_TOKEN_TTL_SECONDS,
+            "expires_at": float(expires_at),
         }
         return token_value, item
+
+    def _decode_signed_access_token(self, token_value: str) -> dict[str, Any] | None:
+        if not token_value.startswith(ACCESS_TOKEN_PREFIX) or len(token_value) > 4096:
+            return None
+        encoded, separator, encoded_signature = token_value[len(ACCESS_TOKEN_PREFIX) :].partition(".")
+        if not separator:
+            return None
+        try:
+            supplied_signature = _base64url_decode(encoded_signature)
+            expected_signature = hmac.new(
+                self._access_token_key(),
+                encoded.encode("ascii"),
+                hashlib.sha256,
+            ).digest()
+            if not hmac.compare_digest(supplied_signature, expected_signature):
+                return None
+            payload = json.loads(_base64url_decode(encoded))
+        except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+            return None
+        required_types = {
+            "v": int,
+            "typ": str,
+            "nonce": str,
+            "client_id": str,
+            "scope": str,
+            "resource": str,
+            "expires_at": int,
+        }
+        if not isinstance(payload, dict) or any(
+            not isinstance(payload.get(key), kind) for key, kind in required_types.items()
+        ):
+            return None
+        if payload["v"] != 1 or payload["typ"] != "access" or not _NONCE.fullmatch(payload["nonce"]):
+            return None
+        if payload["expires_at"] <= time.time():
+            return None
+        if payload["resource"] != self.config.resource or payload["client_id"] != self.config.client_id:
+            return None
+        try:
+            self.normalize_scope(payload["scope"])
+        except OAuthError:
+            return None
+        return payload
 
     def _new_refresh_token(self, *, client_id: str, scope: str) -> tuple[str, dict[str, Any]]:
         token_value = secrets.token_urlsafe(48)
@@ -355,11 +427,15 @@ class OAuthState:
             return False
         self.cleanup()
         item = self.access_tokens.get(token_value)
-        return bool(
+        if (
             item
             and item.get("expires_at", 0) > time.time()
             and item.get("resource") == self.config.resource
-        )
+        ):
+            return True
+        # Clustered origin: accept a still-valid HMAC-signed access token issued
+        # by a peer that shares this confidential client secret and resource.
+        return self._decode_signed_access_token(token_value) is not None
 
     # ------------------------------------------------------------------
     # Durable token persistence (v0.7 S5, ADR-001). Tokens are persisted
@@ -520,10 +596,14 @@ class BearerAuthMiddleware:
         authorization = headers.get(b"authorization", b"").decode("latin-1")
         supplied = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
         if not validate_bearer_token(supplied, self.state, static_token=expected_static):
+            challenge = "Bearer"
+            if self.state is not None:
+                metadata = f"{self.state.config.issuer}/.well-known/oauth-protected-resource"
+                challenge = f'Bearer realm="hermes-gpt", resource_metadata="{metadata}"'
             response = JSONResponse(
                 {"error": "unauthorized"},
                 status_code=401,
-                headers={"WWW-Authenticate": "Bearer"},
+                headers={"WWW-Authenticate": challenge},
             )
             await response(scope, receive, send)
             return

@@ -33,6 +33,7 @@ import operator_fleet as op_fleet
 import operator_session as op_session
 import operator_mission as op_mission
 import operator_mission_runtime as op_mission_runtime
+import operator_mission_plan as op_mission_plan
 import operator_contract as op_contract
 import operator_delegations as op_delegations
 import operator_job_supervisor as op_jobs
@@ -40,9 +41,16 @@ import operator_runners as op_runners
 import operator_review as op_review
 import operator_events as op_events
 import operator_live_events as op_live_events
+import operator_capability_manifest as op_capability_manifest
+import operator_mission_ledger as op_mission_ledger
+import operator_mission_budget as op_mission_budget
+import operator_placement as op_placement
+import operator_failure_semantics as op_failure_semantics
+import operator_controller as op_controller
 import operator_oauth as op_oauth
 import operator_swarm as op_swarm
 import operator_recovery as op_recovery
+import operator_finance as op_finance
 from versioning import VERSION
 
 
@@ -1255,6 +1263,16 @@ def hermes_web_extract(
         raise clean_error("hermes_web_extract", exc) from exc
 
 
+def hermes_finance_analyze(evidence_json: str, timeout: int = 120) -> str:
+    """Analyze a bounded finance.evidence/v1 packet with the local Finance profile."""
+    return op_finance.hermes_finance_analyze(
+        evidence_json=evidence_json,
+        timeout=timeout,
+        hermes_root=_default_hermes_root(),
+        agent_root=HERMES_ROOT,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Operator / Owner Mode tools
 # ---------------------------------------------------------------------------
@@ -1419,6 +1437,26 @@ def hermes_operator_status() -> str:
             "hermes_mission_reconcile",
             "hermes_mission_transition",
             "hermes_mission_approve",
+            "hermes_plan_create",
+            "hermes_plan_get",
+            "hermes_plan_list",
+            "hermes_plan_validate",
+            "hermes_plan_decompose",
+            "hermes_plan_review",
+            "hermes_plan_node_transition",
+            "hermes_plan_set_status",
+            "hermes_budget_set",
+            "hermes_budget_get",
+            "hermes_budget_check",
+            "hermes_budget_record",
+            "hermes_placement_score",
+            "hermes_placement_candidates",
+            "hermes_placement_get",
+            "hermes_placement_list",
+            "hermes_failure_classify",
+            "hermes_failure_taxonomy",
+            "hermes_recovery_matrix",
+            "hermes_controller_plan_list",
             "hermes_live_events_cursor",
             "hermes_live_events_since",
             "hermes_contract_define",
@@ -1541,6 +1579,50 @@ def hermes_events_tail(limit: int = 20) -> str:
     """Recent events across all allowed sources (read-only, redacted)."""
     return op_events.hermes_events_tail(
         limit=limit, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_capability_manifest(
+    source: str = "",
+    include_cache: bool = True,
+    limit: int = 100,
+) -> str:
+    """Query the derived capability manifest (read-only, INV-9, bounded)."""
+    return op_capability_manifest.hermes_capability_manifest(
+        source=source,
+        include_cache=include_cache,
+        limit=limit,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_mission_ledger(
+    mission_id: str,
+    source: str = "",
+    cursor: int = 0,
+    limit: int = 100,
+    replay: bool = False,
+) -> str:
+    """Query the merged, replayable per-mission ledger (read-only, INV-9)."""
+    return op_mission_ledger.hermes_mission_ledger(
+        mission_id=mission_id,
+        source=source,
+        cursor=cursor,
+        limit=limit,
+        replay=replay,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_mission_ledger_replay(
+    mission_id: str,
+    limit: int = 500,
+) -> str:
+    """Replay a mission's full event history (read-only, INV-9)."""
+    return op_mission_ledger.hermes_mission_ledger_replay(
+        mission_id=mission_id,
+        limit=limit,
+        hermes_root=_default_hermes_root(),
     )
 
 
@@ -2130,6 +2212,245 @@ def hermes_mission_approve(
     )
 
 
+# --- MissionPlan (decomposition DAG, additive; read-only re missions) ------
+
+
+def hermes_plan_create(
+    mission_id: str,
+    plan_json: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+    status: str = "draft",
+) -> str:
+    """Create (or replace-version) a MissionPlan for a mission (additive, read-only re mission)."""
+    return op_mission_plan.hermes_plan_create(
+        mission_id, plan_json, confirm=confirm, dry_run=dry_run, status=status, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_plan_get(mission_id: str) -> str:
+    """Read the MissionPlan + plan_nodes for a mission (read-only)."""
+    return op_mission_plan.hermes_plan_get(mission_id, _default_hermes_root())
+
+
+def hermes_plan_list(status: str = "", limit: int = 50) -> str:
+    """List MissionPlans (read-only)."""
+    return op_mission_plan.hermes_plan_list(status, limit, _default_hermes_root())
+
+
+def hermes_plan_validate(plan_json: str) -> str:
+    """Pure read-only validation of a MissionPlan document."""
+    return op_mission_plan.hermes_plan_validate(plan_json)
+
+
+def hermes_plan_decompose(mission_id: str) -> str:
+    """Deterministically decompose a MissionSpec into a bounded plan DAG (read-only)."""
+    return op_mission_plan.hermes_plan_decompose(mission_id, _default_hermes_root())
+
+
+def hermes_plan_review(mission_id: str) -> str:
+    """Operator review surface: the bounded DAG + node state (read-only)."""
+    return op_mission_plan.hermes_plan_review(mission_id, _default_hermes_root())
+
+
+def hermes_plan_node_transition(
+    mission_id: str,
+    node_id: str,
+    target_state: str,
+    reason: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Advance a plan node via the validated state machine (read-only re mission)."""
+    return op_mission_plan.hermes_plan_node_transition(
+        mission_id, node_id, target_state, reason, confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_plan_set_status(
+    mission_id: str,
+    status: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Set the plan-level review status (operator-reviewable, read-only re mission)."""
+    return op_mission_plan.hermes_plan_set_status(
+        mission_id, status, confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root()
+    )
+
+
+# --- Mission budget envelope (spend envelope + budget_check; dry-run) -------
+
+
+def hermes_budget_set(
+    mission_id: str,
+    quota: float,
+    policy_json: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Create (or update) the mission-scoped spend envelope (budget_accounts)."""
+    return op_mission_budget.hermes_budget_set(
+        mission_id, quota, policy_json, confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_budget_get(mission_id: str) -> str:
+    """Read the mission spend envelope (read-only)."""
+    return op_mission_budget.hermes_budget_get(mission_id, _default_hermes_root())
+
+
+def hermes_budget_check(mission_id: str) -> str:
+    """Evaluate the mission spend envelope (read-only `budget_check` surface)."""
+    return op_mission_budget.hermes_budget_check(mission_id, _default_hermes_root())
+
+
+def hermes_budget_record(
+    mission_id: str,
+    amount: float,
+    ref: str = "",
+    reason: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Record a spend increment against a mission envelope (dry-run enforcement)."""
+    return op_mission_budget.hermes_budget_record(
+        mission_id, amount, ref, reason, confirm=confirm, dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+# --- Deterministic placement scoring (vNext slice-1, phase 2) -----------------
+
+
+def hermes_placement_score(
+    mission_id: str,
+    node_id: str,
+    source: str = "",
+    features: str = "",
+    workspace: str = "",
+    backends: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Score + record a plan node's placement (deterministic, dry-run-first).
+
+    No assignment executes (``would_assign=False``); the controller proposes,
+    actual dispatch goes through the existing contract/fleet/delegation surfaces.
+    """
+    return op_placement.hermes_placement_score(
+        mission_id, node_id, source=source, features=features, workspace=workspace,
+        backends=backends, confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_placement_candidates(
+    profile: str,
+    skills: str = "",
+    authorization_class: str = "reversible_write",
+    features: str = "",
+    workspace: str = "",
+    backends: str = "",
+    source: str = "",
+) -> str:
+    """Read-only probe: candidate targets + per-candidate filter/score."""
+    return op_placement.hermes_placement_candidates(
+        profile, skills=skills, authorization_class=authorization_class, features=features,
+        workspace=workspace, backends=backends, source=source, hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_placement_get(mission_id: str, node_id: str) -> str:
+    """Read a recorded placement decision (read-only)."""
+    return op_placement.hermes_placement_get(mission_id, node_id, hermes_root=_default_hermes_root())
+
+
+def hermes_placement_list(mission_id: str, limit: int = 50) -> str:
+    """List recorded placement decisions for a mission (read-only)."""
+    return op_placement.hermes_placement_list(mission_id, limit, hermes_root=_default_hermes_root())
+
+
+# --- Semantic failure classification + recovery matrix (vNext slice-1, phase 3)
+
+
+def hermes_failure_classify(
+    mission_id: str,
+    node_id: str,
+    observation_json: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Classify an observation envelope; propose the smallest recovery action.
+
+    Decision output only (§17 item 7): ``would_execute`` is always False; no
+    dispatch/reclaim/redispatch/approval path exists. Recording the decision to
+    ``controller_plan`` requires workspace + direct + confirm.
+    """
+    return op_failure_semantics.hermes_failure_classify(
+        mission_id, node_id, observation_json,
+        confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_failure_taxonomy() -> str:
+    """Read-only: the authoritative 8-class failure taxonomy (§11.1)."""
+    return op_failure_semantics.hermes_failure_taxonomy()
+
+
+def hermes_recovery_matrix(row_key: str = "") -> str:
+    """Read-only: the deterministic smallest-first recovery matrix (§11.2)."""
+    return op_failure_semantics.hermes_recovery_matrix(row_key)
+
+
+def hermes_controller_plan_list(mission_id: str, limit: int = 50) -> str:
+    """Read-only: recorded failure decisions (controller_plan rows)."""
+    return op_failure_semantics.hermes_controller_plan_list(
+        mission_id, limit, hermes_root=_default_hermes_root()
+    )
+
+
+# --- Supervised mission controller — shadow/observe reconciler loop (§17 item 6);
+
+
+def hermes_controller_reconcile(
+    mission_id: str,
+    trigger_kind: str = "T5_manual",
+    dry_run: bool = True,
+) -> str:
+    """Run one shadow pass over a mission (observe → classify → smallest action).
+
+    Decision output only (§17 item 6 / §7): the controller observes authoritative
+    mission/plan/delegation/runner state, classifies it via the Ops 8-class
+    taxonomy, and emits the smallest recovery action as a *proposal* —
+    ``would_execute`` is always False and the returned envelope carries the
+    ``would_be_commands`` a higher-autonomy rung would run (D10: not this slice).
+    The only durable writes are the controller's own ``controller_plan`` +
+    ``controller_telemetry``; nothing is dispatched, completed, or approved.
+    """
+    return op_controller.hermes_controller_reconcile(
+        mission_id, trigger_kind, dry_run=dry_run, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_controller_status() -> str:
+    """Read-only controller health surface (§12.2): liveness, passes, counts."""
+    return op_controller.hermes_controller_status(_default_hermes_root())
+
+
+def hermes_controller_lease_list(mission_id: str = "") -> str:
+    """Read-only: current per-mission pass leases + trigger-queue conflation state."""
+    return op_controller.hermes_controller_lease_list(
+        mission_id, hermes_root=_default_hermes_root()
+    )
+
+
+def hermes_controller_trigger(mission_id: str, trigger_kind: str, ref: str = "") -> str:
+    """Enqueue a T1–T5 work request for the reconciler (advisory; shadow)."""
+    return op_controller.hermes_controller_trigger(
+        mission_id, trigger_kind, ref, hermes_root=_default_hermes_root()
+    )
+
+
 # --- Work Contracts (v0.6 M1) ----------------------------------------------
 
 
@@ -2710,6 +3031,8 @@ def register_tools(server: FastMCP) -> None:
     if env_enabled(ENABLE_WEB_ENV):
         server.add_tool(hermes_web_search, meta=tool_meta())
         server.add_tool(hermes_web_extract, meta=tool_meta())
+    if op_finance.finance_enabled(_default_hermes_root()):
+        server.add_tool(hermes_finance_analyze, meta=tool_meta())
 
     # --- Operator / Owner Mode tools -----------------------------------
     #
@@ -2785,6 +3108,75 @@ def register_tools(server: FastMCP) -> None:
     ):
         server.add_tool(_mission_runtime_tool, meta=tool_meta())
 
+    # MissionPlan (decomposition DAG, additive; read-only re missions).
+    # Get/list/review/validate/decompose are read-only; create/node-transition/
+    # set-status mutate only the plan store and never dispatch or change a
+    # Mission's lifecycle (Phase-1 read-only slice).
+    for _plan_tool in (
+        hermes_plan_create,
+        hermes_plan_get,
+        hermes_plan_list,
+        hermes_plan_validate,
+        hermes_plan_decompose,
+        hermes_plan_review,
+        hermes_plan_node_transition,
+        hermes_plan_set_status,
+    ):
+        server.add_tool(_plan_tool, meta=tool_meta())
+
+    # Mission budget envelope (spend envelope + budget_check; dry-run).
+    # Get/check are read-only; set/record mutate only the budget store and never
+    # pause a Mission or change its lifecycle (Phase-2 dry-run slice). D3 hard-
+    # block semantics are designed (flag default off) but wired in Phase 4/5.
+    for _budget_tool in (
+        hermes_budget_set,
+        hermes_budget_get,
+        hermes_budget_check,
+        hermes_budget_record,
+    ):
+        server.add_tool(_budget_tool, meta=tool_meta())
+
+    # Deterministic placement scoring (filter-and-score, D7): dry-run only.
+    # Score/candidates/get/list never dispatch work; score records a placement
+    # decision only under workspace+direct (dry-run-first) and always returns
+    # would_assign=False. The controller proposes; dispatch goes through the
+    # existing contract/fleet/delegation authority surfaces.
+    for _placement_tool in (
+        hermes_placement_score,
+        hermes_placement_candidates,
+        hermes_placement_get,
+        hermes_placement_list,
+    ):
+        server.add_tool(_placement_tool, meta=tool_meta())
+
+    # Semantic failure classification + deterministic recovery matrix (vNext
+    # slice-1, phase 3, §17 item 7 / D8 / §11): decision output only. The
+    # classifier proposes the smallest action and never executes anything;
+    # taxonomy/matrix/plan-list are read-only.
+    for _failure_tool in (
+        hermes_failure_classify,
+        hermes_failure_taxonomy,
+        hermes_recovery_matrix,
+        hermes_controller_plan_list,
+    ):
+        server.add_tool(_failure_tool, meta=tool_meta())
+
+    # Supervised mission controller — shadow/observe reconciler loop (§17 item 6 /
+    # §7, D2, D10). Read-only surfaces + a single-pass shadow reconcile. The
+    # reconcile surface observes authoritative mission/plan/delegation/runner
+    # state, classifies it, and emits the smallest recovery action as decision
+    # output ONLY (would_execute always False); its only durable writes are the
+    # controller's own controller_plan + controller_telemetry + pass lease. It
+    # never dispatches work, never completes, never approves — the loop is not
+    # started by this slice (no deploy / no process mutation).
+    for _controller_tool in (
+        hermes_controller_reconcile,
+        hermes_controller_status,
+        hermes_controller_lease_list,
+        hermes_controller_trigger,
+    ):
+        server.add_tool(_controller_tool, meta=tool_meta())
+
     # Event history (v0.7 S4): read-only normalized timeline over durable
     # stores. Registered unconditionally; each tool enforces the per-client
     # allowlist (HERMES_GPT_EVENTS_ALLOWED_SOURCES) and audits every call.
@@ -2819,6 +3211,36 @@ def register_tools(server: FastMCP) -> None:
         meta=tool_meta(),
         annotations=ToolAnnotations(
             title="Read or wait for durable v0.9 live events",
+            readOnlyHint=True,
+        ),
+    )
+
+    # Derived capability-manifest + per-mission ledger (vNext slice-1, phase 1):
+    # read-only derived views over authoritative registries. Registered
+    # unconditionally; each enforces a per-client allowlist env, audits every
+    # call, and carries readOnlyHint (advisory, not authority). No mutation
+    # path exists in either module.
+    server.add_tool(
+        hermes_capability_manifest,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Query the derived capability manifest (read-only)",
+            readOnlyHint=True,
+        ),
+    )
+    server.add_tool(
+        hermes_mission_ledger,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Query the merged, replayable per-mission ledger (read-only)",
+            readOnlyHint=True,
+        ),
+    )
+    server.add_tool(
+        hermes_mission_ledger_replay,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Replay a mission's full ledger event history (read-only)",
             readOnlyHint=True,
         ),
     )

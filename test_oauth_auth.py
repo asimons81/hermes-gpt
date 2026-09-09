@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
+import json
 import time
 import urllib.parse
 
@@ -548,6 +550,98 @@ def test_credentials_are_absent_from_metadata_and_errors(oauth_client: TestClien
     assert CLIENT_SECRET not in observed
     assert issued["access_token"] not in observed
     assert issued["refresh_token"] not in observed
+
+
+def test_clustered_origin_accepts_hmac_signed_access_token_from_peer_issuer():
+    issuer = OAuthState(
+        OAuthConfig(
+            issuer=ISSUER,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            redirect_uris=(REDIRECT_URI,),
+            scope="hermes",
+        )
+    )
+    peer = OAuthState(
+        OAuthConfig(
+            issuer=ISSUER,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            redirect_uris=(REDIRECT_URI,),
+            scope="hermes",
+        )
+    )
+    token, item = issuer._new_access_token(client_id=CLIENT_ID, scope="hermes", resource=RESOURCE)
+    issuer.access_tokens[token] = item
+    assert token.startswith("hg.at.v1.")
+    assert token not in peer.access_tokens
+    assert peer.validate_access_token(token) is True
+    assert validate_bearer_token(token, peer, static_token="") is True
+    assert CLIENT_SECRET not in token
+
+
+def test_clustered_origin_rejects_tampered_expired_and_foreign_signed_access_tokens():
+    issuer = OAuthState(
+        OAuthConfig(
+            issuer=ISSUER,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            redirect_uris=(REDIRECT_URI,),
+            scope="hermes",
+        )
+    )
+    token, _item = issuer._new_access_token(client_id=CLIENT_ID, scope="hermes", resource=RESOURCE)
+    peer = OAuthState(
+        OAuthConfig(
+            issuer=ISSUER,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            redirect_uris=(REDIRECT_URI,),
+            scope="hermes",
+        )
+    )
+    foreign = OAuthState(
+        OAuthConfig(
+            issuer=ISSUER,
+            client_id=CLIENT_ID,
+            client_secret="other-client-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUV",
+            redirect_uris=(REDIRECT_URI,),
+            scope="hermes",
+        )
+    )
+    assert peer.validate_access_token(token[:-1] + ("A" if token[-1] != "A" else "B")) is False
+    expired, _ = issuer._new_access_token(client_id=CLIENT_ID, scope="hermes", resource=RESOURCE)
+    encoded = expired[len("hg.at.v1.") :].split(".", 1)[0]
+    payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+    payload["expires_at"] = int(time.time()) - 10
+    encoded_expired = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).rstrip(b"=").decode("ascii")
+    signature = hmac.new(issuer._access_token_key(), encoded_expired.encode("ascii"), hashlib.sha256).digest()
+    expired_token = (
+        "hg.at.v1."
+        + encoded_expired
+        + "."
+        + base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii")
+    )
+    assert peer.validate_access_token(expired_token) is False
+    assert foreign.validate_access_token(token) is False
+    assert peer.validate_access_token("") is False
+    assert peer.validate_access_token("opaque-random-token") is False
+
+
+def test_unauthenticated_mcp_challenge_points_at_protected_resource_metadata(oauth_state: OAuthState):
+    async def endpoint(_request):
+        return JSONResponse({"ok": True})
+
+    app = BearerAuthMiddleware(Starlette(routes=[Route("/mcp", endpoint, methods=["POST"])]), oauth_state)
+    client = TestClient(app)
+    denied = client.post("/mcp")
+    assert denied.status_code == 401
+    assert denied.json() == {"error": "unauthorized"}
+    challenge = denied.headers["www-authenticate"]
+    assert 'resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"' in challenge
+    assert CLIENT_SECRET not in challenge
 
 
 def test_bearer_middleware_preserves_static_token_compatibility(monkeypatch: pytest.MonkeyPatch, oauth_state: OAuthState):

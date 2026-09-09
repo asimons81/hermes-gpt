@@ -400,7 +400,8 @@ a {
 .brand-image-wrapper img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center;
   filter: saturate(1.1) brightness(0.9);
 }
 
@@ -907,6 +908,12 @@ a {
   font-size: 15px;
   color: var(--text-muted);
   line-height: 1.6;
+}
+
+/* v0.10: long unbroken tool names (hermes_plan_create/get/...) must wrap,
+   not blow out narrow bento cards */
+.bento-card p code {
+  overflow-wrap: anywhere;
 }
 
 /* Installation Panel styling */
