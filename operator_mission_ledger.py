@@ -28,6 +28,7 @@ allowlist env (``HERMES_GPT_LEDGER_ALLOWED_SOURCES``), bounded output.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -51,6 +52,8 @@ MAX_LIMIT = 500
 MAX_PER_SOURCE = 500
 _ERROR_STRING_CAP = 500
 _SOURCE_RANK = {"mission": 0, "delegation": 1, "audit": 2, "kanban": 3}
+_CURSOR_PREFIX = "ld1."
+_MAX_CURSOR_TOKEN = 8192
 
 _PII_STRIP = re.compile(
     r"(?i)(sk-[a-zA-Z0-9]{20,}|[A-Za-z0-9._~-]{43,128}@[A-Za-z0-9._-]+|"
@@ -163,6 +166,7 @@ def _read_mission_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
                 events.append(
                     {
                         "source": "mission",
+                        "cursor_key": "mission",
                         "source_seq": int(row["seq"]),
                         "ts": str(row["created_at"] or ""),
                         "kind": _sanitize(row["event_type"] or ""),
@@ -216,6 +220,7 @@ def _read_delegation_events(
                     events.append(
                         {
                             "source": "delegation",
+                            "cursor_key": "delegation",
                             "source_seq": int(row["seq"]),
                             "ts": str(row["created_at"] or ""),
                             "kind": _sanitize(row["event_type"] or ""),
@@ -263,12 +268,13 @@ def _read_audit_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
                 events.append(
                     {
                         "source": "audit",
-                        "source_seq": n,
+                        "cursor_key": "audit",
+                        "source_seq": n + 1,
                         "ts": str(rec.get("timestamp") or ""),
                         "kind": "tool_call",
                         "status_before": "",
                         "status_after": "success" if rec.get("success") else "error",
-                        "event_id": f"audit:{rec.get('timestamp') or ''}:{n}",
+                        "event_id": f"audit:{rec.get('timestamp') or ''}:{n + 1}",
                         "refs": [rec.get("tool") or "", f"mission:{mission_id}"],
                         "summary": _sanitize(
                             rec.get("summary")
@@ -311,8 +317,8 @@ def _read_kanban_events(root: Path, task_ids: set[str]) -> list[dict[str, Any]]:
                         continue
                     placeholders = ",".join("?" for _ in task_ids)
                     rows = conn.execute(
-                        f"SELECT task_id, kind, created_at, actor, summary FROM task_events "
-                        f"WHERE task_id IN ({placeholders}) ORDER BY created_at ASC LIMIT ?",
+                        f"SELECT rowid AS source_rowid, task_id, kind, created_at, actor, summary FROM task_events "
+                        f"WHERE task_id IN ({placeholders}) ORDER BY rowid ASC LIMIT ?",
                         (*sorted(task_ids), MAX_PER_SOURCE),
                     ).fetchall()
                     for row in rows:
@@ -322,12 +328,13 @@ def _read_kanban_events(root: Path, task_ids: set[str]) -> list[dict[str, Any]]:
                         events.append(
                             {
                                 "source": "kanban",
-                                "source_seq": len(events),
+                                "cursor_key": f"kanban:{slug}",
+                                "source_seq": int(row["source_rowid"]),
                                 "ts": ts,
                                 "kind": _sanitize(kind or "task_event"),
                                 "status_before": "",
                                 "status_after": _sanitize(kind or ""),
-                                "event_id": f"kanban:{slug}:{task_id}:{ts}:{len(events)}",
+                                "event_id": f"kanban:{slug}:{int(row["source_rowid"])}",
                                 "refs": [f"kanban:{task_id}", f"task:{task_id}"],
                                 "summary": _sanitize(row["summary"])
                                 if row["summary"]
@@ -353,28 +360,84 @@ _SOURCE_READERS: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Merge (deterministic cursor stream)
+# Merge (stable vector cursor stream)
 # ---------------------------------------------------------------------------
 
 
+def _encode_cursor(watermarks: dict[str, int]) -> str:
+    payload = json.dumps(
+        {"v": 1, "w": dict(sorted(watermarks.items()))},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return _CURSOR_PREFIX + base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_cursor(value: Any) -> dict[str, int]:
+    if value in (None, "", 0, "0"):
+        return {}
+    if isinstance(value, int):
+        raise ValueError("legacy numeric ledger cursors are not resumable; restart from cursor=0")
+    token = str(value).strip()
+    if len(token) > _MAX_CURSOR_TOKEN or not token.startswith(_CURSOR_PREFIX):
+        raise ValueError("ledger cursor is invalid")
+    encoded = token[len(_CURSOR_PREFIX):]
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        raw = base64.b64decode(encoded + padding, altchars=b"-_", validate=True)
+        payload = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("ledger cursor is invalid") from exc
+    watermarks = payload.get("w") if isinstance(payload, dict) and payload.get("v") == 1 else None
+    if not isinstance(watermarks, dict) or len(watermarks) > 256:
+        raise ValueError("ledger cursor is invalid")
+    out: dict[str, int] = {}
+    for key, seq in watermarks.items():
+        if not isinstance(key, str) or not key or len(key) > 128 or not isinstance(seq, int) or seq < 0:
+            raise ValueError("ledger cursor is invalid")
+        out[key] = seq
+    return out
+
+
+def _event_cursor_key(event: dict[str, Any]) -> str:
+    return str(event.get("cursor_key") or event.get("source") or "")
+
+
 def _merge(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Order events causally and assign a monotonic merged cursor.
+    """Merge append-only source streams without reordering within a source.
 
-    Primary key: parseable ISO timestamp (fallback 0). Tie-break by source
-    rank then source_seq so the ordering is deterministic given the same
-    store state -> replay reproduces the exact event history.
+    Each authoritative source keeps its own stable monotonic sequence. The
+    merge chooses the oldest timestamp only among each source's current head,
+    so a late event with an older timestamp can never move behind a watermark
+    that was already returned to a client.
     """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for event in events:
+        groups.setdefault(_event_cursor_key(event), []).append(event)
+    for group in groups.values():
+        group.sort(key=lambda e: int(e.get("source_seq", 0)))
 
-    def key(e: dict[str, Any]) -> tuple[float, int, int]:
-        return (
-            _parse_iso_ts(e.get("ts")) or 0.0,
-            _SOURCE_RANK.get(e.get("source", ""), 9),
-            int(e.get("source_seq", 0)),
-        )
-
-    ordered = sorted(events, key=key)
-    for idx, e in enumerate(ordered, start=1):
-        e["cursor"] = idx
+    positions = {key: 0 for key in groups}
+    ordered: list[dict[str, Any]] = []
+    while True:
+        candidates: list[tuple[tuple[float, int, str, int], str, dict[str, Any]]] = []
+        for cursor_key, group in groups.items():
+            pos = positions[cursor_key]
+            if pos >= len(group):
+                continue
+            event = group[pos]
+            sort_key = (
+                _parse_iso_ts(event.get("ts")) or 0.0,
+                _SOURCE_RANK.get(event.get("source", ""), 9),
+                cursor_key,
+                int(event.get("source_seq", 0)),
+            )
+            candidates.append((sort_key, cursor_key, event))
+        if not candidates:
+            break
+        _key, cursor_key, event = min(candidates, key=lambda item: item[0])
+        ordered.append(event)
+        positions[cursor_key] += 1
     return ordered
 
 
@@ -412,10 +475,18 @@ def _envelope(
     warnings: list[str],
     trace_id: str,
     mission_status: str,
+    cursor_state: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     truncated = len(events) > limit
     visible = events[:limit]
-    max_cursor = max((int(e.get("cursor", 0)) for e in events), default=0)
+    watermarks = dict(cursor_state or {})
+    for event in visible:
+        cursor_key = _event_cursor_key(event)
+        watermarks[cursor_key] = max(
+            int(watermarks.get(cursor_key, 0)), int(event.get("source_seq", 0))
+        )
+        event["cursor"] = _encode_cursor(watermarks)
+    next_cursor = _encode_cursor(watermarks)
     return {
         "success": True,
         "schema_version": SCHEMA_VERSION,
@@ -429,8 +500,8 @@ def _envelope(
         "count_returned": len(visible),
         "count_total": len(events),
         "truncated": truncated,
-        "max_cursor": max_cursor,
-        "next_cursor": max_cursor + 1 if not truncated else max_cursor,
+        "max_cursor": next_cursor,
+        "next_cursor": next_cursor,
         "sources_queried": sources,
         "sources_allowed": sorted(_allowed_sources()),
         "warnings": warnings,
@@ -458,7 +529,7 @@ def _mission_status(root: Path, mission_id: str) -> str:
 def hermes_mission_ledger(
     mission_id: str,
     source: str = "",
-    cursor: int = 0,
+    cursor: int | str = 0,
     limit: int = 100,
     replay: bool = False,
     hermes_root: Path | None = None,
@@ -496,9 +567,24 @@ def hermes_mission_ledger(
     except (TypeError, ValueError):
         limit = 100
     try:
-        cursor = max(0, int(cursor))
-    except (TypeError, ValueError):
-        cursor = 0
+        cursor_state = {} if replay else _decode_cursor(cursor)
+    except (TypeError, ValueError) as exc:
+        warnings.append(str(exc))
+        return json.dumps(
+            _envelope(
+                tool=tool,
+                mission_id=mission_id,
+                events=[],
+                limit=limit,
+                sources=[],
+                warnings=warnings,
+                trace_id=tid,
+                mission_status=_mission_status(root, mission_id),
+                cursor_state={},
+            ),
+            ensure_ascii=False,
+            indent=2,
+        )
 
     sources = [source] if source else list(LEDGER_SOURCES)
     if source and source not in LEDGER_SOURCES:
@@ -527,7 +613,12 @@ def hermes_mission_ledger(
 
     merged = _merge(all_events)
     if not replay:
-        merged = [e for e in merged if int(e.get("cursor", 0)) > cursor]
+        merged = [
+            event
+            for event in merged
+            if int(event.get("source_seq", 0))
+            > int(cursor_state.get(_event_cursor_key(event), 0))
+        ]
 
     status = _mission_status(root, mission_id)
     _audit(
@@ -546,6 +637,7 @@ def hermes_mission_ledger(
             warnings=warnings,
             trace_id=tid,
             mission_status=status,
+            cursor_state=cursor_state,
         ),
         ensure_ascii=False,
         indent=2,

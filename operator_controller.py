@@ -686,19 +686,32 @@ def _replan_attempts_used(db: sqlite3.Connection, mission_id: str) -> int:
 
 
 def _latest_delegation(
-    hermes_root: Path | None, mission_id: str
+    hermes_root: Path | None, mission_id: str, contract_sha256: str = ""
 ) -> dict[str, Any] | None:
-    """Read the authoritative delegation state for a mission (delegations.db)."""
+    """Read authoritative delegation state, optionally bound to a contract.
+
+    When a frontier node supplies a contract hash, never substitute an
+    unrelated mission-level latest delegation: parallel nodes must be observed
+    against their own durable lineage.
+    """
     dbp = deleg._db_path(hermes_root)
     if not dbp.is_file():
         return None
     try:
         with deleg._connect(dbp, write=False) as db:
-            row = db.execute(
-                "SELECT delegation_id,task_id,state,backend_state,outcome,validation_verdict "
-                "FROM delegations WHERE mission_id=? ORDER BY updated_at DESC LIMIT 1",
-                (mission_id,),
-            ).fetchone()
+            if contract_sha256:
+                row = db.execute(
+                    "SELECT delegation_id,task_id,contract_sha256,state,backend_state,outcome,validation_verdict "
+                    "FROM delegations WHERE mission_id=? AND contract_sha256=? "
+                    "ORDER BY updated_at DESC LIMIT 1",
+                    (mission_id, contract_sha256),
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT delegation_id,task_id,contract_sha256,state,backend_state,outcome,validation_verdict "
+                    "FROM delegations WHERE mission_id=? ORDER BY updated_at DESC LIMIT 1",
+                    (mission_id,),
+                ).fetchone()
             if not row:
                 return None
             return dict(row)
@@ -763,9 +776,9 @@ def build_observation(
 
     deleg_state: dict[str, Any] | None = None
     if node_id and frontier.get("contract_sha256"):
-        # Prefer a delegation whose task maps to this node; fall back to latest.
-        latest = _latest_delegation(hermes_root, mission_id)
-        deleg_state = latest
+        deleg_state = _latest_delegation(
+            hermes_root, mission_id, str(frontier["contract_sha256"])
+        )
 
     delegation: dict[str, Any] | None = None
     runner: dict[str, Any] | None = None
@@ -1659,21 +1672,22 @@ def hermes_controller_reconcile(
     dry_run: bool = True,
     hermes_root: Path | None = None,
 ) -> str:
-    """Run one shadow pass over a mission (L0/L1 observe/plan; decision output only).
+    """Run one supervised shadow reconciliation pass.
 
-    Requires ``read_only``. The only durable writes are the controller's own
-    ``controller_plan`` + ``controller_telemetry`` (+ pass lease); no mission,
-    plan, delegation, budget, or attachment state changes. ``would_execute`` is
-    always False. The reported ``proposed_action`` + ``would_be_commands``
-    describe what a higher-autonomy rung would run (D10: not in this slice).
+    The pass is decision-only with respect to Mission/work execution, but it
+    persists controller plans, telemetry, leases, heartbeats, and attention
+    envelopes. Therefore every invocation requires the normal ``workspace`` +
+    ``direct`` mutation gates even when ``dry_run`` is true.
     """
     policy = op.OperatorPolicy()
     try:
-        policy.require_level("read_only")
+        policy.require_level("workspace")
+        policy.require_mutation(False)
         if not MISSION_ID_RE.fullmatch(mission_id or ""):
             raise ValueError("mission_id is invalid")
         if trigger_kind not in TRIGGERS:
             raise ValueError(f"trigger_kind must be one of {TRIGGERS}")
+
         result = reconcile_pass(
             mission_id,
             trigger_kind,
@@ -1681,14 +1695,12 @@ def hermes_controller_reconcile(
             hermes_root=hermes_root,
             interval=DEFAULT_INTERVAL_SECONDS,
         )
-        result["dry_run"] = True
-        # A shadow pass always records a controller_plan + controller_telemetry
-        # row (its own L1 surfaces); it never dispatches/executes anything.
+        result["dry_run"] = bool(dry_run)
         result["changed"] = True
         _audit(
             "hermes_controller_reconcile",
             policy,
-            dry_run=True,
+            dry_run=bool(dry_run),
             success=not any(k in result for k in ("error",)),
             changed=True,
             mission_id=mission_id,
@@ -1712,7 +1724,7 @@ def hermes_controller_reconcile(
         _audit(
             "hermes_controller_reconcile",
             policy,
-            dry_run=True,
+            dry_run=bool(dry_run),
             success=False,
             changed=False,
             mission_id=mission_id,
@@ -1720,7 +1732,7 @@ def hermes_controller_reconcile(
         return _error(
             exc,
             "CONTROLLER_RECONCILE_REJECTED",
-            "Check the mission id, trigger kind, and Operator policy.",
+            "Check the mission id, trigger kind, and Operator mutation policy.",
         )
 
 
@@ -1820,15 +1832,16 @@ def hermes_controller_trigger(
     ref: str = "",
     hermes_root: Path | None = None,
 ) -> str:
-    """Enqueue a T1–T5 work request for the reconciler (advisory; shadow)."""
+    """Enqueue a T1–T5 request (persistent controller mutation)."""
     policy = op.OperatorPolicy()
     try:
-        policy.require_level("read_only")
+        policy.require_level("workspace")
+        policy.require_mutation(False)
         result = trigger(mission_id, trigger_kind, ref, hermes_root=hermes_root)
         _audit(
             "hermes_controller_trigger",
             policy,
-            dry_run=True,
+            dry_run=False,
             success=True,
             changed=True,
             mission_id=mission_id,
@@ -1846,11 +1859,11 @@ def hermes_controller_trigger(
         _audit(
             "hermes_controller_trigger",
             policy,
-            dry_run=True,
+            dry_run=False,
             success=False,
             changed=False,
             mission_id=mission_id,
         )
         return _error(
-            exc, "CONTROLLER_TRIGGER_REJECTED", "Check the mission id and trigger kind."
+            exc, "CONTROLLER_TRIGGER_REJECTED", "Check the mission id, trigger kind, and Operator mutation policy."
         )

@@ -163,6 +163,10 @@ class OAuthState:
         self.used_auth_codes: dict[str, dict[str, Any]] = {}
         self.access_tokens: dict[str, dict[str, Any]] = {}
         self.refresh_tokens: dict[str, dict[str, Any]] = {}
+        # Bound by restore_tokens()/persist_tokens() in server mode. When set,
+        # the durable store is authoritative for bearer validity so revocation
+        # cannot be bypassed by the clustered signed-token fallback.
+        self._hermes_root: Path | None = None
 
     def cleanup(self) -> None:
         now = time.time()
@@ -422,10 +426,54 @@ class OAuthState:
             "scope": scope,
         }
 
+    def _durable_access_token_valid(self, token_value: str) -> bool:
+        """Validate bearer presence against the authoritative durable envelope.
+
+        A clustered peer may not have the token in process memory, so a cache
+        miss is resolved by reading the shared durable store. Conversely, once
+        revocation removes that envelope, an already-cached token is rejected
+        immediately instead of being resurrected solely from its MAC.
+        """
+        if self._hermes_root is None:
+            item = self.access_tokens.get(token_value)
+            return bool(
+                item
+                and item.get("expires_at", 0) > time.time()
+                and item.get("resource") == self.config.resource
+            )
+        try:
+            import token_store
+
+            bundle = token_store.load_tokens(self._hermes_root)
+        except Exception:
+            self.access_tokens.pop(token_value, None)
+            return False
+        item = (bundle.get("access_tokens") or {}).get(token_value) if isinstance(bundle, dict) else None
+        if not (
+            isinstance(item, dict)
+            and item.get("expires_at", 0) > time.time()
+            and item.get("resource") == self.config.resource
+        ):
+            self.access_tokens.pop(token_value, None)
+            return False
+        self.access_tokens[token_value] = item
+        return True
+
     def validate_access_token(self, token_value: str) -> bool:
         if not token_value:
             return False
         self.cleanup()
+
+        # In server mode the encrypted durable envelope is the revocation
+        # authority for both legacy opaque and v1 signed tokens. Signed tokens
+        # still require a valid MAC, but a MAC alone is never enough.
+        if self._hermes_root is not None:
+            if token_value.startswith(ACCESS_TOKEN_PREFIX) and self._decode_signed_access_token(token_value) is None:
+                return False
+            return self._durable_access_token_valid(token_value)
+
+        # Standalone/in-memory OAuthState instances have no durable authority.
+        # Preserve their local validation behavior for tests and embedded use.
         item = self.access_tokens.get(token_value)
         if (
             item
@@ -433,8 +481,6 @@ class OAuthState:
             and item.get("resource") == self.config.resource
         ):
             return True
-        # Clustered origin: accept a still-valid HMAC-signed access token issued
-        # by a peer that shares this confidential client secret and resource.
         return self._decode_signed_access_token(token_value) is not None
 
     # ------------------------------------------------------------------
@@ -456,6 +502,7 @@ class OAuthState:
             }
         if not hermes_root:
             hermes_root = Path.home() / ".hermes"
+        self._hermes_root = Path(hermes_root)
         return token_store.save_tokens(hermes_root, bundle)
 
     def restore_tokens(self, hermes_root: Path | None = None) -> dict[str, Any]:
@@ -467,6 +514,7 @@ class OAuthState:
 
         if not hermes_root:
             hermes_root = Path.home() / ".hermes"
+        self._hermes_root = Path(hermes_root)
         bundle = token_store.load_tokens(hermes_root)
         if not bundle:
             return {"restored": 0, "present": False}

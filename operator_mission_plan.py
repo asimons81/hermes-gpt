@@ -832,6 +832,20 @@ def hermes_plan_decompose(mission_id: str, hermes_root: Path | None = None) -> s
         return _error(exc, "PLAN_DECOMPOSE_FAILED", "Check mission id and Operator read access.")
 
 
+def _ready_node_ids(nodes: list[dict[str, Any]]) -> list[str]:
+    """Return pending nodes whose complete parent set succeeded."""
+    by_id = {n["node_id"]: n for n in nodes}
+    return [
+        n["node_id"]
+        for n in nodes
+        if n["state"] == "pending"
+        and all(
+            parent_id in by_id and by_id[parent_id]["state"] == "completed"
+            for parent_id in n.get("parents", [])
+        )
+    ]
+
+
 def hermes_plan_review(mission_id: str, hermes_root: Path | None = None) -> str:
     """Operator review surface (read-only): the bounded DAG + node state."""
     policy = op.OperatorPolicy()
@@ -849,13 +863,8 @@ def hermes_plan_review(mission_id: str, hermes_root: Path | None = None) -> str:
                 [{"node_id": n["node_id"], "parents": n["parents"]} for n in nodes]
             )
             value["terminal_nodes"] = [n["node_id"] for n in nodes if n["state"] in TERMINAL_NODE_STATES]
-            # Ready = no parent is non-terminal.
-            value["ready_nodes"] = [
-                n["node_id"]
-                for n in nodes
-                if n["state"] == "pending"
-                and all(p["state"] in TERMINAL_NODE_STATES for p in nodes if p["node_id"] in n["parents"])
-            ]
+            # Ready means every declared parent completed successfully.
+            value["ready_nodes"] = _ready_node_ids(nodes)
         value["success"] = True
         value["tool"] = "hermes_plan_review"
         _audit("hermes_plan_review", policy, dry_run=True, success=True, changed=False, mission_id=mission_id)
