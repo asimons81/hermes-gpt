@@ -255,8 +255,16 @@ class OAuthState:
         resource: str,
         code_challenge: str,
     ) -> str:
+        import token_store as _ts
+
+        issuance_epoch = 0
+        if self._hermes_root is not None:
+            try:
+                issuance_epoch = _ts.read_revocation_epoch(self._hermes_root)
+            except Exception:
+                issuance_epoch = 0
         payload = {
-            "v": 1,
+            "v": 2,
             "nonce": secrets.token_urlsafe(24),
             "client_id": client_id,
             "redirect_uri": redirect_uri,
@@ -264,6 +272,7 @@ class OAuthState:
             "resource": resource,
             "code_challenge": code_challenge,
             "expires_at": int(time.time()) + AUTH_CODE_TTL_SECONDS,
+            "epoch": issuance_epoch,
         }
         encoded = _base64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
         signature = hmac.new(self._authorization_code_key, encoded.encode("ascii"), hashlib.sha256).digest()
@@ -299,8 +308,23 @@ class OAuthState:
         }
         if not isinstance(payload, dict) or any(not isinstance(payload.get(key), kind) for key, kind in required_types.items()):
             raise OAuthError("invalid_grant", "Invalid, expired, or already used authorization code.")
-        if payload["v"] != 1 or not _NONCE.fullmatch(payload["nonce"]):
+        if payload["v"] not in (1, 2) or not _NONCE.fullmatch(payload["nonce"]):
             raise OAuthError("invalid_grant", "Invalid, expired, or already used authorization code.")
+        # v2 codes are bound to the revocation epoch they were issued under;
+        # a revocation since issuance invalidates every outstanding code.
+        if payload["v"] == 2:
+            epoch = payload.get("epoch")
+            if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
+                raise OAuthError("invalid_grant", "Invalid, expired, or already used authorization code.")
+            if self._hermes_root is not None:
+                import token_store as _ts
+
+                try:
+                    current_epoch = _ts.read_revocation_epoch(self._hermes_root)
+                except Exception:
+                    raise OAuthError("invalid_grant", "Invalid, expired, or already used authorization code.")
+                if epoch < current_epoch:
+                    raise OAuthError("invalid_grant", "Invalid, expired, or already used authorization code.")
         return payload
 
     def _access_token_key(self) -> bytes:
@@ -369,12 +393,23 @@ class OAuthState:
             not isinstance(payload.get(key), kind) for key, kind in required_types.items()
         ):
             return None
-        if payload["v"] != 1 or payload["typ"] != "access" or not _NONCE.fullmatch(payload["nonce"]):
+        if payload["v"] not in (1, 2) or payload["typ"] != "access" or not _NONCE.fullmatch(payload["nonce"]):
             return None
         if payload["expires_at"] <= time.time():
             return None
         if payload["resource"] != self.config.resource or payload["client_id"] != self.config.client_id:
             return None
+        # v2 codes are bound to the revocation epoch they were issued under;
+        # a revocation since issuance invalidates every outstanding code.
+        if payload["v"] == 2 and self._hermes_root is not None:
+            import token_store as _ts
+
+            try:
+                current_epoch = _ts.read_revocation_epoch(self._hermes_root)
+            except Exception:
+                return None  # unreadable store: fail closed
+            if int(payload.get("epoch", 0)) < current_epoch:
+                return None
         try:
             self.normalize_scope(payload["scope"])
         except OAuthError:
@@ -454,7 +489,9 @@ class OAuthState:
         self.access_tokens[access_value] = access_item
         if refresh_item is not None:
             self.refresh_tokens[refresh_value] = refresh_item
-        _run_persist_hook(self, "authorization_code")
+        # Durable persistence is part of the exchange contract in server
+        # mode: never hand out credentials that were not durably committed.
+        _run_persist_hook_strict(self, "authorization_code")
         return response
 
     def validate_refresh_token_grant(self, refresh_token: str, client_id: str) -> dict[str, Any]:

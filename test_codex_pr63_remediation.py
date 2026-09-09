@@ -667,3 +667,165 @@ def test_concurrent_commits_and_revocation_are_serialized(tmp_path: Path):
     assert token_store.lookup_token(root, "access", tok) is None, (
         "revoked/concurrent token resurrected"
     )
+
+
+def test_revocation_closes_legacy_migration(tmp_path: Path):
+    """After revocation, leftover legacy JSON artifacts must never re-import
+    revoked credentials (migration closes permanently)."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    token, item = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[token] = item
+    state.persist_tokens(root)
+
+    # Simulate a legacy envelope left behind (e.g. failed cleanup).
+    legacy = token_store._legacy_envelope_path(root)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("{}", encoding="utf-8")
+
+    token_store.revoke_tokens(root, rotate_key=False)
+    # Re-create the envelope AFTER revocation (worst case: stray file).
+    legacy.write_text("{}", encoding="utf-8")
+
+    # A later commit with a stale view must not resurrect anything, and the
+    # migration marker must keep legacy imports closed.
+    peer = oauth_auth.OAuthState(config)
+    peer._hermes_root = root
+    with pytest.raises(token_store.TokenStoreError):
+        peer.persist_tokens(root)
+    import sqlite3
+
+    db = sqlite3.connect(token_store._db_path(root))
+    marker = db.execute(
+        "SELECT value FROM token_meta WHERE name='legacy_migration'"
+    ).fetchone()
+    db.close()
+    assert marker is not None and marker[0].startswith("closed"), marker
+
+
+def test_corrupt_legacy_ledger_fails_closed(tmp_path: Path):
+    """An unparseable legacy retirement ledger aborts the import."""
+    import json as _json
+
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    token, item = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[token] = item
+    state.persist_tokens(root)
+
+    # Build a legacy envelope + corrupt ledger on a FRESH root.
+    root2 = tmp_path / "hermes2"
+    (root2 / "secrets").mkdir(parents=True)
+    token_store.save_tokens(
+        root2, {"access_tokens": {token: dict(item)}, "refresh_tokens": {}}
+    )
+    (root2 / "secrets" / token_store.LEGACY_LEDGER_FILENAME).write_text(
+        "{corrupt!!", encoding="utf-8"
+    )
+
+    with pytest.raises(token_store.TokenStoreError):
+        token_store.commit_tokens(root2, source_epoch=0, issue={})
+    # Nothing was imported.
+    assert token_store.lookup_token(root2, "access", token) is None
+    # The recovery source is intact (deleted only after a successful commit).
+    assert token_store._legacy_envelope_path(root2).exists()
+
+
+def test_migration_imports_live_tokens_with_cache_markers(tmp_path: Path):
+    """Legacy upgrade imports credentials restorable after a restart."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    refresh, ritem = state._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    state.refresh_tokens[refresh] = ritem
+    state.persist_tokens(root)
+
+    # Convert the DB store back into legacy shape on a fresh root. Pin the
+    # master key via env so both roots resolve the same key regardless of
+    # keyring availability.
+    monkeypatch_key = pytest.MonkeyPatch()
+    monkeypatch_key.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    try:
+        root2 = tmp_path / "hermes2"
+        (root2 / "secrets").mkdir(parents=True)
+        # Write the legacy envelope with the env key in effect.
+        token_store.save_tokens(root2, {"refresh_tokens": {refresh: dict(ritem)}})
+
+        token_store.commit_tokens(root2, source_epoch=0, issue={})
+        fresh = oauth_auth.OAuthState(config)
+        summary = fresh.restore_tokens(root2)
+        assert summary["restored"] >= 1
+        assert refresh in fresh.refresh_tokens
+        assert fresh.validate_refresh_token_grant(refresh, config.client_id) is not None
+        assert not token_store._legacy_envelope_path(root2).exists()
+    finally:
+        monkeypatch_key.undo()
+
+
+def test_outstanding_code_dies_on_revocation(tmp_path: Path):
+    """An unexchanged code issued before revocation must not mint durable
+    credentials afterwards (epoch-bound v2 codes)."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    code = state.issue_authorization_code(
+        client_id=config.client_id,
+        redirect_uri=config.redirect_uris[0],
+        scope=config.scope,
+        resource=config.resource,
+        code_challenge="",
+    )
+    token_store.revoke_tokens(root, rotate_key=False)
+    state.clear_live_tokens()
+    # The peer adopts the new epoch for fresh grants, but the pre-revocation
+    # code is still bound to the old epoch and must be rejected.
+    with pytest.raises(oauth_auth.OAuthError) as excinfo:
+        state.exchange_authorization_code(
+            code=code,
+            client_id=config.client_id,
+            redirect_uri=config.redirect_uris[0],
+            code_verifier="",
+        )
+    assert excinfo.value.error == "invalid_grant"
+
+
+def test_exchange_fails_loud_when_persistence_fails(tmp_path: Path):
+    """A corrupt durable store must fail the exchange (no unusable creds)."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    code = state.issue_authorization_code(
+        client_id=config.client_id,
+        redirect_uri=config.redirect_uris[0],
+        scope=config.scope,
+        resource=config.resource,
+        code_challenge="",
+    )
+    # Corrupt the store so the strict persist must fail.
+    token_store._db_path(root).write_bytes(b"corrupt-not-sqlite" * 8)
+    def _boom(st, kind):
+        st.persist_tokens(root)
+    oauth_auth.set_persist_hook(_boom)
+    try:
+        with pytest.raises(oauth_auth.OAuthError):
+            state.exchange_authorization_code(
+                code=code,
+                client_id=config.client_id,
+                redirect_uri=config.redirect_uris[0],
+                code_verifier="",
+            )
+    finally:
+        oauth_auth.set_persist_hook(None)

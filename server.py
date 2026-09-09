@@ -3000,11 +3000,10 @@ def build_server(
     setattr(server, "_hermes_oauth_state", oauth_state)
     if oauth_state is not None:
         # v0.7 S5: persist every token issuance/refresh through token_store.
+        # Persistence failures PROPAGATE: the strict exchange path turns them
+        # into OAuth errors instead of handing out uncommitted credentials.
         def _persist(state, kind: str) -> None:
-            try:
-                state.persist_tokens(_default_hermes_root())
-            except Exception:
-                pass
+            state.persist_tokens(_default_hermes_root())
 
         oauth_auth.set_persist_hook(_persist)
         # Durable revocation (hermes_oauth_revoke) must also drop this

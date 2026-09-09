@@ -300,30 +300,63 @@ def _decrypt_record(key: bytes, nonce: bytes, ciphertext: bytes) -> dict[str, An
 def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes, kid: str, now: float) -> int:
     """One-time import of the legacy JSON envelope (and hash ledger) into the DB.
 
-    Runs inside the caller's write transaction. The legacy envelope's raw
-    values are preserved as encrypted rows; legacy ledger retirement marks
-    are preserved so rotated/revoked tokens stay dead.
+    Runs inside the caller's write transaction. Rules:
+
+    - A durable ``legacy_migration`` marker closes migration permanently once
+      set; revocation sets it too, so leftover legacy files can never
+      re-import revoked credentials (fail closed).
+    - A corrupt/unparseable legacy ledger is a hard error: the transaction
+      aborts rather than importing credentials whose retirement history
+      cannot be established.
+    - Legacy artifacts are NOT deleted inside this transaction; cleanup
+      happens only after the enclosing transaction commits (the caller
+      schedules it), so a rollback never loses the recovery source.
+    - Imported records carry the internal markers needed to reconstruct
+      caches (``_kind``/``_token_value``) exactly like fresh records.
     """
+    marker = db.execute(
+        "SELECT value FROM token_meta WHERE name='legacy_migration'"
+    ).fetchone()
+    if marker is not None:
+        return 0  # already migrated (or closed by revocation)
     env_path = _legacy_envelope_path(hermes_root)
+    ledger_path = _secrets_dir(hermes_root) / LEGACY_LEDGER_FILENAME
+    epoch_path = _secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME
     if not env_path.exists():
+        # No envelope anywhere: close migration so later stray files cannot
+        # be imported after revocation has happened.
+        db.execute(
+            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:empty')"
+        )
         return 0
     try:
         envelope = load_envelope(hermes_root)
         bundle = decrypt_envelope(envelope, hermes_root) if envelope else {}
     except TokenStoreError:
-        # Corrupt/undecryptable legacy store: keep it dead (fail closed).
+        # Corrupt/undecryptable legacy store: close migration, keep files.
+        db.execute(
+            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:corrupt')"
+        )
         return 0
     if not isinstance(bundle, dict):
+        db.execute(
+            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:corrupt')"
+        )
         return 0
     legacy_ledger: dict[str, Any] = {}
-    ledger_path = _secrets_dir(hermes_root) / LEGACY_LEDGER_FILENAME
+    ledger_corrupt = False
     if ledger_path.exists():
         try:
             data = json.loads(ledger_path.read_text(encoding="utf-8"))
-            legacy_ledger = data if isinstance(data, dict) else {}
+            if isinstance(data, dict):
+                legacy_ledger = data
+            else:
+                ledger_corrupt = True
         except (OSError, ValueError):
-            # Retire everything we cannot reason about: fail closed.
-            legacy_ledger = {"retired": "__corrupt__"}
+            ledger_corrupt = True
+    if ledger_corrupt:
+        # Fail closed: retirement history cannot be established.
+        raise TokenStoreError("legacy retirement ledger is corrupt; refusing to import")
     retired_keys = legacy_ledger.get("retired")
     retired = retired_keys if isinstance(retired_keys, dict) else {}
     migrated = 0
@@ -335,50 +368,59 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
             if not (isinstance(item, dict) and item.get("expires_at", 0) > now):
                 continue
             row_key = _token_key(kind, value)
-            exists = db.execute(
-                "SELECT 1 FROM tokens WHERE token_key=?", (row_key,)
-            ).fetchone()
-            if exists:
-                continue
             if row_key in retired:
+                # Preserve the tombstone so rotated/revoked stay dead.
                 db.execute(
                     "INSERT OR REPLACE INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,1,?)",
                     (row_key, kind, b"", b"", item.get("expires_at", 0), now),
                 )
                 continue
-            nonce, ct = _encrypt_record(key, dict(item))
+            record = dict(item)
+            record["_kind"] = kind
+            record["_token_value"] = value
+            nonce, ct = _encrypt_record(key, record)
             db.execute(
                 "INSERT OR REPLACE INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,0,NULL)",
                 (row_key, kind, nonce, ct, item.get("expires_at", 0)),
             )
             migrated += 1
-    # Preserve the legacy revocation epoch when the DB has none.
+    # Preserve the legacy revocation epoch.
+    legacy_epoch = 0
+    if isinstance(legacy_ledger.get("revocation_epoch"), int) and not isinstance(
+        legacy_ledger.get("revocation_epoch"), bool
+    ):
+        legacy_epoch = int(legacy_ledger["revocation_epoch"])
+    elif epoch_path.exists():
+        try:
+            legacy_epoch = int(epoch_path.read_text(encoding="ascii").strip())
+        except (OSError, ValueError):
+            legacy_epoch = 1  # unknown history -> treat as revoked once
     have_epoch = db.execute(
         "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
     ).fetchone()
     if not have_epoch:
-        legacy_epoch = 0
-        if isinstance(legacy_ledger.get("revocation_epoch"), int):
-            legacy_epoch = legacy_ledger["revocation_epoch"]
-        else:
-            epoch_path = _secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME
-            if epoch_path.exists():
-                try:
-                    legacy_epoch = int(epoch_path.read_text(encoding="ascii").strip())
-                except (OSError, ValueError):
-                    legacy_epoch = 1  # unknown history -> treat as revoked once
         db.execute(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
             (str(max(0, legacy_epoch)),),
         )
-    # Legacy artifacts are superseded; keep the secrets dir clean.
+    db.execute(
+        "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','done')"
+    )
+    return migrated
+
+
+def _cleanup_legacy_artifacts(hermes_root: Path) -> None:
+    """Remove legacy artifacts AFTER the enclosing transaction committed.
+
+    Safe to retry: each unlink is missing_ok. If cleanup fails the worst case
+    is leftover files that the closed migration marker ignores.
+    """
     try:
-        env_path.unlink(missing_ok=True)
+        _legacy_envelope_path(hermes_root).unlink(missing_ok=True)
         (_secrets_dir(hermes_root) / LEGACY_LEDGER_FILENAME).unlink(missing_ok=True)
         (_secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME).unlink(missing_ok=True)
     except OSError:
         pass
-    return migrated
 
 
 def read_revocation_epoch(hermes_root: Path) -> int:
@@ -539,6 +581,7 @@ def commit_tokens(
             (str(current_epoch),),
         )
         db.execute("COMMIT")
+        _cleanup_legacy_artifacts(hermes_root)
         return {
             "kid": kid,
             "source": source,
@@ -618,6 +661,7 @@ def exchange_commit(
             issued += 1
         db.execute("DELETE FROM tokens WHERE expires_at<=?", (now,))
         db.execute("COMMIT")
+        _cleanup_legacy_artifacts(hermes_root)
         return {
             "kid": kid,
             "source": source,
@@ -798,6 +842,11 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
             (str(epoch + 1),),
         )
+        # Close legacy migration permanently: leftover JSON artifacts must
+        # never re-import credentials this revocation just killed.
+        db.execute(
+            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:revoked')"
+        )
         if rotate_key:
             # Rotate while still holding the write lock: any concurrent
             # commit either completed before us (its tokens are now retired)
@@ -816,13 +865,9 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
         raise TokenStoreError(f"token revocation failed: {exc}") from exc
     finally:
         db.close()
-    # Legacy artifacts are obsolete once revoked.
-    try:
-        _legacy_envelope_path(hermes_root).unlink(missing_ok=True)
-        (_secrets_dir(hermes_root) / LEGACY_LEDGER_FILENAME).unlink(missing_ok=True)
-        (_secrets_dir(hermes_root) / LEGACY_EPOCH_FILENAME).unlink(missing_ok=True)
-    except OSError:
-        pass
+    # Legacy artifacts are obsolete once revoked (migration is closed inside
+    # the transaction; deletion after commit is best-effort and retryable).
+    _cleanup_legacy_artifacts(hermes_root)
     return {
         "revoked": True,
         "envelope_removed": envelope_existed,
