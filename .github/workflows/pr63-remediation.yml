@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/remediate_pr63.py
       - scripts/remediate_pr63_v2.py
+      - scripts/remediate_pr63_v3.py
       - .github/workflows/pr63-remediation.yml
 
 permissions:
@@ -30,6 +31,7 @@ jobs:
         run: |
           python scripts/remediate_pr63.py
           python scripts/remediate_pr63_v2.py
+          python scripts/remediate_pr63_v3.py
 
       - name: Compile changed Python modules
         run: |
@@ -50,7 +52,8 @@ jobs:
             test_codex_pr63_remediation.py \
             test_operator_mission_ledger.py \
             test_operator_mission_plan.py \
-            test_operator_controller.py
+            test_operator_controller.py \
+            test_token_store.py
 
       - name: Run full suite
         run: python -m pytest
@@ -59,6 +62,7 @@ jobs:
         run: |
           rm -f scripts/remediate_pr63.py
           rm -f scripts/remediate_pr63_v2.py
+          rm -f scripts/remediate_pr63_v3.py
           rm -f .github/workflows/pr63-remediation.yml
 
       - name: Commit verified remediation
