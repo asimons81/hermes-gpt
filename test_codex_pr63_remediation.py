@@ -265,6 +265,14 @@ def test_controller_reconcile_preview_writes_nothing(monkeypatch, tmp_path: Path
     tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "controller_telemetry" not in tables, "preview must not create controller tables"
     db.close()
+    # The ONLY durable side effect is the Operator audit trail (every tool
+    # call is audited — AGENTS.md invariant), never controller state.
+    audit_log = root.parent / "audit.jsonl"
+    if audit_log.exists():
+        for line in audit_log.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rec = json.loads(line)
+                assert rec.get("changed") is False
 
 
 def test_controller_trigger_dry_run_apply_mode_is_rejected(monkeypatch, tmp_path: Path):
@@ -981,3 +989,94 @@ def test_startup_migration_preserves_positive_legacy_epoch(tmp_path: Path):
             oauth_auth.set_persist_hook(None)
     finally:
         mp.undo()
+
+
+def test_retirement_tombstones_survive_expiry_and_block_reissue(tmp_path: Path):
+    """A retired (rotated/revoked) token hash must remain a tombstone past
+    its original expiry, and a stale peer reissue must stay dead."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    seeder = oauth_auth.OAuthState(config)
+    seeder.restore_tokens(root)
+    refresh, ritem = seeder._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    seeder.refresh_tokens[refresh] = ritem
+    seeder.persist_tokens(root)
+
+    oauth_auth.set_persist_hook(lambda s, k: s.persist_tokens(root))
+    try:
+        resp = seeder.exchange_refresh_token(
+            refresh_token=refresh, client_id=config.client_id, requested_scope=""
+        )
+    finally:
+        oauth_auth.set_persist_hook(None)
+    assert token_store.lookup_token(root, "refresh", refresh) is None
+
+    # Force the tombstone row's expiry into the past.
+    import sqlite3
+
+    conn = sqlite3.connect(token_store._db_path(root))
+    conn.execute(
+        "UPDATE tokens SET expires_at=? WHERE token_key=?",
+        (time.time() - 1000, token_store.issue_key("refresh", refresh)),
+    )
+    conn.commit()
+    conn.close()
+
+    # Any later commit must prune expired LIVE rows but keep the tombstone.
+    other = oauth_auth.OAuthState(config)
+    other.restore_tokens(root)
+    tn, tin = other._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    other.access_tokens[tn] = tin
+    other.persist_tokens(root)
+
+    conn = sqlite3.connect(token_store._db_path(root))
+    row = conn.execute(
+        "SELECT retired FROM tokens WHERE token_key=?",
+        (token_store.issue_key("refresh", refresh),),
+    ).fetchone()
+    conn.close()
+    assert row is not None and row[0] == 1, "tombstone was pruned on expiry"
+
+    # A stale peer holding the old token cannot reissue it.
+    stale = oauth_auth.OAuthState(config)
+    stale._hermes_root = root
+    stale._epoch = token_store.read_revocation_epoch(root)
+    stale.refresh_tokens[refresh] = ritem
+    stale.persist_tokens(root)
+    assert token_store.lookup_token(root, "refresh", refresh) is None
+
+
+def test_restore_fails_closed_on_undecryptable_live_record(tmp_path: Path):
+    """A live record that cannot be decrypted must abort the restore, not
+    silently restore a partial credential set."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    good, gi = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[good] = gi
+    bad, bi = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[bad] = bi
+    state.persist_tokens(root)
+
+    import sqlite3
+
+    conn = sqlite3.connect(token_store._db_path(root))
+    conn.execute(
+        "UPDATE tokens SET ciphertext=? WHERE token_key=?",
+        (b"\x00" * 40, token_store.issue_key("access", bad)),
+    )
+    conn.commit()
+    conn.close()
+
+    fresh = oauth_auth.OAuthState(config)
+    with pytest.raises(token_store.TokenStoreError):
+        fresh.restore_tokens(root)

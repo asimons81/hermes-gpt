@@ -1671,13 +1671,15 @@ def reconcile_preview(
     *,
     hermes_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Build one shadow pass envelope WITHOUT persisting anything.
+    """Build one shadow pass envelope without persisting controller state.
 
     Same observation + classification as :func:`reconcile_pass`, but no lease
     is taken, no controller_plan/controller_telemetry rows are written, no
     heartbeat is pulsed, and no attention envelope is spooled. This is the
     truthful dry-run surface: the returned envelope is what a direct pass
-    WOULD decide and record.
+    WOULD decide and record. The only durable side effect is the repo-wide
+    Operator audit trail (every tool call is audited; see AGENTS.md) — no
+    mission, plan, delegation, or controller state is touched.
     """
     started = _now()
     started_ts = _now_ts()
@@ -1796,9 +1798,11 @@ def hermes_controller_reconcile(
     """Run one supervised shadow reconciliation pass.
 
     ``dry_run=True`` (default) returns the exact pass envelope a direct pass
-    would record — via a non-persisting preview that writes NOTHING (no
-    lease, no controller_plan/controller_telemetry, no heartbeat, no
-    attention spool) — and requires only read authority.
+    would record — via a non-persisting preview that writes no mission,
+    plan, delegation, lease, controller_plan/controller_telemetry, heartbeat,
+    or attention state (the only durable side effect is the repo-wide
+    Operator audit trail that every tool call produces) — and requires only
+    read authority.
 
     ``dry_run=False`` runs the persisting pass (controller plans, telemetry,
     leases, heartbeats, attention envelopes) and requires ``workspace`` level

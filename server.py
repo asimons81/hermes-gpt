@@ -2429,7 +2429,9 @@ def hermes_controller_reconcile(
     ``would_execute`` is always False and the returned envelope carries the
     ``would_be_commands`` a higher-autonomy rung would run (D10: not this slice).
 
-    ``dry_run=True`` (default) is a truthful preview: NO durable writes at all.
+    ``dry_run=True`` (default) is a truthful preview: no durable writes to any
+    mission/plan/delegation/controller state (only the repo-wide Operator
+    audit trail every tool call produces).
     ``dry_run=False`` records the pass (controller_plan + controller_telemetry
     + pass lease + heartbeat) and requires workspace level with direct apply
     mode. Nothing is dispatched, completed, or approved in either mode.

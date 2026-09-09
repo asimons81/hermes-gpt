@@ -507,8 +507,14 @@ def load_live_tokens(hermes_root: Path) -> dict[str, Any]:
     for row in rows:
         try:
             record = _decrypt_record(key, row["nonce"], row["ciphertext"])
-        except Exception:
-            continue
+        except Exception as exc:
+            # A live (unretired, unexpired) record that cannot be decrypted
+            # means a corrupt or key-mismatched store. Fail closed: a partial
+            # restore would silently drop credentials (and their revocation
+            # semantics) instead of surfacing the damage.
+            raise TokenStoreError(
+                "token database contains an undecryptable live record"
+            ) from exc
         section = out.get(f"{row['kind']}_tokens")
         if isinstance(section, dict):
             value = record.get("_token_value")
@@ -586,7 +592,10 @@ def commit_tokens(
                 (row_key, kind, nonce, ct, item["expires_at"]),
             )
             issued += 1
-        db.execute("DELETE FROM tokens WHERE expires_at<=? AND retired=1", (now,))
+        # Prune expired LIVE credentials only. Retired rows are tombstones:
+        # they must outlive their original expiry so a later stale reissue of
+        # the same token value can never succeed after the row is gone.
+        db.execute("DELETE FROM tokens WHERE expires_at<=? AND retired=0", (now,))
         live = db.execute("SELECT COUNT(*) AS c FROM tokens WHERE retired=0").fetchone()
         db.execute(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
@@ -711,7 +720,7 @@ def exchange_commit(
                 (row_key, kind, nonce, ct, item["expires_at"]),
             )
             issued += 1
-        db.execute("DELETE FROM tokens WHERE expires_at<=?", (now,))
+        db.execute("DELETE FROM tokens WHERE expires_at<=? AND retired=0", (now,))
         db.execute("COMMIT")
         _cleanup_legacy_artifacts(hermes_root)
         return {
