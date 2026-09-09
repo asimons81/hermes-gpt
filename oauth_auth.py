@@ -40,6 +40,28 @@ _NONCE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 # issuance/refresh persists through token_store without oauth_auth depending
 # on a concrete hermes_root. Never raises; token material never logged.
 _persist_hook: Any | None = None
+# Optional revocation hook. server.py installs it so a durable revocation
+# (hermes_oauth_revoke) also drops the live process's in-memory token caches;
+# otherwise the next issuance would re-persist pre-revocation tokens through
+# the persist hook and resurrect them in the durable store.
+_revocation_hook: Any | None = None
+
+
+def set_revocation_hook(hook: Any | None) -> None:
+    """Install (or clear) the durable-revocation notification hook."""
+    global _revocation_hook
+    _revocation_hook = hook
+
+
+def run_revocation_hook() -> None:
+    """Notify installed hooks that the durable token store was revoked."""
+    if _revocation_hook is None:
+        return
+    try:
+        _revocation_hook()
+    except Exception:
+        # Revocation notification must never break the revoke path.
+        pass
 
 
 def set_persist_hook(hook: Any | None) -> None:
@@ -388,6 +410,44 @@ class OAuthState:
         _run_persist_hook(self, "authorization_code")
         return response
 
+    def validate_refresh_token_grant(self, refresh_token: str, client_id: str) -> dict[str, Any]:
+        """Validate a refresh grant against the authoritative durable envelope.
+
+        In server mode (``_hermes_root`` bound) the durable store is the
+        revocation authority for refresh tokens exactly as for access tokens:
+        a refresh token that is not currently present in the durable envelope
+        is rejected, so an owner revocation cannot be outlived by a copy held
+        in process memory. Returns the validated item.
+        """
+        item = self.refresh_tokens.get(refresh_token)
+        if not item or item.get("expires_at", 0) <= time.time():
+            self.refresh_tokens.pop(refresh_token, None)
+            raise OAuthError("invalid_grant", "Invalid, expired, or already used refresh token.")
+        if item.get("client_id") != client_id:
+            raise OAuthError("invalid_grant", "Refresh token validation failed.")
+        if self._hermes_root is None:
+            return item
+        durable_item: Any = None
+        try:
+            import token_store
+
+            bundle = token_store.load_tokens(self._hermes_root)
+            durable_item = (
+                (bundle.get("refresh_tokens") or {}).get(refresh_token)
+                if isinstance(bundle, dict)
+                else None
+            )
+        except Exception:
+            durable_item = None
+        if not (
+            isinstance(durable_item, dict)
+            and durable_item.get("expires_at", 0) > time.time()
+            and durable_item.get("client_id") == client_id
+        ):
+            self.refresh_tokens.pop(refresh_token, None)
+            raise OAuthError("invalid_grant", "Invalid, expired, or already used refresh token.")
+        return item
+
     def exchange_refresh_token(
         self,
         *,
@@ -396,12 +456,7 @@ class OAuthState:
         requested_scope: str,
     ) -> dict[str, Any]:
         self.cleanup()
-        item = self.refresh_tokens.get(refresh_token)
-        if not item or item.get("expires_at", 0) <= time.time():
-            self.refresh_tokens.pop(refresh_token, None)
-            raise OAuthError("invalid_grant", "Invalid, expired, or already used refresh token.")
-        if item.get("client_id") != client_id:
-            raise OAuthError("invalid_grant", "Refresh token validation failed.")
+        item = self.validate_refresh_token_grant(refresh_token, client_id)
         original_scope = self.normalize_scope(item["scope"])
         scope = self.normalize_scope(requested_scope) if requested_scope.strip() else original_scope
         if not set(scope.split()).issubset(original_scope.split()):
@@ -488,6 +543,17 @@ class OAuthState:
     # through token_store (AES-256-GCM envelope); no token material is
     # ever written to the audit log or returned on surfaces.
     # ------------------------------------------------------------------
+
+    def clear_live_tokens(self) -> None:
+        """Drop all in-memory token caches (durable revocation observer).
+
+        Called when the durable envelope is revoked so a later persist
+        (triggered by any fresh issuance) cannot write pre-revocation tokens
+        back into the durable store.
+        """
+        self.access_tokens.clear()
+        self.refresh_tokens.clear()
+        self.used_auth_codes.clear()
 
     def persist_tokens(self, hermes_root: Path | None = None) -> dict[str, Any]:
         """Encrypt + persist the current access/refresh token stores."""

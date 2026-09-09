@@ -141,7 +141,9 @@ def _parse_iso_ts(value: Any) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def _read_mission_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
+def _read_mission_events(
+    root: Path, mission_id: str, since: int = 0
+) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     db = op_mission_runtime._db_path(root)
     if not db.is_file():
@@ -152,10 +154,12 @@ def _read_mission_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(mission_events)")}
             if "mission_id" not in cols:
                 return events
+            # Resume from the source-local watermark so pagination eventually
+            # delivers events beyond the first MAX_PER_SOURCE window.
             rows = conn.execute(
                 "SELECT seq, event_type, from_status, to_status, reason_sha256, details_json, created_at "
-                "FROM mission_events WHERE mission_id=? ORDER BY seq ASC LIMIT ?",
-                (mission_id, MAX_PER_SOURCE),
+                "FROM mission_events WHERE mission_id=? AND seq>? ORDER BY seq ASC LIMIT ?",
+                (mission_id, since, MAX_PER_SOURCE),
             ).fetchall()
             for row in rows:
                 details_json = (
@@ -187,7 +191,7 @@ def _read_mission_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
 
 
 def _read_delegation_events(
-    root: Path, mission_id: str
+    root: Path, mission_id: str, since: int = 0
 ) -> tuple[list[dict[str, Any]], set[str]]:
     events: list[dict[str, Any]] = []
     task_ids: set[str] = set()
@@ -213,8 +217,8 @@ def _read_delegation_events(
             for delegation_id in delegation_ids:
                 rows = conn.execute(
                     "SELECT seq, event_type, from_state, to_state, backend_state, observed_sha256, created_at "
-                    "FROM delegation_events WHERE delegation_id=? ORDER BY seq ASC LIMIT ?",
-                    (delegation_id, MAX_PER_SOURCE),
+                    "FROM delegation_events WHERE delegation_id=? AND seq>? ORDER BY seq ASC LIMIT ?",
+                    (delegation_id, since, MAX_PER_SOURCE),
                 ).fetchall()
                 for row in rows:
                     events.append(
@@ -246,7 +250,9 @@ def _read_delegation_events(
     return events, task_ids
 
 
-def _read_audit_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
+def _read_audit_events(
+    root: Path, mission_id: str, since: int = 0
+) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     path = root / "logs" / "hermes_gpt_operator_audit.jsonl"
     if not path.is_file():
@@ -256,6 +262,9 @@ def _read_audit_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
             for n, line in enumerate(fh):
                 line = line.strip()
                 if not line:
+                    continue
+                seq = n + 1
+                if seq <= since:
                     continue
                 try:
                     rec = json.loads(line)
@@ -269,12 +278,12 @@ def _read_audit_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
                     {
                         "source": "audit",
                         "cursor_key": "audit",
-                        "source_seq": n + 1,
+                        "source_seq": seq,
                         "ts": str(rec.get("timestamp") or ""),
                         "kind": "tool_call",
                         "status_before": "",
                         "status_after": "success" if rec.get("success") else "error",
-                        "event_id": f"audit:{rec.get('timestamp') or ''}:{n + 1}",
+                        "event_id": f"audit:{rec.get('timestamp') or ''}:{seq}",
                         "refs": [rec.get("tool") or "", f"mission:{mission_id}"],
                         "summary": _sanitize(
                             rec.get("summary")
@@ -294,10 +303,13 @@ def _read_audit_events(root: Path, mission_id: str) -> list[dict[str, Any]]:
     return events
 
 
-def _read_kanban_events(root: Path, task_ids: set[str]) -> list[dict[str, Any]]:
+def _read_kanban_events(
+    root: Path, task_ids: set[str], since_by_board: dict[str, int] | None = None
+) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     if not task_ids:
         return events
+    since_by_board = since_by_board or {}
     boards = root / "kanban" / "boards"
     if not boards.is_dir():
         return events
@@ -307,6 +319,7 @@ def _read_kanban_events(root: Path, task_ids: set[str]) -> list[dict[str, Any]]:
             if not db.is_file():
                 continue
             slug = board.name
+            since = int(since_by_board.get(f"kanban:{slug}", 0))
             try:
                 conn = _open_ro(db)
                 try:
@@ -318,8 +331,8 @@ def _read_kanban_events(root: Path, task_ids: set[str]) -> list[dict[str, Any]]:
                     placeholders = ",".join("?" for _ in task_ids)
                     rows = conn.execute(
                         f"SELECT rowid AS source_rowid, task_id, kind, created_at, actor, summary FROM task_events "
-                        f"WHERE task_id IN ({placeholders}) ORDER BY rowid ASC LIMIT ?",
-                        (*sorted(task_ids), MAX_PER_SOURCE),
+                        f"WHERE task_id IN ({placeholders}) AND rowid>? ORDER BY rowid ASC LIMIT ?",
+                        (*sorted(task_ids), since, MAX_PER_SOURCE),
                     ).fetchall()
                     for row in rows:
                         task_id = str(row["task_id"])
@@ -596,19 +609,27 @@ def hermes_mission_ledger(
 
     all_events: list[dict[str, Any]] = []
     task_ids: set[str] = set()
+    # Source-local resume watermarks: readers start at/after these, so
+    # pagination walks successive MAX_PER_SOURCE windows instead of stalling
+    # on the first one.
+    since = {key: int(seq) for key, seq in cursor_state.items()} if not replay else {}
     for s in queried:
         if s == "delegation":
-            deps, task_ids = _read_delegation_events(root, mission_id)
+            deps, task_ids = _read_delegation_events(
+                root, mission_id, since.get("delegation", 0)
+            )
             all_events.extend(deps)
         elif s == "kanban":
             # kanban needs the mission's task set; if delegation not queried,
             # fetch the task set quietly for the join.
             if not task_ids:
                 _, task_ids = _read_delegation_events(root, mission_id)
-            all_events.extend(_read_kanban_events(root, task_ids))
+            all_events.extend(_read_kanban_events(root, task_ids, since))
         elif s in _SOURCE_READERS:
             all_events.extend(
-                _SOURCE_READERS[s](root, mission_id) if s != "kanban" else []
+                _SOURCE_READERS[s](root, mission_id, since.get(s, 0))
+                if s != "kanban"
+                else []
             )
 
     merged = _merge(all_events)

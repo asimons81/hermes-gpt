@@ -325,3 +325,47 @@ def test_late_older_timestamp_event_is_not_skipped(hermes_root: Path):
     resumed = json.loads(ld.hermes_mission_ledger(mid, cursor=cursor, hermes_root=root))
     assert resumed["count_total"] == 1
     assert resumed["events"][0]["kind"] == "late_ingest"
+
+
+def test_pagination_walks_past_per_source_window(hermes_root: Path):
+    """Pagination must deliver events beyond the first MAX_PER_SOURCE window."""
+    root = hermes_root
+    mid = "msn-big"
+    _seed_mission(root, mid)
+    db = mission._db_path(root)
+    conn = mission._connect(db, write=True)
+    try:
+        # _seed_mission already inserted seq 1-2; add events up to a total
+        # beyond one window.
+        target = ld.MAX_PER_SOURCE + 60
+        for i in range(3, target + 1):
+            conn.execute(
+                "INSERT INTO mission_events (mission_id, event_type, from_status, to_status, reason_sha256, details_json, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (mid, f"ev.{i}", "running", "running", "f" * 64, "{}", f"2026-08-15T12:00:{i % 60:02d}+00:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    seen: list[str] = []
+    cursor = 0
+    for _ in range(200):
+        out = json.loads(ld.hermes_mission_ledger(mid, cursor=cursor, limit=100, hermes_root=root))
+        if out["count_returned"] == 0:
+            break
+        seen.extend(e["event_id"] for e in out["events"])
+        cursor = out["next_cursor"]
+    assert len(seen) == target, f"delivered {len(seen)} of {target}"
+    assert len(set(seen)) == len(seen), "duplicate delivery"
+
+
+def test_ledger_mcp_wrapper_accepts_string_cursor():
+    """The server wrapper's annotation must accept the opaque ld1. cursor."""
+    import inspect
+
+    import server as server_mod
+
+    sig = inspect.signature(server_mod.hermes_mission_ledger)
+    ann = sig.parameters["cursor"].annotation
+    assert ann in ("int | str", int | str), f"cursor annotation is {ann!r}"

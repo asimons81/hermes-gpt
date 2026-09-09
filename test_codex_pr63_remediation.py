@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
+
+import pytest
 
 import oauth_auth
 import operator_controller as controller
@@ -138,3 +139,126 @@ def test_pyyaml_is_a_runtime_dependency():
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     runtime = [str(dep).lower() for dep in data["project"]["dependencies"]]
     assert any(dep == "pyyaml" or dep.startswith("pyyaml") for dep in runtime)
+
+
+# ---------------------------------------------------------------------------
+# Independent-review regressions (follow-up findings on the remediation itself)
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_grant_rejected_after_durable_revocation(tmp_path: Path):
+    """A refresh token held in memory must not outlive durable revocation."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    issuer = oauth_auth.OAuthState(config)
+    issuer.restore_tokens(root)  # binds the durable root (server mode)
+    refresh, item = issuer._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    issuer.refresh_tokens[refresh] = item
+    issuer.persist_tokens(root)
+
+    peer = oauth_auth.OAuthState(config)
+    peer.restore_tokens(root)
+    assert peer.validate_refresh_token_grant(refresh, config.client_id)["client_id"] == config.client_id
+
+    token_store.revoke_tokens(root, rotate_key=False)
+    with pytest.raises(oauth_auth.OAuthError) as excinfo:
+        peer.validate_refresh_token_grant(refresh, config.client_id)
+    assert excinfo.value.error == "invalid_grant"
+    # The stale in-memory copy is dropped, not just rejected once.
+    assert refresh not in peer.refresh_tokens
+
+
+def test_revocation_hook_clears_live_state_and_prevents_resurrection(tmp_path: Path):
+    """After revoke + clear_live_tokens, a later persist cannot resurrect tokens."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    token, item = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[token] = item
+    refresh, ritem = state._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    state.refresh_tokens[refresh] = ritem
+    state.persist_tokens(root)
+
+    token_store.revoke_tokens(root, rotate_key=False)
+    # server.py wires the hook to clear_live_tokens; simulate that wiring:
+    oauth_auth.set_revocation_hook(state.clear_live_tokens)
+    try:
+        oauth_auth.run_revocation_hook()
+        assert token not in state.access_tokens
+        assert refresh not in state.refresh_tokens
+        # A later persist (e.g. triggered by a fresh issuance hook) writes an
+        # empty bundle, not the pre-revocation tokens.
+        state.persist_tokens(root)
+        bundle = token_store.load_tokens(root)
+        assert token not in (bundle.get("access_tokens") or {})
+        assert refresh not in (bundle.get("refresh_tokens") or {})
+    finally:
+        oauth_auth.set_revocation_hook(None)
+
+
+def test_controller_reconcile_dry_run_apply_mode_is_rejected(monkeypatch, tmp_path: Path):
+    """workspace + dry_run posture must not persist controller bookkeeping."""
+    _policy(monkeypatch, "workspace", apply_mode="dry_run")
+    called = False
+
+    def fake_reconcile(*args, **kwargs):
+        nonlocal called
+        called = True
+        return {"success": True}
+
+    monkeypatch.setattr(controller, "reconcile_pass", fake_reconcile)
+    out = json.loads(
+        controller.hermes_controller_reconcile(
+            "msn-codex", dry_run=True, hermes_root=tmp_path
+        )
+    )
+    assert out["success"] is False
+    assert called is False
+    assert "direct" in json.dumps(out)
+
+
+def test_controller_trigger_dry_run_apply_mode_is_rejected(monkeypatch, tmp_path: Path):
+    _policy(monkeypatch, "workspace", apply_mode="dry_run")
+    called = False
+
+    def fake_trigger(*args, **kwargs):
+        nonlocal called
+        called = True
+        return {"success": True, "seq": 1}
+
+    monkeypatch.setattr(controller, "trigger", fake_trigger)
+    out = json.loads(
+        controller.hermes_controller_trigger(
+            "msn-codex", controller.TRIGGER_MANUAL, hermes_root=tmp_path
+        )
+    )
+    assert out["success"] is False
+    assert called is False
+
+
+def test_controller_gates_pass_in_direct_mode(monkeypatch, tmp_path: Path):
+    """The tightened gates must still admit the legitimate direct-mode path."""
+    _policy(monkeypatch, "workspace", apply_mode="direct")
+    monkeypatch.setattr(
+        controller, "reconcile_pass", lambda *a, **k: {"success": True}
+    )
+    out = json.loads(
+        controller.hermes_controller_reconcile(
+            "msn-codex", dry_run=True, hermes_root=tmp_path
+        )
+    )
+    assert out["success"] is True
+    monkeypatch.setattr(controller, "trigger", lambda *a, **k: {"success": True, "seq": 1})
+    out2 = json.loads(
+        controller.hermes_controller_trigger(
+            "msn-codex", controller.TRIGGER_MANUAL, hermes_root=tmp_path
+        )
+    )
+    assert out2["success"] is True

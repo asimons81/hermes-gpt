@@ -1599,11 +1599,15 @@ def hermes_capability_manifest(
 def hermes_mission_ledger(
     mission_id: str,
     source: str = "",
-    cursor: int = 0,
+    cursor: int | str = 0,
     limit: int = 100,
     replay: bool = False,
 ) -> str:
-    """Query the merged, replayable per-mission ledger (read-only, INV-9)."""
+    """Query the merged, replayable per-mission ledger (read-only, INV-9).
+
+    ``cursor`` is an opaque watermark token (the ``next_cursor`` value from a
+    previous page) or 0 to start from the beginning.
+    """
     return op_mission_ledger.hermes_mission_ledger(
         mission_id=mission_id,
         source=source,
@@ -3000,6 +3004,10 @@ def build_server(
                 pass
 
         oauth_auth.set_persist_hook(_persist)
+        # Durable revocation (hermes_oauth_revoke) must also drop this
+        # process's in-memory token caches, or the next issuance would
+        # re-persist the revoked tokens through _persist.
+        oauth_auth.set_revocation_hook(oauth_state.clear_live_tokens)
     register_tools(server)
     return server
 

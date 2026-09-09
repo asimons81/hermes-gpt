@@ -93,8 +93,11 @@ An authorization-code exchange returns an access token with `expires_in=3600`. I
 
 Access tokens are HMAC-SHA256 signed with a key derived from the confidential
 client secret. Clustered origins that share the same issuer, client id, client
-secret, and resource can therefore validate a ChatGPT bearer issued by another
-origin without a shared process-memory token table. Opaque legacy access tokens
+secret, and resource can validate a ChatGPT bearer issued by another origin
+**only when that token is still present in the shared encrypted durable token
+store**. A valid signature alone is never sufficient: in server mode the
+durable store is the revocation authority, so `hermes_oauth_revoke` removes
+access and refresh tokens everywhere at once. Opaque legacy access tokens
 remain valid on the issuing origin via the in-memory/durable store until they
 expire. Rotating the client secret invalidates every signed access token.
 

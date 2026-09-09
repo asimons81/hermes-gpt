@@ -1682,7 +1682,16 @@ def hermes_controller_reconcile(
     policy = op.OperatorPolicy()
     try:
         policy.require_level("workspace")
-        policy.require_mutation(False)
+        # The pass persists controller bookkeeping (plans, telemetry, leases,
+        # heartbeats) unconditionally, so it requires direct apply mode even
+        # when ``dry_run`` is true. ``require_mutation`` alone cannot express
+        # this: with a non-direct apply mode it silently downgrades instead
+        # of raising, which would leave the persistence ungated.
+        if policy.apply_mode != "direct":
+            raise PermissionError(
+                "Controller reconcile persists controller bookkeeping and requires "
+                f"{op.OPERATOR_APPLY_MODE_ENV}=direct."
+            )
         if not MISSION_ID_RE.fullmatch(mission_id or ""):
             raise ValueError("mission_id is invalid")
         if trigger_kind not in TRIGGERS:
@@ -1836,7 +1845,14 @@ def hermes_controller_trigger(
     policy = op.OperatorPolicy()
     try:
         policy.require_level("workspace")
-        policy.require_mutation(False)
+        # Enqueueing persists trigger-queue + recheck state unconditionally:
+        # require direct apply mode. ``require_mutation`` cannot express this
+        # (a non-direct apply mode silently downgrades instead of raising).
+        if policy.apply_mode != "direct":
+            raise PermissionError(
+                "Controller trigger persists queue/recheck state and requires "
+                f"{op.OPERATOR_APPLY_MODE_ENV}=direct."
+            )
         result = trigger(mission_id, trigger_kind, ref, hermes_root=hermes_root)
         _audit(
             "hermes_controller_trigger",
