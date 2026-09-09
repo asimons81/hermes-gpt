@@ -1,0 +1,68 @@
+name: PR63 Codex remediation
+
+on:
+  push:
+    branches:
+      - fix/pr63-remediation
+    paths:
+      - scripts/remediate_pr63.py
+      - .github/workflows/pr63-remediation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out remediation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply deterministic remediation
+        run: python scripts/remediate_pr63.py
+
+      - name: Compile changed Python modules
+        run: |
+          python -m py_compile \
+            oauth_auth.py \
+            operator_controller.py \
+            operator_mission_plan.py \
+            operator_mission_ledger.py \
+            test_codex_pr63_remediation.py \
+            test_operator_mission_ledger.py
+
+      - name: Install test dependencies
+        run: python -m pip install -e '.[dev]'
+
+      - name: Run focused remediation tests
+        run: |
+          python -m pytest \
+            test_codex_pr63_remediation.py \
+            test_operator_mission_ledger.py \
+            test_operator_mission_plan.py \
+            test_operator_controller.py
+
+      - name: Run full suite
+        run: python -m pytest
+
+      - name: Remove temporary remediation machinery
+        run: |
+          rm -f scripts/remediate_pr63.py
+          rm -f .github/workflows/pr63-remediation.yml
+
+      - name: Commit verified remediation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: remediate Codex findings from PR #63'
+            git push origin HEAD:fix/pr63-remediation
+          fi
