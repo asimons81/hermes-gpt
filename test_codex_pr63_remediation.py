@@ -93,6 +93,7 @@ def test_plan_ready_set_requires_successful_parent_completion():
     nodes = [
         {"node_id": "parent", "state": "failed", "parents": []},
         {"node_id": "child", "state": "pending", "parents": ["parent"]},
+        {"node_id": "orphan", "state": "pending", "parents": ["missing"]},
     ]
     assert plan._ready_node_ids(nodes) == []
     nodes[0]["state"] = "completed"
