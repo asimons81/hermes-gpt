@@ -126,6 +126,32 @@ def _write_key_file(hermes_root: Path, key: bytes) -> None:
         pass
 
 
+def _rotate_active_key(hermes_root: Path) -> bool:
+    """Rotate whichever key source is ACTIVE. Returns True on a real rotation.
+
+    - env key (HERMES_GPT_TOKEN_MASTER_KEY): cannot be rotated from here
+      (managed by the operator); returns False so callers report honestly.
+    - keyring: overwrite the stored key with a fresh random key.
+    - key file: delete it; the next _resolve_key generates a new one.
+    """
+    env_key = _key_from_env()
+    if env_key is not None:
+        return False
+    keyring_key = _key_from_keyring()
+    if keyring_key is not None:
+        fresh = secrets.token_bytes(32)
+        if _store_key_in_keyring(fresh):
+            return True
+        return False
+    # key file (or nothing yet): remove + regenerate
+    try:
+        key_file_path(hermes_root).unlink(missing_ok=True)
+        _resolve_key(hermes_root)
+    except Exception:
+        return False
+    return True
+
+
 def _resolve_key(hermes_root: Path) -> tuple[bytes, str, str]:
     """Return (key, kid, source). Key precedence env → keyring → key file."""
     env_key = _key_from_env()
@@ -714,6 +740,13 @@ def exchange_commit(
             value = str(item.get("_token_value") or "")
             if kind not in ("access", "refresh") or not value:
                 continue
+            # Retirement is permanent: never let an issuance (even from the
+            # exchange's own replacement set) overwrite a tombstone.
+            tomb = db.execute(
+                "SELECT 1 FROM tokens WHERE token_key=? AND retired=1", (row_key,)
+            ).fetchone()
+            if tomb:
+                continue
             nonce, ct = _encrypt_record(key, dict(item))
             db.execute(
                 "INSERT OR REPLACE INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,0,NULL)",
@@ -908,15 +941,14 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
         db.execute(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:revoked')"
         )
+        rotated = False
         if rotate_key:
-            # Rotate while still holding the write lock: any concurrent
-            # commit either completed before us (its tokens are now retired)
-            # or waits and then sees the bumped epoch and is refused.
-            try:
-                key_file_path(hermes_root).unlink(missing_ok=True)
-                _resolve_key(hermes_root)  # regenerates
-            except Exception:
-                pass
+            # Rotate the ACTIVE key source while still holding the write
+            # lock: any concurrent commit either completed before us (its
+            # tokens are now retired) or waits and then sees the bumped
+            # epoch and is refused. Honest reporting: env-managed keys
+            # cannot be rotated from here.
+            rotated = _rotate_active_key(hermes_root)
         db.execute("COMMIT")
     except sqlite3.Error as exc:
         try:
@@ -932,6 +964,12 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
     return {
         "revoked": True,
         "envelope_removed": envelope_existed,
-        "key_rotated": bool(rotate_key),
+        "key_rotated": bool(rotate_key) and rotated,
+        "key_rotation_note": (
+            "master key is env-managed (HERMES_GPT_TOKEN_MASTER_KEY); "
+            "rotate it externally"
+            if rotate_key and not rotated
+            else ""
+        ),
         "epoch": epoch + 1,
     }

@@ -1080,3 +1080,66 @@ def test_restore_fails_closed_on_undecryptable_live_record(tmp_path: Path):
     fresh = oauth_auth.OAuthState(config)
     with pytest.raises(token_store.TokenStoreError):
         fresh.restore_tokens(root)
+
+
+def test_exchange_commit_cannot_overwrite_tombstone(tmp_path: Path):
+    """exchange_commit's replacement issuance must never resurrect a retired
+    token key (same guard as commit_tokens)."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    live, li = state._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    dead, di = state._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    state.refresh_tokens[live] = li
+    state.refresh_tokens[dead] = di
+    state.persist_tokens(root)
+
+    # Retire `dead` directly (simulating a prior rotation elsewhere).
+    import sqlite3
+
+    conn = sqlite3.connect(token_store._db_path(root))
+    conn.execute(
+        "UPDATE tokens SET retired=1, retired_at=? WHERE token_key=?",
+        (time.time(), token_store.issue_key("refresh", dead)),
+    )
+    conn.commit()
+    conn.close()
+
+    # Exchange `live`, but the replacement set hostile-ly includes the
+    # retired `dead` value as a "new" refresh token.
+    result = token_store.exchange_commit(
+        root,
+        source_epoch=token_store.read_revocation_epoch(root),
+        presented_kind="refresh",
+        presented_value=live,
+        issue={
+            token_store.issue_key("refresh", dead): {
+                "client_id": config.client_id,
+                "scope": config.scope,
+                "expires_at": time.time() + 3600,
+                "_kind": "refresh",
+                "_token_value": dead,
+            }
+        },
+    )
+    assert result["issued"] == 0, "retired key was re-issued by exchange_commit"
+    assert token_store.lookup_token(root, "refresh", dead) is None
+    # The presented live token was still consumed (rotation happened).
+    assert token_store.lookup_token(root, "refresh", live) is None
+
+
+
+
+def test_revoke_reports_key_rotation_truthfully(tmp_path: Path, monkeypatch):
+    """With an env-managed master key, revoke must NOT claim key_rotated."""
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    result = token_store.revoke_tokens(root, rotate_key=True)
+    assert result["key_rotated"] is False
+    assert "env-managed" in result.get("key_rotation_note", "")
