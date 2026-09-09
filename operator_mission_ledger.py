@@ -386,9 +386,14 @@ def _encode_cursor(watermarks: dict[str, int]) -> str:
     return _CURSOR_PREFIX + base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
 
 
+_SQLITE_MAX_INT = 2**63 - 1
+
+
 def _decode_cursor(value: Any) -> dict[str, int]:
     if value in (None, "", 0, "0"):
         return {}
+    if isinstance(value, bool):
+        raise ValueError("ledger cursor is invalid")
     if isinstance(value, int):
         raise ValueError("legacy numeric ledger cursors are not resumable; restart from cursor=0")
     token = str(value).strip()
@@ -399,14 +404,22 @@ def _decode_cursor(value: Any) -> dict[str, int]:
         padding = "=" * (-len(encoded) % 4)
         raw = base64.b64decode(encoded + padding, altchars=b"-_", validate=True)
         payload = json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
+    except (ValueError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError("ledger cursor is invalid") from exc
     watermarks = payload.get("w") if isinstance(payload, dict) and payload.get("v") == 1 else None
     if not isinstance(watermarks, dict) or len(watermarks) > 256:
         raise ValueError("ledger cursor is invalid")
     out: dict[str, int] = {}
     for key, seq in watermarks.items():
-        if not isinstance(key, str) or not key or len(key) > 128 or not isinstance(seq, int) or seq < 0:
+        if (
+            not isinstance(key, str)
+            or not key
+            or len(key) > 128
+            or isinstance(seq, bool)
+            or not isinstance(seq, int)
+            or seq < 0
+            or seq > _SQLITE_MAX_INT
+        ):
             raise ValueError("ledger cursor is invalid")
         out[key] = seq
     return out

@@ -1665,6 +1665,127 @@ def _count_uncertainty(db: sqlite3.Connection, cutoff: str | None = None) -> int
 # ---------------------------------------------------------------------------
 
 
+def reconcile_preview(
+    mission_id: str,
+    trigger_kind: str,
+    *,
+    hermes_root: Path | None = None,
+) -> dict[str, Any]:
+    """Build one shadow pass envelope WITHOUT persisting anything.
+
+    Same observation + classification as :func:`reconcile_pass`, but no lease
+    is taken, no controller_plan/controller_telemetry rows are written, no
+    heartbeat is pulsed, and no attention envelope is spooled. This is the
+    truthful dry-run surface: the returned envelope is what a direct pass
+    WOULD decide and record.
+    """
+    started = _now()
+    started_ts = _now_ts()
+    path = _db_path(hermes_root)
+
+    pass_env: dict[str, Any] = {
+        "schema": PASS_SCHEMA,
+        "schema_version": SCHEMA_VERSION,
+        "mission_id": mission_id,
+        "node_id": "",
+        "trigger_kind": trigger_kind,
+        "mode": CONTROLLER_MODE,
+        "would_execute": False,
+        "lease_acquired": False,
+        "lease_reclaimed": False,
+        "preview": True,
+        "pass_result": PASS_STALE,
+        "classification": "",
+        "row_key": "",
+        "proposed_action": "",
+        "would_be_commands": [],
+        "need_attention": False,
+        "actions_taken": [{"action": "preview", "detail": "no durable writes"}],
+        "started_at": started,
+    }
+
+    with _connect(path, write=False) as db:
+        mission._get_row(db, mission_id)  # verify the mission exists
+        env, frontier = build_observation(db, hermes_root, mission_id, NullHostAdapter())
+        node_id = frontier.get("node_id", "") if frontier else ""
+        pass_env["node_id"] = node_id
+        try:
+            decision = fs.finalize(fs.classify(mission_id, node_id, env))
+        except fs.ObservationError as exc:
+            decision = fs.finalize(
+                fs.classify(
+                    mission_id,
+                    node_id,
+                    {
+                        "mission": env["mission"],
+                        "plan": env["plan"],
+                        "delegation": env.get("delegation"),
+                        "runner": env.get("runner"),
+                        "worker_exit": {"kind": "unknown", "code": 0},
+                        "last_failure_error": "",
+                        "capability": env.get("capability"),
+                        "breaker": env.get("breaker"),
+                    },
+                )
+            )
+            decision["classification_uncertainty"] = "invalid_observation:" + _sanitize(
+                str(exc), 64
+            )
+
+        row_key = decision["row_key"]
+        contract_sha = frontier.get("contract_sha256", "") if frontier else ""
+        attempt_seq = (int(frontier.get("retries", 0) or 0) + 1) if frontier else 1
+        cmds = _would_be_commands(
+            row_key,
+            mission_id,
+            node_id,
+            contract_sha,
+            attempt_seq,
+            env.get("delegation"),
+        )
+        need_attention = bool(decision.get("need_attention"))
+        tier, tier_reasons = derive_pass_tier(
+            mission_status=str(env["mission"].get("status", "")),
+            classification=str(decision["classification"]),
+            row_key=row_key,
+            need_attention=need_attention,
+            stuck_s=_stuck_seconds(db, mission_id),
+        )
+
+        pass_env.update(
+            {
+                "node_id": node_id,
+                "classification": decision["classification"],
+                "failure_class": decision.get("failure_class", ""),
+                "row_key": row_key,
+                "proposed_action": decision["proposed_action"],
+                "proposed_tool": decision["proposed_tool"],
+                "verify": decision["verify"],
+                "auto_retry": bool(decision.get("auto_retry")),
+                "would_execute": False,
+                "need_attention": need_attention,
+                "pass_result": _pass_result(row_key),
+                "escalation_tier": tier,
+                "escalation_reasons": tier_reasons,
+                "would_be_commands": cmds,
+                "classification_uncertainty": decision.get(
+                    "classification_uncertainty", ""
+                ),
+                "decision_sha256": decision["decision_sha256"],
+                "replan_proposal": decision.get("replan_proposal"),
+                "observation": {
+                    "mission": env["mission"],
+                    "plan": env["plan"],
+                    "delegation": env.get("delegation"),
+                    "runner": env.get("runner"),
+                },
+            }
+        )
+
+    pass_env["duration_ms"] = int((_now_ts() - started_ts) * 1000)
+    return pass_env
+
+
 def hermes_controller_reconcile(
     mission_id: str,
     trigger_kind: str = TRIGGER_MANUAL,
@@ -1674,44 +1795,60 @@ def hermes_controller_reconcile(
 ) -> str:
     """Run one supervised shadow reconciliation pass.
 
-    The pass is decision-only with respect to Mission/work execution, but it
-    persists controller plans, telemetry, leases, heartbeats, and attention
-    envelopes. Therefore every invocation requires the normal ``workspace`` +
-    ``direct`` mutation gates even when ``dry_run`` is true.
+    ``dry_run=True`` (default) returns the exact pass envelope a direct pass
+    would record — via a non-persisting preview that writes NOTHING (no
+    lease, no controller_plan/controller_telemetry, no heartbeat, no
+    attention spool) — and requires only read authority.
+
+    ``dry_run=False`` runs the persisting pass (controller plans, telemetry,
+    leases, heartbeats, attention envelopes) and requires ``workspace`` level
+    plus ``direct`` apply mode. In both modes the pass is decision-only with
+    respect to Mission/work execution: ``would_execute`` is always False and
+    nothing is dispatched.
     """
     policy = op.OperatorPolicy()
     try:
-        policy.require_level("workspace")
-        # The pass persists controller bookkeeping (plans, telemetry, leases,
-        # heartbeats) unconditionally, so it requires direct apply mode even
-        # when ``dry_run`` is true. ``require_mutation`` alone cannot express
-        # this: with a non-direct apply mode it silently downgrades instead
-        # of raising, which would leave the persistence ungated.
-        if policy.apply_mode != "direct":
-            raise PermissionError(
-                "Controller reconcile persists controller bookkeeping and requires "
-                f"{op.OPERATOR_APPLY_MODE_ENV}=direct."
-            )
+        if not dry_run:
+            policy.require_level("workspace")
+            # The persisting pass writes controller bookkeeping (plans,
+            # telemetry, leases, heartbeats) and therefore requires direct
+            # apply mode. ``require_mutation`` cannot express this: with a
+            # non-direct apply mode it silently downgrades instead of
+            # raising, which would leave the persistence ungated.
+            if policy.apply_mode != "direct":
+                raise PermissionError(
+                    "Controller reconcile persists controller bookkeeping and requires "
+                    f"{op.OPERATOR_APPLY_MODE_ENV}=direct."
+                )
+        else:
+            policy.require_level("read_only")
         if not MISSION_ID_RE.fullmatch(mission_id or ""):
             raise ValueError("mission_id is invalid")
         if trigger_kind not in TRIGGERS:
             raise ValueError(f"trigger_kind must be one of {TRIGGERS}")
 
-        result = reconcile_pass(
-            mission_id,
-            trigger_kind,
-            host=NullHostAdapter(),
-            hermes_root=hermes_root,
-            interval=DEFAULT_INTERVAL_SECONDS,
-        )
+        if dry_run:
+            result = reconcile_preview(
+                mission_id,
+                trigger_kind,
+                hermes_root=hermes_root,
+            )
+        else:
+            result = reconcile_pass(
+                mission_id,
+                trigger_kind,
+                host=NullHostAdapter(),
+                hermes_root=hermes_root,
+                interval=DEFAULT_INTERVAL_SECONDS,
+            )
         result["dry_run"] = bool(dry_run)
-        result["changed"] = True
+        result["changed"] = not dry_run
         _audit(
             "hermes_controller_reconcile",
             policy,
             dry_run=bool(dry_run),
             success=not any(k in result for k in ("error",)),
-            changed=True,
+            changed=not dry_run,
             mission_id=mission_id,
             node_id=result.get("node_id", ""),
             extra={

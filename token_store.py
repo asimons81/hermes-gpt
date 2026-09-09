@@ -19,6 +19,7 @@ import base64
 import json
 import os
 import secrets
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -209,6 +210,117 @@ def save_tokens(hermes_root: Path, tokens: dict[str, Any]) -> dict[str, Any]:
     return {"kid": kid, "source": source, "path": str(envelope_path(hermes_root))}
 
 
+REVOCATION_EPOCH_FILENAME = "hermes_gpt_token_epoch"
+_SQLITE_MAX_INT = 2**63 - 1
+
+
+def _epoch_path(hermes_root: Path) -> Path:
+    return _secrets_dir(hermes_root) / REVOCATION_EPOCH_FILENAME
+
+
+def read_revocation_epoch(hermes_root: Path) -> int:
+    """Current durable revocation epoch (monotonic; 0 = never revoked).
+
+    The epoch file survives envelope deletion, so any process — including a
+    clustered peer that never saw the revocation event — can detect that the
+    tokens it still holds in memory predate a revocation and must not be
+    re-persisted.
+    """
+    path = _epoch_path(hermes_root)
+    if not path.exists():
+        return 0
+    try:
+        value = int(path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return 0
+    if not 0 <= value <= _SQLITE_MAX_INT:
+        return 0
+    return value
+
+
+def _bump_revocation_epoch(hermes_root: Path) -> int:
+    """Atomically advance the revocation epoch and return the new value."""
+    d = _secrets_dir(hermes_root)
+    d.mkdir(parents=True, exist_ok=True)
+    path = _epoch_path(hermes_root)
+    next_epoch = read_revocation_epoch(hermes_root) + 1
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(str(next_epoch), encoding="ascii")
+    os.chmod(tmp, 0o600)
+    tmp.replace(path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return next_epoch
+
+
+def merge_persist_tokens(
+    hermes_root: Path,
+    access_updates: dict[str, Any],
+    refresh_updates: dict[str, Any],
+    *,
+    removed_refresh: tuple[str, ...] = (),
+    observed_epoch: int,
+    source_epoch: int,
+) -> dict[str, Any]:
+    """Merge-update the shared durable envelope under revocation-epoch fencing.
+
+    Clustered peers each hold only their own issued tokens in memory, so a
+    plain save would drop every other peer's valid tokens (and, after a
+    revocation, could resurrect pre-revocation tokens from a stale cache).
+    This loads the authoritative envelope, applies only the caller's
+    additions/removals, and re-writes it atomically.
+
+    Epoch fencing: the caller records the epoch its in-memory view was built
+    under (``source_epoch``) and the epoch it observed at decision time
+    (``observed_epoch``). If a revocation happened in between (or the store
+    was revoked at any point before this write: current epoch >
+    ``source_epoch``), the merge refuses so no pre-revocation token can be
+    written back. New tokens minted *after* the caller's last epoch check are
+    fenced by ``observed_epoch``: they are only written when the store's
+    current epoch still equals it.
+
+    Removals (rotated/consumed refresh tokens) are applied against the
+    envelope regardless of the caller's cache, so rotation stays durable even
+    when the writer's view is otherwise stale.
+    """
+    key, kid, source = _resolve_key(hermes_root)
+    current_epoch = read_revocation_epoch(hermes_root)
+    if current_epoch > observed_epoch or current_epoch > source_epoch:
+        raise TokenStoreError(
+            "token envelope was revoked after this view was built; refusing to persist"
+        )
+    try:
+        bundle = load_tokens(hermes_root)
+    except TokenStoreError:
+        bundle = {}
+    if not isinstance(bundle, dict):
+        bundle = {}
+    access = bundle.get("access_tokens")
+    refresh = bundle.get("refresh_tokens")
+    access = dict(access) if isinstance(access, dict) else {}
+    refresh = dict(refresh) if isinstance(refresh, dict) else {}
+    now = time.time()
+    for value, item in (access_updates or {}).items():
+        if isinstance(item, dict) and item.get("expires_at", 0) > now:
+            access[value] = item
+    for value, item in (refresh_updates or {}).items():
+        if isinstance(item, dict) and item.get("expires_at", 0) > now:
+            refresh[value] = item
+    for value in removed_refresh:
+        refresh.pop(value, None)
+    merged = {"access_tokens": access, "refresh_tokens": refresh}
+    _write_envelope(hermes_root, kid, merged, key)
+    return {
+        "kid": kid,
+        "source": source,
+        "path": str(envelope_path(hermes_root)),
+        "epoch": current_epoch,
+        "merged": True,
+    }
+
+
 def load_tokens(hermes_root: Path) -> dict[str, Any]:
     """Load + decrypt the token bundle. Raises TokenStoreError on problems."""
     envelope = load_envelope(hermes_root)
@@ -223,7 +335,9 @@ def load_tokens(hermes_root: Path) -> dict[str, Any]:
 def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, Any]:
     """Revoke durable tokens: delete the envelope (optionally rotate key).
 
-    Returns a bounded summary; never exposes token material.
+    Also advances the durable revocation epoch so clustered peers that still
+    hold pre-revocation tokens in memory can never re-persist them over the
+    revocation. Returns a bounded summary; never exposes token material.
     """
     path = envelope_path(hermes_root)
     existed = path.exists()
@@ -232,6 +346,7 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
             path.unlink()
         except OSError as exc:
             raise TokenStoreError(f"could not remove token envelope: {exc}") from exc
+    epoch = _bump_revocation_epoch(hermes_root)
     rotated = False
     if rotate_key:
         try:
@@ -244,6 +359,7 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
         "revoked": existed,
         "envelope_removed": existed,
         "key_rotated": rotated,
+        "epoch": epoch,
     }
 
 

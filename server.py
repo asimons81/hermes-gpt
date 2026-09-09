@@ -2428,8 +2428,11 @@ def hermes_controller_reconcile(
     taxonomy, and emits the smallest recovery action as a *proposal* —
     ``would_execute`` is always False and the returned envelope carries the
     ``would_be_commands`` a higher-autonomy rung would run (D10: not this slice).
-    The only durable writes are the controller's own ``controller_plan`` +
-    ``controller_telemetry``; nothing is dispatched, completed, or approved.
+
+    ``dry_run=True`` (default) is a truthful preview: NO durable writes at all.
+    ``dry_run=False`` records the pass (controller_plan + controller_telemetry
+    + pass lease + heartbeat) and requires workspace level with direct apply
+    mode. Nothing is dispatched, completed, or approved in either mode.
     """
     return op_controller.hermes_controller_reconcile(
         mission_id, trigger_kind, dry_run=dry_run, hermes_root=_default_hermes_root()

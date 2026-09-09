@@ -189,6 +189,15 @@ class OAuthState:
         # the durable store is authoritative for bearer validity so revocation
         # cannot be bypassed by the clustered signed-token fallback.
         self._hermes_root: Path | None = None
+        # Durable revocation epoch this process's in-memory caches were built
+        # under. A peer that misses a revocation event detects the mismatch
+        # from this value and refuses to re-persist stale tokens.
+        self._epoch: int = 0
+        # Refresh tokens consumed/rotated since the last durable persist.
+        # Because persistence merges rather than replaces, removals must be
+        # carried explicitly or a rotated token would remain durable and
+        # become replayable after a restart.
+        self._retired_refresh_tokens: set[str] = set()
 
     def cleanup(self) -> None:
         now = time.time()
@@ -470,6 +479,7 @@ class OAuthState:
         )
         rotated_value, rotated_item = self._new_refresh_token(client_id=client_id, scope=scope)
         self.refresh_tokens.pop(refresh_token, None)
+        self._retired_refresh_tokens.add(refresh_token)
         self.refresh_tokens[rotated_value] = rotated_item
         self.access_tokens[access_value] = access_item
         _run_persist_hook(self, "refresh")
@@ -545,31 +555,59 @@ class OAuthState:
     # ------------------------------------------------------------------
 
     def clear_live_tokens(self) -> None:
-        """Drop all in-memory token caches (durable revocation observer).
+        """Drop live bearer/refresh caches after a durable revocation.
 
-        Called when the durable envelope is revoked so a later persist
-        (triggered by any fresh issuance) cannot write pre-revocation tokens
-        back into the durable store.
+        Used-code replay state is deliberately RETAINED: clearing it would let
+        an already-exchanged authorization code be exchanged again (fresh
+        credentials minted immediately after revocation) until its five-minute
+        expiry. Rotating the authorization-code key below additionally
+        invalidates every outstanding (unexchanged) code.
         """
         self.access_tokens.clear()
         self.refresh_tokens.clear()
-        self.used_auth_codes.clear()
+        self._authorization_code_key = secrets.token_bytes(32)
 
     def persist_tokens(self, hermes_root: Path | None = None) -> dict[str, Any]:
-        """Encrypt + persist the current access/refresh token stores."""
+        """Merge-persist current live tokens into the shared durable envelope.
+
+        In server mode this never replaces the envelope wholesale: only this
+        process's live tokens are merged in, other processes' tokens are
+        preserved, and revocation-epoch fencing refuses the write entirely if
+        a durable revocation happened after this view was built.
+        """
         import token_store
 
-        bundle: dict[str, Any] = {}
-        for kind, store in (("access_tokens", self.access_tokens), ("refresh_tokens", self.refresh_tokens)):
-            bundle[kind] = {
-                value: item
-                for value, item in store.items()
-                if item.get("expires_at", 0) > time.time()
-            }
         if not hermes_root:
             hermes_root = Path.home() / ".hermes"
         self._hermes_root = Path(hermes_root)
-        return token_store.save_tokens(hermes_root, bundle)
+        now = time.time()
+        access_updates = {
+            value: item
+            for value, item in self.access_tokens.items()
+            if item.get("expires_at", 0) > now
+        }
+        refresh_updates = {
+            value: item
+            for value, item in self.refresh_tokens.items()
+            if item.get("expires_at", 0) > now
+        }
+        try:
+            result = token_store.merge_persist_tokens(
+                hermes_root,
+                access_updates,
+                refresh_updates,
+                removed_refresh=tuple(self._retired_refresh_tokens),
+                observed_epoch=token_store.read_revocation_epoch(hermes_root),
+                source_epoch=self._epoch,
+            )
+        except token_store.TokenStoreError:
+            # A revocation fenced this write off. Drop the stale live caches
+            # so nothing validates or re-persists them later.
+            self.clear_live_tokens()
+            raise
+        self._epoch = int(result.get("epoch", self._epoch))
+        self._retired_refresh_tokens.clear()
+        return result
 
     def restore_tokens(self, hermes_root: Path | None = None) -> dict[str, Any]:
         """Load + decrypt persisted tokens into the in-memory stores.
@@ -581,6 +619,7 @@ class OAuthState:
         if not hermes_root:
             hermes_root = Path.home() / ".hermes"
         self._hermes_root = Path(hermes_root)
+        self._epoch = token_store.read_revocation_epoch(hermes_root)
         bundle = token_store.load_tokens(hermes_root)
         if not bundle:
             return {"restored": 0, "present": False}

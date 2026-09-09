@@ -295,7 +295,7 @@ def run_green_pass_aggregate() -> None:
         _setup_mission(root, "msn-health")
         res = _j(
             ctl.hermes_controller_reconcile(
-                "msn-health", ctl.TRIGGER_MANUAL, hermes_root=root
+                "msn-health", ctl.TRIGGER_MANUAL, dry_run=False, hermes_root=root
             )
         )
         eq(res["classification"], fs.CLASS_NONE_DISPATCHABLE, "ready child")
@@ -390,7 +390,7 @@ def run_red_path_spool() -> None:
             db.commit()
         res = _j(
             ctl.hermes_controller_reconcile(
-                "msn-red", ctl.TRIGGER_PERIODIC, hermes_root=root
+                "msn-red", ctl.TRIGGER_PERIODIC, dry_run=False, hermes_root=root
             )
         )
         eq(res["classification"], fs.CLASS_UNKNOWN, "fail-closed unknown")
@@ -464,7 +464,7 @@ def run_red_path_spool() -> None:
             db.commit()
         _j(
             ctl.hermes_controller_reconcile(
-                "msn-red", ctl.TRIGGER_PERIODIC, hermes_root=root
+                "msn-red", ctl.TRIGGER_PERIODIC, dry_run=False, hermes_root=root
             )
         )
         spool2 = ctl.attention_envelopes(root)
@@ -520,7 +520,7 @@ def run_reclaim_accounting() -> None:
             db.commit()
         res = _j(
             ctl.hermes_controller_reconcile(
-                "msn-reclaim", ctl.TRIGGER_PERIODIC, hermes_root=root
+                "msn-reclaim", ctl.TRIGGER_PERIODIC, dry_run=False, hermes_root=root
             )
         )
         eq(res["lease_acquired"], True, "stale lease reclaimed")
@@ -540,7 +540,7 @@ def run_reclaim_accounting() -> None:
             assert acq["acquired"] is True
         confl = _j(
             ctl.hermes_controller_reconcile(
-                "msn-reclaim", ctl.TRIGGER_DEPENDENCY, hermes_root=root
+                "msn-reclaim", ctl.TRIGGER_DEPENDENCY, dry_run=False, hermes_root=root
             )
         )
         eq(confl["pass_result"], ctl.PASS_STALE, "held lease conflates")
@@ -562,7 +562,7 @@ def run_inv10_loudness() -> None:
         # Fresh heartbeat: tier green after a pass
         _j(
             ctl.hermes_controller_reconcile(
-                "msn-loud", ctl.TRIGGER_MANUAL, hermes_root=root
+                "msn-loud", ctl.TRIGGER_MANUAL, dry_run=False, hermes_root=root
             )
         )
         st = _j(ctl.hermes_controller_status(root))
@@ -625,7 +625,7 @@ def run_migration_backward_compat() -> None:
         # Create a parent-card-shaped store first (controller tables exist)...
         _j(
             ctl.hermes_controller_reconcile(
-                "msn-mig", ctl.TRIGGER_MANUAL, hermes_root=root
+                "msn-mig", ctl.TRIGGER_MANUAL, dry_run=False, hermes_root=root
             )
         )
         # ...then simulate the pre-tier schema: drop the two new columns.
@@ -657,7 +657,7 @@ def run_migration_backward_compat() -> None:
         # Parent's suite fixtures still pass against a migrated store.
         res = _j(
             ctl.hermes_controller_reconcile(
-                "msn-mig", ctl.TRIGGER_MANUAL, hermes_root=root
+                "msn-mig", ctl.TRIGGER_MANUAL, dry_run=False, hermes_root=root
             )
         )
         eq(
