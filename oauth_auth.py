@@ -369,6 +369,22 @@ class OAuthState:
         }
         return token_value, item
 
+    def _sync_epoch_for_fresh_grant(self) -> None:
+        """Adopt the current durable epoch when holding no pre-revocation tokens.
+
+        A fresh grant (authorization-code exchange) mints NEW credentials that
+        must be persistable even right after a revocation. When this process
+        holds no live access/refresh tokens, its epoch can only be stale by
+        revocation — nothing here needs fencing — so adopting the current
+        epoch is safe and unblocks the persist hook. When live tokens ARE
+        held, keep the stricter epoch so a fenced persist still discards them.
+        """
+        if self._hermes_root is None:
+            return
+        if self.access_tokens or self.refresh_tokens:
+            return
+        self._adopt_current_epoch()
+
     def exchange_authorization_code(
         self,
         *,
@@ -378,6 +394,7 @@ class OAuthState:
         code_verifier: str,
     ) -> dict[str, Any]:
         self.cleanup()
+        self._sync_epoch_for_fresh_grant()
         item = self._decode_authorization_code(code)
         nonce = item["nonce"]
         if nonce in self.used_auth_codes or item.get("expires_at", 0) <= time.time():
@@ -440,11 +457,8 @@ class OAuthState:
         try:
             import token_store
 
-            bundle = token_store.load_tokens(self._hermes_root)
-            durable_item = (
-                (bundle.get("refresh_tokens") or {}).get(refresh_token)
-                if isinstance(bundle, dict)
-                else None
+            durable_item = token_store.lookup_token(
+                self._hermes_root, "refresh", refresh_token
             )
         except Exception:
             durable_item = None
@@ -509,11 +523,10 @@ class OAuthState:
         try:
             import token_store
 
-            bundle = token_store.load_tokens(self._hermes_root)
+            item = token_store.lookup_token(self._hermes_root, "access", token_value)
         except Exception:
             self.access_tokens.pop(token_value, None)
             return False
-        item = (bundle.get("access_tokens") or {}).get(token_value) if isinstance(bundle, dict) else None
         if not (
             isinstance(item, dict)
             and item.get("expires_at", 0) > time.time()
@@ -567,13 +580,30 @@ class OAuthState:
         self.refresh_tokens.clear()
         self._authorization_code_key = secrets.token_bytes(32)
 
-    def persist_tokens(self, hermes_root: Path | None = None) -> dict[str, Any]:
-        """Merge-persist current live tokens into the shared durable envelope.
+    def _adopt_current_epoch(self) -> None:
+        """Re-sync this process's view to the durable revocation epoch.
 
-        In server mode this never replaces the envelope wholesale: only this
-        process's live tokens are merged in, other processes' tokens are
-        preserved, and revocation-epoch fencing refuses the write entirely if
-        a durable revocation happened after this view was built.
+        Called after stale credentials were discarded because a commit was
+        fenced off: with the stale caches dropped, adopting the current epoch
+        lets FRESH issuance persist normally instead of being refused forever.
+        """
+        if self._hermes_root is None:
+            return
+        try:
+            import token_store
+
+            self._epoch = token_store.read_revocation_epoch(self._hermes_root)
+        except Exception:
+            pass
+
+    def persist_tokens(self, hermes_root: Path | None = None) -> dict[str, Any]:
+        """Commit current live tokens to the shared durable store.
+
+        Issuance and retirement commit as one locked, epoch-fenced
+        transaction covering both the encrypted envelope (raw values) and
+        the plaintext hash ledger (liveness/retirement). Other processes'
+        tokens are never replaced, and retirement is permanent, so a stale
+        peer cache can never resurrect a rotated or revoked token.
         """
         import token_store
 
@@ -581,29 +611,36 @@ class OAuthState:
             hermes_root = Path.home() / ".hermes"
         self._hermes_root = Path(hermes_root)
         now = time.time()
-        access_updates = {
-            value: item
-            for value, item in self.access_tokens.items()
-            if item.get("expires_at", 0) > now
-        }
-        refresh_updates = {
-            value: item
-            for value, item in self.refresh_tokens.items()
-            if item.get("expires_at", 0) > now
-        }
+        issue: dict[str, dict[str, Any]] = {}
+        for value, item in self.access_tokens.items():
+            if item.get("expires_at", 0) > now:
+                record = dict(item)
+                record["_kind"] = "access"
+                record["_token_value"] = value
+                issue[token_store.issue_key("access", value)] = record
+        for value, item in self.refresh_tokens.items():
+            if item.get("expires_at", 0) > now:
+                record = dict(item)
+                record["_kind"] = "refresh"
+                record["_token_value"] = value
+                issue[token_store.issue_key("refresh", value)] = record
+        retire: dict[str, list[str]] = {}
+        if self._retired_refresh_tokens:
+            retire["refresh"] = list(self._retired_refresh_tokens)
         try:
-            result = token_store.merge_persist_tokens(
+            result = token_store.commit_tokens(
                 hermes_root,
-                access_updates,
-                refresh_updates,
-                removed_refresh=tuple(self._retired_refresh_tokens),
-                observed_epoch=token_store.read_revocation_epoch(hermes_root),
                 source_epoch=self._epoch,
+                issue=issue,
+                retire=retire,
             )
         except token_store.TokenStoreError:
-            # A revocation fenced this write off. Drop the stale live caches
-            # so nothing validates or re-persists them later.
+            # A revocation fenced this commit off. Drop the stale live
+            # caches, re-sync the epoch so fresh issuance can persist, and
+            # surface the failure.
             self.clear_live_tokens()
+            self._retired_refresh_tokens.clear()
+            self._adopt_current_epoch()
             raise
         self._epoch = int(result.get("epoch", self._epoch))
         self._retired_refresh_tokens.clear()
@@ -620,7 +657,7 @@ class OAuthState:
             hermes_root = Path.home() / ".hermes"
         self._hermes_root = Path(hermes_root)
         self._epoch = token_store.read_revocation_epoch(hermes_root)
-        bundle = token_store.load_tokens(hermes_root)
+        bundle = token_store.load_live_tokens(hermes_root)
         if not bundle:
             return {"restored": 0, "present": False}
         restored = 0

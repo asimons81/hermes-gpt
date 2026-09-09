@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 try:
@@ -477,3 +478,185 @@ def test_hostile_ledger_cursors_fail_closed(tmp_path: Path):
     out2 = json.loads(ld.hermes_mission_ledger(mid, cursor=deep, hermes_root=root))
     assert out2["success"] is True
     assert any("invalid" in w for w in out2["warnings"])
+
+
+def test_post_revocation_fresh_exchange_persists(tmp_path: Path):
+    """After revocation, a FRESH code exchange in the same process must still
+    produce durable, cross-process-valid tokens (no permanent fencing)."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    token, item = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[token] = item
+    state.persist_tokens(root)
+
+    token_store.revoke_tokens(root, rotate_key=False)
+    state.clear_live_tokens()
+
+    oauth_auth.set_persist_hook(lambda s, kind: s.persist_tokens(root))
+    try:
+        code = state.issue_authorization_code(
+            client_id=config.client_id,
+            redirect_uri=config.redirect_uris[0],
+            scope=config.scope,
+            resource=config.resource,
+            code_challenge="",
+        )
+        resp = state.exchange_authorization_code(
+            code=code,
+            client_id=config.client_id,
+            redirect_uri=config.redirect_uris[0],
+            code_verifier="",
+        )
+    finally:
+        oauth_auth.set_persist_hook(None)
+
+    bundle = token_store.load_tokens(root)
+    assert resp["access_token"] in bundle["access_tokens"]
+    peer = oauth_auth.OAuthState(config)
+    peer.restore_tokens(root)
+    assert peer.validate_access_token(resp["access_token"]) is True
+    assert peer.validate_access_token(token) is False
+
+
+def test_stale_peer_cannot_reissue_retired_refresh(tmp_path: Path):
+    """Peer B restores R; A rotates R durably; B's later persist must NOT
+    make R usable again (permanent retirement beats stale caches)."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    seeder = oauth_auth.OAuthState(config)
+    seeder.restore_tokens(root)
+    refresh, ritem = seeder._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    seeder.refresh_tokens[refresh] = ritem
+    seeder.persist_tokens(root)
+
+    a = oauth_auth.OAuthState(config)
+    a.restore_tokens(root)
+    b = oauth_auth.OAuthState(config)
+    b.restore_tokens(root)
+
+    oauth_auth.set_persist_hook(lambda s, kind: s.persist_tokens(root))
+    try:
+        resp = a.exchange_refresh_token(
+            refresh_token=refresh, client_id=config.client_id, requested_scope=""
+        )
+    finally:
+        oauth_auth.set_persist_hook(None)
+
+    # B does an unrelated issuance; its stale cache still lists R.
+    tb, ib = b._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    b.access_tokens[tb] = ib
+    b.persist_tokens(root)
+
+    with pytest.raises(oauth_auth.OAuthError) as excinfo:
+        b.validate_refresh_token_grant(refresh, config.client_id)
+    assert excinfo.value.error == "invalid_grant"
+    # The new rotated token is the one that works (a peer that syncs from
+    # the durable store picks it up).
+    fresh_peer = oauth_auth.OAuthState(config)
+    fresh_peer.restore_tokens(root)
+    assert fresh_peer.validate_refresh_token_grant(
+        resp["refresh_token"], config.client_id
+    ) is not None
+
+
+def test_expired_tokens_are_pruned_from_durable_store(tmp_path: Path):
+    """Once a token expires inside the envelope, any subsequent commit must
+    prune it (bounded store)."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    old, oitem = state._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    state.refresh_tokens[old] = oitem
+    state.persist_tokens(root)
+    assert old in token_store.load_tokens(root)["refresh_tokens"]
+
+    # Force-expire it inside the durable envelope only (simulating the
+    # passage of time with no further access by this process).
+    bundle = token_store.load_tokens(root)
+    bundle["refresh_tokens"][old]["expires_at"] = time.time() - 100
+    token_store.save_tokens(root, bundle)
+
+    other = oauth_auth.OAuthState(config)
+    other.restore_tokens(root)
+    tn, tin = other._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    other.access_tokens[tn] = tin
+    other.persist_tokens(root)
+
+    bundle2 = token_store.load_tokens(root)
+    assert old not in bundle2["refresh_tokens"], "expired token survived a commit"
+    assert tn in bundle2["access_tokens"]
+
+
+def test_concurrent_commits_and_revocation_are_serialized(tmp_path: Path):
+    """Commit vs revoke interleaving must never resurrect a revoked token:
+    both take the ledger lock, so the race window is closed."""
+    import threading
+
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    seeder = oauth_auth.OAuthState(config)
+    seeder.restore_tokens(root)
+    tok, item = seeder._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    seeder.access_tokens[tok] = item
+    seeder.persist_tokens(root)
+
+    errors: list[Exception] = []
+    outcomes = {"revoked": False, "committed": False}
+
+    def revoker() -> None:
+        try:
+            token_store.revoke_tokens(root, rotate_key=False)
+            outcomes["revoked"] = True
+        except Exception as exc:  # pragma: no cover
+            errors.append(exc)
+
+    def committer() -> None:
+        try:
+            # A peer with a pre-revocation view tries to persist.
+            token_store.commit_tokens(
+                root,
+                source_epoch=0,
+                issue={
+                    token_store.issue_key("access", tok): {
+                        "client_id": config.client_id,
+                        "scope": config.scope,
+                        "resource": config.resource,
+                        "expires_at": time.time() + 3600,
+                        "_kind": "access",
+                        "_token_value": tok,
+                    }
+                },
+            )
+            outcomes["committed"] = True
+        except token_store.TokenStoreError:
+            outcomes["committed"] = False
+        except Exception as exc:  # pragma: no cover
+            errors.append(exc)
+
+    t1 = threading.Thread(target=revoker)
+    t2 = threading.Thread(target=committer)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    assert not errors, errors
+
+    # Whatever the interleaving, the token must NOT be live afterwards.
+    assert token_store.lookup_token(root, "access", tok) is None, (
+        "revoked/concurrent token resurrected"
+    )
