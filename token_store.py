@@ -127,30 +127,33 @@ def _write_key_file(hermes_root: Path, key: bytes) -> None:
         pass
 
 
-def _rotate_active_key(hermes_root: Path) -> bool:
-    """Rotate whichever key source is ACTIVE. Returns True on a real rotation.
+def _rotate_active_key(hermes_root: Path) -> dict[str, Any]:
+    """Rotate whichever key source is ACTIVE. Returns a structured result:
+    ``{"outcome": "rotated"|"env_managed"|"failed", "source": str}``.
 
     - env key (HERMES_GPT_TOKEN_MASTER_KEY): cannot be rotated from here
-      (managed by the operator); returns False so callers report honestly.
+      (operator-managed); outcome ``env_managed``.
     - keyring: overwrite the stored key with a fresh random key.
     - key file: delete it; the next _resolve_key generates a new one.
+    Failures are reported as ``failed`` with the source, never silently
+    conflated with intentional external key management.
     """
     env_key = _key_from_env()
     if env_key is not None:
-        return False
+        return {"outcome": "env_managed", "source": "env"}
     keyring_key = _key_from_keyring()
     if keyring_key is not None:
         fresh = secrets.token_bytes(32)
         if _store_key_in_keyring(fresh):
-            return True
-        return False
+            return {"outcome": "rotated", "source": "keyring"}
+        return {"outcome": "failed", "source": "keyring"}
     # key file (or nothing yet): remove + regenerate
     try:
         key_file_path(hermes_root).unlink(missing_ok=True)
         _resolve_key(hermes_root)
     except Exception:
-        return False
-    return True
+        return {"outcome": "failed", "source": "keyfile"}
+    return {"outcome": "rotated", "source": "keyfile"}
 
 
 def _resolve_key(hermes_root: Path) -> tuple[bytes, str, str]:
@@ -481,6 +484,20 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
     ):
         raise TokenStoreError("legacy retirement ledger is malformed; refusing to import")
     migrated = 0
+    # Import EVERY legacy retired hash as a permanent tombstone FIRST — a
+    # rotated/revoked token normally no longer appears in the live envelope,
+    # so its hash may exist ONLY in the ledger. Dropping those would erase
+    # retirement history and let a stale peer re-persist the token.
+    for ledger_key in retired:
+        exists = db.execute(
+            "SELECT 1 FROM tokens WHERE token_key=?", (ledger_key,)
+        ).fetchone()
+        if exists:
+            continue
+        db.execute(
+            "INSERT INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,1,?)",
+            (ledger_key, "retired", b"", b"", 0.0, now),
+        )
     for kind in ("access", "refresh"):
         section = bundle.get(f"{kind}_tokens")
         if not isinstance(section, dict):
@@ -1075,16 +1092,15 @@ def _revoke_tokens_locked(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:revoked')"
         )
         db.execute("COMMIT")
-        rotated = False
+        rotation: dict[str, Any] = {"outcome": "not_requested", "source": ""}
         if rotate_key:
             # Rotate the ACTIVE key source only AFTER the transaction
             # committed: SQLite cannot roll back an external key mutation,
             # and rotating mid-transaction would leave still-live rows
             # undecryptable if the commit then failed. Post-commit there are
             # no live rows left to lose (every token was retired above), so
-            # the new key starts clean. Honest reporting: env-managed keys
-            # cannot be rotated from here.
-            rotated = _rotate_active_key(hermes_root)
+            # the new key starts clean.
+            rotation = _rotate_active_key(hermes_root)
     except sqlite3.Error as exc:
         try:
             db.execute("ROLLBACK")
@@ -1096,15 +1112,22 @@ def _revoke_tokens_locked(
     # Legacy artifacts are obsolete once revoked (migration is closed inside
     # the transaction; deletion after commit is best-effort and retryable).
     _cleanup_legacy_artifacts(hermes_root)
+    note = ""
+    if rotate_key and rotation["outcome"] == "env_managed":
+        note = (
+            "master key is env-managed (HERMES_GPT_TOKEN_MASTER_KEY); "
+            "rotate it externally"
+        )
+    elif rotate_key and rotation["outcome"] == "failed":
+        note = (
+            f"master-key rotation FAILED for the active "
+            f"{rotation.get('source', 'unknown')} source; tokens are revoked "
+            f"but the old key remains active — investigate and rotate manually"
+        )
     return {
         "revoked": True,
         "envelope_removed": envelope_existed,
-        "key_rotated": bool(rotate_key) and rotated,
-        "key_rotation_note": (
-            "master key is env-managed (HERMES_GPT_TOKEN_MASTER_KEY); "
-            "rotate it externally"
-            if rotate_key and not rotated
-            else ""
-        ),
+        "key_rotated": bool(rotate_key) and rotation["outcome"] == "rotated",
+        "key_rotation_note": note,
         "epoch": epoch + 1,
     }

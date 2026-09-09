@@ -1298,3 +1298,82 @@ def test_negative_legacy_ledger_epoch_fails_closed(tmp_path: Path, monkeypatch):
     )
     migrated = token_store.migrate_store(root)
     assert migrated["epoch"] >= 1, "negative legacy epoch imported as 0"
+
+
+def test_migration_imports_ledger_only_tombstones(tmp_path: Path, monkeypatch):
+    """A retirement hash that exists ONLY in the legacy ledger (the token
+    already left the envelope) must still migrate as a tombstone."""
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    config = _oauth_config()
+    live, li = oauth_auth.OAuthState(config)._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    # Envelope holds ONLY the live token; the ledger retires a DIFFERENT
+    # hash (the previously rotated one, absent from the envelope).
+    retired_value = "previously-rotated-refresh-token"
+    token_store.save_tokens(root, {"refresh_tokens": {live: dict(li)}})
+    (root / "secrets" / token_store.LEGACY_LEDGER_FILENAME).write_text(
+        json.dumps(
+            {
+                "retired": {token_store.issue_key("refresh", retired_value): {"retired_at": 1.0}},
+                "revocation_epoch": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    migrated = token_store.migrate_store(root)
+    assert migrated["epoch"] == 0
+    # The ledger-only tombstone exists as a retired row...
+    import sqlite3
+
+    conn = sqlite3.connect(token_store._db_path(root))
+    row = conn.execute(
+        "SELECT retired FROM tokens WHERE token_key=?",
+        (token_store.issue_key("refresh", retired_value),),
+    ).fetchone()
+    conn.close()
+    assert row is not None and row[0] == 1, "ledger-only tombstone was dropped"
+    # ...and blocks a stale-peer reissue of that token.
+    stale = oauth_auth.OAuthState(config)
+    stale._hermes_root = root
+    stale._epoch = token_store.read_revocation_epoch(root)
+    stale.refresh_tokens[retired_value] = {"client_id": config.client_id, "scope": config.scope, "expires_at": time.time() + 3600}
+    stale.persist_tokens(root)
+    assert token_store.lookup_token(root, "refresh", retired_value) is None
+
+
+def test_revoke_rotation_failure_reported_as_failure(tmp_path: Path, monkeypatch):
+    """A keyring/keyfile rotation failure must NOT be reported as
+    env-managed; the note must say rotation FAILED."""
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    token, item = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[token] = item
+    state.persist_tokens(root)
+
+    # Force the rotation to fail for whatever source is active.
+    monkeypatch.setattr(
+        token_store, "_store_key_in_keyring", lambda key: False, raising=False
+    )
+    real_unlink = token_store.key_file_path
+
+    def _boom(path):
+        raise OSError("injected failure")
+
+    monkeypatch.setattr(token_store.Path, "unlink", _boom) if False else None
+    # Simpler: patch _rotate_active_key's file branch by making unlink fail.
+    import unittest.mock as mock
+
+    with mock.patch.object(token_store, "_rotate_active_key") as rot:
+        rot.return_value = {"outcome": "failed", "source": "keyring"}
+        result = token_store.revoke_tokens(root, rotate_key=True)
+    assert result["key_rotated"] is False
+    assert "FAILED" in result["key_rotation_note"]
+    assert "env-managed" not in result["key_rotation_note"]
