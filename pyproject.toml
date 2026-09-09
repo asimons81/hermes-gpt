@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-gpt"
-version = "0.8.0"
+version = "0.10.0"
 description = "Local-dev MCP sidecar for exposing selected Hermes Agent capabilities."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -58,6 +58,13 @@ py-modules = [
   "operator_session",
   "operator_mission",
   "operator_mission_runtime",
+  "operator_mission_plan",
+  "operator_mission_ledger",
+  "operator_mission_budget",
+  "operator_capability_manifest",
+  "operator_placement",
+  "operator_failure_semantics",
+  "operator_controller",
   "operator_contract",
   "operator_delegations",
   "operator_job_supervisor",
@@ -71,6 +78,8 @@ py-modules = [
   "operator_swarm",
   "operator_swarm_workflows",
   "operator_recovery",
+  "operator_finance",
+  "finance_worker",
   "codex_core",
   "codex_mcp",
   "codex_config",
@@ -96,6 +105,7 @@ py-modules = [
   "docs/README.md",
   "docs/oauth.md",
   "docs/operator-mode.md",
+  "docs/finance.md",
   "docs/missions.md",
   "docs/live-events.md",
   "docs/delegations.md",

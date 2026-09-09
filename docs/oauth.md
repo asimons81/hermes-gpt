@@ -11,7 +11,7 @@ The built-in authorization server is intentionally narrow:
 - client authentication on every authorization-code and refresh exchange;
 - optional PKCE S256 validation when a client supplies a challenge;
 - one configured Hermes resource scope (required on every issued token) plus the connector compatibility scopes `openid` and `offline_access`;
-- one-hour access tokens;
+- one-hour HMAC-signed access tokens (verifiable by any origin that shares the confidential client secret);
 - 30-day refresh tokens with rotation and replay rejection;
 - signed, five-minute stateless authorization codes plus bounded process-memory replay, access-token, and refresh-token stores;
 - no dynamic client registration, user accounts, persistent plaintext token database, or OpenID Provider claims.
@@ -90,6 +90,13 @@ ChatGPT may add `openid` to the authorization request. `offline_access` is requi
 ## Token lifecycle
 
 An authorization-code exchange returns an access token with `expires_in=3600`. If `offline_access` was granted, it also returns a refresh token. A successful refresh returns a new access token and rotates the refresh token; replaying the old refresh token fails with `invalid_grant`.
+
+Access tokens are HMAC-SHA256 signed with a key derived from the confidential
+client secret. Clustered origins that share the same issuer, client id, client
+secret, and resource can therefore validate a ChatGPT bearer issued by another
+origin without a shared process-memory token table. Opaque legacy access tokens
+remain valid on the issuing origin via the in-memory/durable store until they
+expire. Rotating the client secret invalidates every signed access token.
 
 Authorization codes are short-lived signed values. Only used-code replay state,
 access tokens, and refresh tokens are held in process memory. Since v0.7,

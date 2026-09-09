@@ -1,6 +1,32 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 - 2026-09-07
+
+vNext slice-1 derived mission views and the supervised mission controller (shadow): deterministic MissionPlan decomposition, read-only capability-manifest and mission-ledger views, a dry-run budget envelope, dry-run placement scoring, semantic failure classification with a smallest-first recovery matrix, and a shadow/observe controller reconciler — all additive and decision-only, preserving the existing read-only/dry-run, read-only, and shadow authority ladder. This slice adds ~27 new MCP tools; none of them can mutate a Mission, dispatch work, or approve anything in this release.
+
+- Added the `hermes_plan_*` MissionPlan surface (`hermes_plan_create/get/list/validate/decompose/review/node_transition/set_status`): a deterministic, bounded decomposition DAG over a `MissionSpec`. Plan create/node-transition/set-status are additive to an isolated plan store and read-only with respect to the Mission lifecycle; get/list/review/validate/decompose are read-only. The DAG is validated through a state machine with dry-run-first mutation defaults.
+- Added read-only derived capability-manifest and mission-ledger views (`hermes_capability_manifest`, `hermes_mission_ledger`, `hermes_mission_ledger_replay`): the manifest folds the Fabric node registry, Fleet authority manifest, profile toolsets/skills, and provider manifests into a single queryable capability index; the ledger is a merged, replayable, cursor-paginated per-mission event timeline. Both carry explicit `readOnlyHint`, enforce a per-client source allowlist, audit every call, and expose no mutation path.
+- Added the mission budget envelope (`hermes_budget_set/get/check/record`): a per-mission spend envelope (`budget_accounts`) and a read-only `budget_check` evaluation surface, enforced dry-run-first. The D3 hard-block path (pause Mission + `budget_breaker` signal) is designed but flag-default-off and wired for a later slice.
+- Added deterministic placement scoring (`hermes_placement_score/candidates/get/list`): filter-and-score over the derived capability-manifest index (hard filters then soft scores), decision output only — `would_assign` is always `False`, no assignment executes, and actual dispatch remains on the existing contract/fleet/delegation authority surfaces.
+- Added semantic failure classification and the recovery matrix (`hermes_failure_classify`, `hermes_failure_taxonomy`, `hermes_recovery_matrix`, `hermes_controller_plan_list`): the Ops 8-class taxonomy classifies an authoritative observation envelope and proposes the deterministic smallest-first recovery action; decision output only, `would_execute` always `False`, and the sole durable write is a `controller_plan` row.
+- Added the supervised mission controller shadow loop (`hermes_controller_reconcile/status/lease_list/trigger`): a T1–T5 trigger model, per-mission pass lease (TTL-heartbeat-renewed, crash-reclaimed, conflated), and a single shadow `reconcile` pass that observes authoritative mission/plan/delegation/runner state, classifies it, and emits the smallest recovery action as a proposal. It never dispatches, completes, or approves; its only durable writes are `controller_plan`, `controller_telemetry`, and the pass lease.
+- Added controller telemetry/health (`controller_telemetry`, 24h-windowed aggregated counters with truthful stale-lease-reclaim accounting) tiered deterministically as GREEN / YELLOW / RED per pass plus a controller rollup; RED spools a fleet-attention `INTERRUPT` envelope to the existing delivery-broker lane (no self-send) and stale heartbeats are loud (INV-10).
+- The vNext authority boundary ladder is preserved and documented: read-only surfaces remain read-only, mutating surfaces are dry-run-first, and the controller is a decision-only shadow in this slice (`would_execute`/`would_assign` always false, no deploy path).
+- `serverInfo.version` continues to advertise the checkout version (`versioning.VERSION`) so MCP clients can detect stale processes; the connector surface acceptance gate now pins the merged v0.10.0 tool count (137) with no duplicate registration.
+
+## 0.9.0 - 2026-08-24
+
+First-class Missions, unified delegation lineage, durable live events, runner-neutral job supervision, and the bounded Finance bridge.
+
+- Added the first-class durable Mission runtime: `hermes_mission_create/get/list/update/attach/reconcile/transition/approve` with bounded context/skills manifests, attachments, observed-state reconciliation, and Owner-gated final approval.
+- Added the unified delegation lifecycle `hermes_delegation_dispatch/get/list/reconcile/cancel`: normalized durable lineage across runner/Fabric execution preserving underlying authority and dry-run gates.
+- Added the durable v0.9 live-event surface `hermes_live_events_cursor`/`hermes_live_events_since` plus runner-neutral `hermes_job_status`/`hermes_job_wait` background-job polling contract.
+- Fixed `hermes_cron_create` model serialization to match the Hermes Agent scheduler contract: `model_name` now persists as the string `model` field and `model_provider` as the sibling `provider` field (previously an invalid nested `model` dict).
+- Fixed the MCP initialize handshake to advertise the app version (`serverInfo.version`) from `versioning.VERSION` instead of the SDK distribution version, so clients can detect stale processes.
+- Fixed clustered ChatGPT MCP authentication: access tokens are now HMAC-signed so a bearer issued by one origin of `gpt.tonysimons.dev` is accepted by the other without a shared process-memory token table. Unauthenticated `/mcp` challenges advertise `resource_metadata`. Opaque legacy access tokens remain valid on the issuing origin until expiry.
+
+
+- Added an opt-in `hermes_finance_analyze` bridge for the local `finance` profile. The bridge accepts bounded `finance.evidence/v1` JSON, rejects credential-like material, passes evidence over stdin to a fixed tool-free child, disables Hermes persistence/memory/background review for the turn, requires a matching `finance.decision/v1` response, and records only metadata hashes/lengths in Operator audit. The tool is disabled unless `HERMES_GPT_ENABLE_FINANCE=1`.
 
 ## 0.8.0 - 2026-08-21
 
