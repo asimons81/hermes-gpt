@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 import oauth_auth
 import operator_controller as controller

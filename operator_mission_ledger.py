@@ -334,7 +334,7 @@ def _read_kanban_events(root: Path, task_ids: set[str]) -> list[dict[str, Any]]:
                                 "kind": _sanitize(kind or "task_event"),
                                 "status_before": "",
                                 "status_after": _sanitize(kind or ""),
-                                "event_id": f"kanban:{slug}:{int(row["source_rowid"])}",
+                                "event_id": f"kanban:{slug}:{int(row['source_rowid'])}",
                                 "refs": [f"kanban:{task_id}", f"task:{task_id}"],
                                 "summary": _sanitize(row["summary"])
                                 if row["summary"]
