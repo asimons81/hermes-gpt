@@ -16,6 +16,7 @@ Token store is NOT an MCP mutation surface: only ``oauth_auth`` calls it.
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -262,6 +263,39 @@ CREATE INDEX IF NOT EXISTS idx_tokens_kind ON tokens(kind, retired);
 """
 
 
+def _store_lock_path(hermes_root: Path) -> Path:
+    return _secrets_dir(hermes_root) / (DB_FILENAME + ".lock")
+
+
+class _StoreLock:
+    """Cross-process mutex around credential mutations (flock-based).
+
+    flock locks are owned by the kernel and released automatically when the
+    process dies, so there is no stale-lock breaking to get wrong. Used to
+    serialize the revocation commit + master-key rotation against new
+    issuance: a grant that commits while a rotation is mid-flight would
+    produce a row encrypted under a key that is about to disappear.
+    """
+
+    def __init__(self, hermes_root: Path) -> None:
+        self.path = _store_lock_path(hermes_root)
+        self.fd: int | None = None
+
+    def __enter__(self) -> "_StoreLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        if self.fd is not None:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            finally:
+                os.close(self.fd)
+                self.fd = None
+
+
 def _token_key(kind: str, token_value: str) -> str:
     """Stable row key: opaque hash of the token value (never the value)."""
     digest = hashlib.sha256(f"{kind}\0{token_value}".encode("utf-8")).hexdigest()
@@ -471,7 +505,9 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
                 (row_key, kind, nonce, ct, item.get("expires_at", 0)),
             )
             migrated += 1
-    # Preserve the legacy revocation epoch.
+    # Preserve the legacy revocation epoch. Out-of-range or negative values
+    # are unknown history: fail closed (epoch >= 1) rather than normalizing
+    # to zero, which would erase the revocation fence.
     legacy_epoch = 0
     if isinstance(legacy_ledger.get("revocation_epoch"), int) and not isinstance(
         legacy_ledger.get("revocation_epoch"), bool
@@ -482,13 +518,15 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
             legacy_epoch = int(epoch_path.read_text(encoding="ascii").strip())
         except (OSError, ValueError):
             legacy_epoch = 1  # unknown history -> treat as revoked once
+    if legacy_epoch < 0 or legacy_epoch > _SQLITE_MAX_INT:
+        legacy_epoch = 1  # out-of-range history -> fail closed
     have_epoch = db.execute(
         "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
     ).fetchone()
     if not have_epoch:
         db.execute(
             "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
-            (str(max(0, legacy_epoch)),),
+            (str(legacy_epoch),),
         )
     db.execute(
         "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','done')"
@@ -623,6 +661,20 @@ def commit_tokens(
     issue = issue or {}
     retire = retire or {}
     now = time.time()
+    with _StoreLock(hermes_root):
+        return _commit_tokens_locked(
+            hermes_root, source_epoch=source_epoch, issue=issue, retire=retire
+        )
+
+
+def _commit_tokens_locked(
+    hermes_root: Path,
+    *,
+    source_epoch: int,
+    issue: dict[str, dict[str, Any]],
+    retire: dict[str, list[str]],
+) -> dict[str, Any]:
+    now = time.time()
     db = _connect(hermes_root)
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -753,6 +805,24 @@ def exchange_commit(
     (no replacement credentials are published).
     """
     issue = issue or {}
+    with _StoreLock(hermes_root):
+        return _exchange_commit_locked(
+            hermes_root,
+            source_epoch=source_epoch,
+            presented_kind=presented_kind,
+            presented_value=presented_value,
+            issue=issue,
+        )
+
+
+def _exchange_commit_locked(
+    hermes_root: Path,
+    *,
+    source_epoch: int,
+    presented_kind: str,
+    presented_value: str,
+    issue: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
     now = time.time()
     presented_key = _token_key(presented_kind, presented_value)
     db = _connect(hermes_root)
@@ -976,6 +1046,16 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
     """
     now = time.time()
     envelope_existed = _legacy_envelope_path(hermes_root).exists()
+    with _StoreLock(hermes_root):
+        return _revoke_tokens_locked(
+            hermes_root, rotate_key=rotate_key, envelope_existed=envelope_existed
+        )
+
+
+def _revoke_tokens_locked(
+    hermes_root: Path, *, rotate_key: bool, envelope_existed: bool
+) -> dict[str, Any]:
+    now = time.time()
     db = _connect(hermes_root)
     epoch = 0
     try:

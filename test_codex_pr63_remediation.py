@@ -1203,3 +1203,98 @@ def test_revoke_rotation_happens_after_commit(tmp_path: Path):
     # key_rotated reflects the real post-commit outcome (True or False,
     # never a lie): both are acceptable; it must be a bool.
     assert isinstance(result["key_rotated"], bool)
+
+
+def test_rotation_and_issuance_are_serialized(tmp_path: Path):
+    """A grant committing concurrently with revoke+rotate must never end up
+    encrypted under a key that rotation just discarded."""
+    import threading
+
+    root = tmp_path / "hermes"
+    config = _oauth_config()
+    state = oauth_auth.OAuthState(config)
+    state.restore_tokens(root)
+    seed, si = state._new_access_token(
+        client_id=config.client_id, scope=config.scope, resource=config.resource
+    )
+    state.access_tokens[seed] = si
+    state.persist_tokens(root)
+
+    outcomes = {"issued": 0, "fenced": 0, "errors": 0}
+    grant_values: list[str] = []
+    lock = threading.Lock()
+
+    def issuer() -> None:
+        st = oauth_auth.OAuthState(config)
+        st.restore_tokens(root)
+        for _ in range(5):
+            value, item = st._new_access_token(
+                client_id=config.client_id, scope=config.scope, resource=config.resource
+            )
+            try:
+                token_store.commit_tokens(
+                    root,
+                    source_epoch=token_store.read_revocation_epoch(root),
+                    issue={
+                        token_store.issue_key("access", value): {
+                            "client_id": config.client_id,
+                            "scope": config.scope,
+                            "resource": config.resource,
+                            "expires_at": item["expires_at"],
+                            "_kind": "access",
+                            "_token_value": value,
+                        }
+                    },
+                )
+                with lock:
+                    outcomes["issued"] += 1
+                    grant_values.append(value)
+            except token_store.TokenStoreError:
+                with lock:
+                    outcomes["fenced"] += 1
+            except Exception:
+                with lock:
+                    outcomes["errors"] += 1
+
+    def revoker() -> None:
+        token_store.revoke_tokens(root, rotate_key=True)
+
+    threads = [threading.Thread(target=issuer) for _ in range(3)]
+    rev = threading.Thread(target=revoker)
+    for t in threads:
+        t.start()
+    rev.start()
+    for t in threads:
+        t.join()
+    rev.join()
+
+    assert outcomes["errors"] == 0, outcomes
+    # Every credential that committed must still be readable (correct key),
+    # and the revoked seed must be dead.
+    for value in grant_values:
+        assert token_store.lookup_token(root, "access", value) is not None, (
+            "issued token unreadable after concurrent rotation"
+        )
+    assert token_store.lookup_token(root, "access", seed) is None
+
+
+def test_negative_legacy_ledger_epoch_fails_closed(tmp_path: Path, monkeypatch):
+    """A negative revocation_epoch in the legacy ledger is out-of-range
+    history: it must import as epoch >= 1, never 0."""
+    import time as _time
+
+    root = tmp_path / "hermes2"
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    config = _oauth_config()
+    refresh, ritem = oauth_auth.OAuthState(config)._new_refresh_token(
+        client_id=config.client_id, scope=config.scope
+    )
+    token_store.save_tokens(
+        root, {"refresh_tokens": {refresh: dict(ritem)}}
+    )
+    (root / "secrets" / token_store.LEGACY_LEDGER_FILENAME).write_text(
+        json.dumps({"retired": {}, "revocation_epoch": -5}), encoding="utf-8"
+    )
+    migrated = token_store.migrate_store(root)
+    assert migrated["epoch"] >= 1, "negative legacy epoch imported as 0"

@@ -112,19 +112,30 @@ access tokens, and refresh tokens are held in process memory. Since v0.7,
 issued access and refresh tokens are also persisted to an **encrypted durable
 token store** so a server restart does not invalidate credentials:
 
-- envelope: `<hermes_data>/secrets/hermes_gpt_tokens.json` (0600), AES-256-GCM;
-- revocation epoch: `<hermes_data>/secrets/hermes_gpt_token_epoch` (0600),
-  advanced on every revocation; survives envelope deletion so clustered
-  peers cannot re-persist pre-revocation tokens;
+- store: `<hermes_data>/secrets/hermes_gpt_tokens.db` (0600, SQLite WAL) —
+  one transactional store; each row is AES-256-GCM ciphertext keyed by
+  sha256(token value), so no token material is stored in plaintext. A
+  flock-serialized mutation lock (`hermes_gpt_tokens.db.lock`) orders
+  issuance, rotation, and revocation across processes;
+- retirement tombstones: rotated/revoked token hashes stay retired forever
+  (past their original expiry), so a stale peer cache can never resurrect
+  them; the revocation epoch lives in the store's metadata and is advanced
+  on every revocation;
+- legacy upgrade: pre-SQLite JSON artifacts (`hermes_gpt_tokens.json`,
+  `hermes_gpt_token_ledger`, `hermes_gpt_token_epoch`) are migrated into
+  the store in one transaction at first use, preserving retirement marks
+  and the revocation epoch fail-closed, then removed;
 - key management precedence: OS keyring (`keyring` lib) → key file
   `<hermes_data>/secrets/hermes_gpt_token_key` (0600, created on first use) →
   env `HERMES_GPT_TOKEN_MASTER_KEY` (CI/test only, weakest — documented);
 - no token material is ever written to the audit log or any MCP response;
   `hermes_oauth_status` reports presence/expiry only;
 - explicit revocation: `hermes_oauth_revoke` (owner + direct + confirm)
-  deletes the envelope, advances the revocation epoch, drops the live
-  process's caches + rotates the authorization-code key, and optionally
-  rotates the master key.
+  retires every token and advances the epoch in one transaction, then — under
+  the same mutation lock — drops the live process's caches, rotates the
+  authorization-code key, and optionally rotates the ACTIVE master key
+  (keyring overwrite or key-file regeneration; an env-managed key is
+  reported as not rotated with a note to rotate it externally).
 
 The durable store is **subject to legal review before shipping** (ADR-001,
 risk R4). On hosts without a keyring service the key-file fallback keeps the
