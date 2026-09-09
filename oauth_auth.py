@@ -751,9 +751,11 @@ class OAuthState:
         self._hermes_root = Path(hermes_root)
         # Complete the legacy -> SQLite migration BEFORE loading, so an
         # upgrade restores existing credentials instead of seeing an empty
-        # store (an empty no-op commit runs the transactional migration).
+        # store. migrate_store imports the legacy revocation epoch
+        # faithfully (migration is not credential issuance, so the grant
+        # fence does not apply); it is idempotent and marker-closed.
         try:
-            token_store.commit_tokens(hermes_root, source_epoch=0, issue={})
+            token_store.migrate_store(hermes_root)
         except token_store.TokenStoreError:
             pass  # corrupt/unmigratable store: fail closed below
         self._epoch = token_store.read_revocation_epoch(hermes_root)

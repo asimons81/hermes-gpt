@@ -612,6 +612,46 @@ def commit_tokens(
         db.close()
 
 
+def migrate_store(hermes_root: Path) -> dict[str, Any]:
+    """Run the legacy -> SQLite migration as its own transaction.
+
+    Migration is NOT credential issuance: it must faithfully import
+    whatever revocation epoch the legacy artifacts carry, so the epoch
+    fence used for grants does not apply here (a positive legacy epoch
+    must commit, not roll back). Safe to call at startup and idempotent:
+    the durable 'legacy_migration' marker closes it after the first run.
+    """
+    now = time.time()
+    db = _connect(hermes_root)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        key, kid, source = _resolve_key_parts(hermes_root)
+        _migrate_legacy_locked(db, hermes_root, key, kid, now)
+        meta = db.execute(
+            "SELECT value FROM token_meta WHERE name='revocation_epoch'"
+        ).fetchone()
+        epoch = int(meta["value"]) if meta else 0
+        live = db.execute(
+            "SELECT COUNT(*) AS c FROM tokens WHERE retired=0"
+        ).fetchone()
+        db.execute("COMMIT")
+        _cleanup_legacy_artifacts(hermes_root)
+        return {
+            "kid": kid,
+            "source": source,
+            "epoch": epoch,
+            "records": live["c"] if live else 0,
+        }
+    except sqlite3.Error as exc:
+        try:
+            db.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise TokenStoreError(f"token store migration failed: {exc}") from exc
+    finally:
+        db.close()
+
+
 def exchange_commit(
     hermes_root: Path,
     *,

@@ -928,3 +928,56 @@ def test_structurally_invalid_legacy_ledger_fails_closed(tmp_path: Path):
         assert token_store.lookup_token(root2, "access", token) is None
     finally:
         mp.undo()
+
+
+def test_startup_migration_preserves_positive_legacy_epoch(tmp_path: Path):
+    """A legacy store that was revoked once (epoch=1) must migrate, restore
+    its live credentials, keep epoch=1, and still allow fresh issuance."""
+    import pytest as _pytest
+
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True)
+    config = _oauth_config()
+    mp = _pytest.MonkeyPatch()
+    mp.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    try:
+        refresh, ritem = oauth_auth.OAuthState(config)._new_refresh_token(
+            client_id=config.client_id, scope=config.scope
+        )
+        token_store.save_tokens(root, {"refresh_tokens": {refresh: dict(ritem)}})
+        (root / "secrets" / token_store.LEGACY_LEDGER_FILENAME).write_text(
+            json.dumps({"retired": {}, "revocation_epoch": 1}), encoding="utf-8"
+        )
+
+        state = oauth_auth.OAuthState(config)
+        summary = state.restore_tokens(root)
+        assert summary["restored"] >= 1
+        assert refresh in state.refresh_tokens
+        assert token_store.read_revocation_epoch(root) == 1
+        assert not token_store._legacy_envelope_path(root).exists()
+
+        # Fresh issuance still works against the migrated store.
+        oauth_auth.set_persist_hook(lambda s, k: s.persist_tokens(root))
+        try:
+            code = state.issue_authorization_code(
+                client_id=config.client_id,
+                redirect_uri=config.redirect_uris[0],
+                scope=config.scope,
+                resource=config.resource,
+                code_challenge="",
+            )
+            resp = state.exchange_authorization_code(
+                code=code,
+                client_id=config.client_id,
+                redirect_uri=config.redirect_uris[0],
+                code_verifier="",
+            )
+            assert resp["access_token"]
+            assert (
+                token_store.lookup_token(root, "access", resp["access_token"])
+                is not None
+            )
+        finally:
+            oauth_auth.set_persist_hook(None)
+    finally:
+        mp.undo()
