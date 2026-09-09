@@ -368,6 +368,41 @@ def _decrypt_record(key: bytes, nonce: bytes, ciphertext: bytes) -> dict[str, An
     return data
 
 
+def _close_legacy_migration_locked(
+    db: sqlite3.Connection, hermes_root: Path, ledger_path: Path, epoch_path: Path, now: float, reason: str
+) -> None:
+    """Close legacy migration while preserving every durable fence.
+
+    Imports retirement tombstones from the ledger and preserves the
+    revocation epoch (ledger-authoritative, fail-closed) before writing the
+    close marker — used by the envelope-absent and envelope-corrupt paths
+    alike, so no close branch can erase retirement history.
+    """
+    tombstones = _parse_legacy_retired(hermes_root, ledger_path)
+    for ledger_key in tombstones:
+        exists = db.execute(
+            "SELECT 1 FROM tokens WHERE token_key=?", (ledger_key,)
+        ).fetchone()
+        if not exists:
+            db.execute(
+                "INSERT INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,1,?)",
+                (ledger_key, "retired", b"", b"", 0.0, now),
+            )
+    legacy_epoch = _legacy_epoch_from_ledger_or_file(hermes_root, ledger_path, epoch_path)
+    have_epoch = db.execute(
+        "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
+    ).fetchone()
+    if not have_epoch and legacy_epoch > 0:
+        db.execute(
+            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
+            (str(legacy_epoch),),
+        )
+    db.execute(
+        "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration',?)",
+        (f"closed:{reason}",),
+    )
+
+
 def _legacy_epoch_from_ledger_or_file(
     hermes_root: Path, ledger_path: Path, epoch_path: Path
 ) -> int:
@@ -465,61 +500,18 @@ def _migrate_legacy_locked(db: sqlite3.Connection, hermes_root: Path, key: bytes
         # prior revocation deleted the envelope, yet both fences must
         # survive, or a stale peer could repersist pre-revocation
         # credentials.
-        tombstones = _parse_legacy_retired(hermes_root, ledger_path)
-        for ledger_key in tombstones:
-            exists = db.execute(
-                "SELECT 1 FROM tokens WHERE token_key=?", (ledger_key,)
-            ).fetchone()
-            if not exists:
-                db.execute(
-                    "INSERT INTO tokens(token_key,kind,nonce,ciphertext,expires_at,retired,retired_at) VALUES(?,?,?,?,?,1,?)",
-                    (ledger_key, "retired", b"", b"", 0.0, now),
-                )
-        legacy_epoch = _legacy_epoch_from_ledger_or_file(hermes_root, ledger_path, epoch_path)
-        have_epoch = db.execute(
-            "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
-        ).fetchone()
-        if not have_epoch and legacy_epoch > 0:
-            db.execute(
-                "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
-                (str(legacy_epoch),),
-            )
-        db.execute(
-            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:empty')"
-        )
+        _close_legacy_migration_locked(db, hermes_root, ledger_path, epoch_path, now, "empty")
         return 0
     try:
         envelope = load_envelope(hermes_root)
         bundle = decrypt_envelope(envelope, hermes_root) if envelope else {}
     except TokenStoreError:
         # Corrupt/undecryptable legacy store: close migration, keep files,
-        # but still preserve any legacy revocation epoch.
-        legacy_epoch = _read_legacy_epoch_locked(hermes_root, epoch_path)
-        have_epoch = db.execute(
-            "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
-        ).fetchone()
-        if not have_epoch and legacy_epoch > 0:
-            db.execute(
-                "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
-                (str(legacy_epoch),),
-            )
-        db.execute(
-            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:corrupt')"
-        )
+        # but still preserve tombstones + the revocation epoch.
+        _close_legacy_migration_locked(db, hermes_root, ledger_path, epoch_path, now, "corrupt")
         return 0
     if not isinstance(bundle, dict):
-        legacy_epoch = _read_legacy_epoch_locked(hermes_root, epoch_path)
-        have_epoch = db.execute(
-            "SELECT 1 FROM token_meta WHERE name='revocation_epoch'"
-        ).fetchone()
-        if not have_epoch and legacy_epoch > 0:
-            db.execute(
-                "INSERT OR REPLACE INTO token_meta(name,value) VALUES('revocation_epoch',?)",
-                (str(legacy_epoch),),
-            )
-        db.execute(
-            "INSERT OR REPLACE INTO token_meta(name,value) VALUES('legacy_migration','closed:corrupt')"
-        )
+        _close_legacy_migration_locked(db, hermes_root, ledger_path, epoch_path, now, "corrupt")
         return 0
     legacy_ledger: dict[str, Any] = {}
     ledger_corrupt = False

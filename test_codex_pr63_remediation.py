@@ -1428,3 +1428,44 @@ def test_corrupt_ledger_without_envelope_fails_closed(tmp_path: Path, monkeypatc
     )
     with pytest.raises(token_store.TokenStoreError):
         token_store.commit_tokens(root, source_epoch=0, issue={})
+
+
+def test_corrupt_envelope_preserves_ledger_tombstones(tmp_path: Path, monkeypatch):
+    """Corrupt legacy envelope + valid ledger: tombstones and epoch must
+    survive the corrupt-close (no retirement-history erasure)."""
+    root = tmp_path / "hermes"
+    (root / "secrets").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(token_store.MASTER_KEY_ENV, "test-master-key")
+    retired_value = "token-retired-before-corruption"
+    # Corrupt envelope bytes (undecryptable/invalid JSON).
+    (root / "secrets" / "hermes_gpt_tokens.json").write_text("{corrupt", encoding="utf-8")
+    (root / "secrets" / token_store.LEGACY_LEDGER_FILENAME).write_text(
+        json.dumps(
+            {
+                "retired": {token_store.issue_key("refresh", retired_value): {"retired_at": 1.0}},
+                "revocation_epoch": 4,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Any commit attempts migration -> corrupt envelope -> close:corrupt,
+    # but tombstones + epoch import first.
+    try:
+        token_store.commit_tokens(root, source_epoch=4, issue={})
+    except token_store.TokenStoreError:
+        pass
+
+    import sqlite3
+
+    conn = sqlite3.connect(token_store._db_path(root))
+    row = conn.execute(
+        "SELECT retired FROM tokens WHERE token_key=?",
+        (token_store.issue_key("refresh", retired_value),),
+    ).fetchone()
+    conn.close()
+    assert row is not None and row[0] == 1, "tombstone lost on corrupt-envelope close"
+    # Epoch fence survives for a correctly-epoch'd writer.
+    res = token_store.commit_tokens(root, source_epoch=4, issue={})
+    assert res["epoch"] == 4
+    assert token_store.read_revocation_epoch(root) == 4
