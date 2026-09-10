@@ -668,7 +668,7 @@ def clean_error(tool_name: str, exc: Exception) -> RuntimeError:
     return RuntimeError(f"{tool_name} failed: {exc}")
 
 
-from mcp.server.fastmcp import FastMCP
+from mcp_compat import HermesMCP as FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, ToolAnnotations
 
@@ -2977,6 +2977,7 @@ def build_server(
         allowed_origins.append(f"{issuer.scheme}://{issuer.netloc}")
     server = FastMCP(
         "hermes-gpt",
+        version=VERSION,
         host=host,
         port=port,
         streamable_http_path="/mcp",
@@ -2989,16 +2990,6 @@ def build_server(
             allowed_origins=list(dict.fromkeys(allowed_origins)),
         ),
     )
-    # Advertise the hermes-gpt app version in the initialize handshake.
-    # mcp 1.28.x: FastMCP.__init__ has no version kwarg and constructs the
-    # low-level MCPServer with only name/instructions/website_url/icons. The
-    # low-level Server.create_initialization_options() falls back to the SDK
-    # distribution version (pkg_version("mcp")) when self.version is unset, so
-    # without this every client sees serverInfo.version="1.28.1" and cannot
-    # detect a stale process exposing an old schema. There is no public FastMCP
-    # hook for the app version in 1.28.x, so set it on the private low-level
-    # server instance (minimal, documented private-API use).
-    server._mcp_server.version = VERSION
     setattr(server, "_hermes_oauth_state", oauth_state)
     if oauth_state is not None:
         # v0.7 S5: persist every token issuance/refresh through token_store.

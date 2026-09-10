@@ -13,7 +13,7 @@ authors = [
   { name = "hermes-gpt contributors" }
 ]
 dependencies = [
-  "mcp[cli]>=1.0,<2",
+  "mcp[cli]>=1.28.1,<3",
   "packaging>=23",
   "uvicorn",
   "cryptography>=42",
@@ -83,6 +83,7 @@ py-modules = [
   "finance_worker",
   "codex_core",
   "codex_mcp",
+  "mcp_compat",
   "codex_config",
   "seams",
   "updater",
