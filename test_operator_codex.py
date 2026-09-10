@@ -112,6 +112,9 @@ def test_nolo_job_metadata_and_audit(monkeypatch, tmp_path):
         def start(self):
             self.target(*self.args)
 
+    # The fake worker PID has no OS identity. Keep the supervisor from
+    # invoking macOS ps through the globally patched subprocess.Popen.
+    monkeypatch.setattr(oc.job_supervisor, "process_identity", lambda pid: None)
     monkeypatch.setattr(oc.subprocess, "Popen", lambda *args, **kwargs: FakeProc())
     monkeypatch.setattr(oc.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(oc.op, "audit_record", lambda **kwargs: captured.update(kwargs) or kwargs)

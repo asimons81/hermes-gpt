@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-
 _ISOLATED_ENV_VARS = (
     "HERMES_GPT_OPERATOR_ENABLED",
     "HERMES_GPT_OPERATOR_LEVEL",
@@ -33,6 +32,7 @@ _ISOLATED_ENV_VARS = (
     "HERMES_GPT_OAUTH_REDIRECT_URI",
     "HERMES_GPT_OAUTH_SCOPE",
     "HERMES_GPT_BEARER_TOKEN",
+    "HERMES_GPT_TOKEN_MASTER_KEY",
     # Hermes-side identity env: never inherit the invoking shell's profile or
     # data root during tests. Cleared at import time so collection-time module
     # imports resolve against the sandbox, not the real machine.
@@ -64,6 +64,20 @@ for _name in _ISOLATED_ENV_VARS:
 # import time). An explicit sandbox config.yaml with no a2a_agents keeps the
 # official A2A registry empty so injected test runners stay authoritative.
 os.environ["HERMES_HOME"] = str(_hermes_sandbox())
+
+# Tests and their subprocesses must never read or rotate the user's OS
+# keychain entry. The failing backend makes token_store use its real,
+# per-test key-file fallback. A null/no-op backend would falsely report
+# successful key writes without retaining them and corrupt round trips.
+os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
+try:
+    import keyring as _keyring
+    from keyring.backends.fail import Keyring as _TestKeyring
+except ImportError:
+    pass  # keyring is optional; token_store already falls back to key files.
+else:
+    # A pytest plugin may have initialized the backend before conftest loads.
+    _keyring.set_keyring(_TestKeyring())
 
 # Deterministic MIME type database. The minimal Arch/Python mimetypes DB does
 # not map common office MIME types (e.g. .xlsx), which makes

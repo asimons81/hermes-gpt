@@ -50,13 +50,32 @@ def test_hermes_home_is_redirected_to_a_sandbox_without_real_config():
     assert profile in (None, ""), f"HERMES_PROFILE leaks the invoking shell: {profile!r}"
 
 
+def test_token_keys_stay_in_the_sandbox(tmp_path):
+    """Default token-store persistence cannot reach an OS keychain."""
+    import token_store
+
+    try:
+        import keyring
+        from keyring.backends.fail import Keyring
+    except ImportError:
+        pass
+    else:
+        # Fail before resolving a key if a plugin replaced test isolation.
+        assert isinstance(keyring.get_keyring(), Keyring)
+    key, _kid, source = token_store._resolve_key(tmp_path)
+    assert source == "keyfile"
+    assert len(key) == 32
+    assert token_store.key_file_path(tmp_path).is_file()
+
+
 def test_importing_test_ui_chat_does_not_inject_outside_paths():
     """test_ui_chat collection must not mutate global sys.path beyond the repo."""
     code = (
         "import sys, json\n"
         f"sys.path.insert(0, {str(REPO)!r})\n"
+        "before = list(sys.path)\n"
         "import test_ui_chat\n"
-        "print(json.dumps(sys.path))\n"
+        "print(json.dumps([p for p in sys.path if p not in before]))\n"
         "print(json.dumps(sorted(m for m in sys.modules if m == 'hermes_cli')))\n"
     )
     env = dict(os.environ)
@@ -66,6 +85,7 @@ def test_importing_test_ui_chat_does_not_inject_outside_paths():
     proc = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
+        check=False,
         text=True,
         timeout=60,
         env=env,
