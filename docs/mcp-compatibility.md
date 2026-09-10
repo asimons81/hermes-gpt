@@ -1,38 +1,29 @@
 # MCP Compatibility
 
-- Status: current (v0.8.0, Fabric)
-- Owner: default (implementation: developer profile)
-- Verified: 2026-08-15 against `mcp` 1.28.1 (`mcp.shared.version`)
+- Status: current source (SDK 1/2 compatibility; not a release announcement)
 
-This manifest pins and verifies the Model Context Protocol surface that
-`hermes-gpt` exposes. It is the source of truth for protocol claims; the
-compatibility tests in `test_mcp_compat.py` assert it against the installed
-SDK at test time.
+This manifest describes the MCP surface exposed by both the main server and
+curated Codex server. Package support is `mcp[cli]>=1.28.1,<3`. SDK 1.x remains
+supported; installations may select SDK 2.x without changing Hermes source.
 
-## Minimum supported protocol revision
+## Protocol compatibility
 
-**2024-11-05** (`2024-11-05`).
+The SDK package version and negotiated MCP protocol revision are separate.
+The compatibility tests perform real HTTP `initialize` requests for legacy
+revisions **2024-11-05** and **2025-11-25**, checking the exact negotiated
+revision and Hermes GPT application version on both server surfaces. The
+existing subprocess stdio test also exercises **2025-06-18**.
 
-The server negotiates the highest mutually supported revision at `initialize`
-time and rejects unsupported revisions. Because the minimum is the oldest
-revision the installed SDK supports, every client that speaks at least
-2024-11-05 can interoperate.
+SDK 2 introduces the **2026-07-28** stateless protocol while retaining legacy
+client support. New-protocol clients do not use the legacy initialization
+handshake. These are SDK transport semantics, not a change to Hermes Operator
+authority. See the [SDK migration guide](https://py.sdk.modelcontextprotocol.io/migration/).
 
-## Supported revisions (installed SDK)
-
-The verified `mcp` SDK (1.28.x) declares these protocol revisions:
-
-| Revision | Notes |
-|---|---|
-| `2024-11-05` | Minimum supported; base tools/list + tools/call surface |
-| `2025-03-26` | Added pagination (`nextCursor`) |
-| `2025-06-18` | Added `roots/list`, tool annotations, structured output schema |
-| `2025-11-25` | Latest supported revision (authorization metadata era) |
-
-`mcp.shared.version.LATEST_PROTOCOL_VERSION` is `2025-11-25` at the verified
-version. `test_mcp_compat.py` asserts `2024-11-05` and `2025-11-25` are in the
-running SDK's `SUPPORTED_PROTOCOL_VERSIONS` so a future SDK floor regression
-fails the suite.
+The shared `mcp_compat.HermesMCP` adapter preserves explicit HTTP/SSE options:
+SDK 1 accepts them at construction; SDK 2 accepts them at ASGI app creation.
+Both retain JSON, stateless Streamable HTTP when started with `--http` and
+the existing host/origin restrictions. SDK 2 uses its public app-version
+parameter; only SDK 1 needs the legacy private version assignment.
 
 ## Transport matrix
 
@@ -73,7 +64,7 @@ The MCP specification leaves rendering of embedded resources to the client. Herm
 ## Version advertisement
 
 The `initialize` handshake advertises the hermes-gpt app version in
-`serverInfo.version` (from `versioning.VERSION`, currently `0.8.0`) — not the
+`serverInfo.version` (from `versioning.VERSION`) — not the
 MCP SDK version. This lets a client detect a stale process that is still
 exposing an old schema. `test_mcp_compat.py::test_initialize_advertises_server_version`
 asserts the handshake reports `versioning.VERSION` and that the pinned floor
@@ -92,9 +83,17 @@ Client notes:
   update and cache-refresh behavior; it is the canonical guide and is not
   duplicated here.
 
-## Package floor
+## Package floor and regression coverage
 
-`pyproject.toml` keeps `mcp[cli]>=1.0,<2` as the metadata floor (SDK 1.x
-family). The exact verified version is a test-time fact, not a hard pin, so
-the floor cannot drift silently: `test_mcp_compat.py` fails if the installed
-SDK drops `2024-11-05` or `2025-11-25` support.
+`pyproject.toml` and `requirements.txt` allow `mcp[cli]>=1.28.1,<3`.
+The minimum 1.x version is the previously documented verified SDK, rather
+than the historical untested `>=1.0` metadata floor. SDK 3 is not admitted.
+
+CI runs both SDK families on Python 3.10, 3.11 and 3.12, plus pinned 1.28.1
+and 2.0.0 floor jobs. Tests inspect serialized MCP field aliases, so SDK 2's
+Python snake_case attributes do not alter the expected wire contract.
+The matrix covers tool inventory, annotations, result schemas, binary export,
+authentication and permission gates. Codex Operator aliases return redacted content blocks without an output schema:
+some callbacks return JSON objects and others return plain skill text. Their
+signature uses `Any` instead of promising the original callback's string result.
+Core tools returning typed dictionaries continue to provide structured content.

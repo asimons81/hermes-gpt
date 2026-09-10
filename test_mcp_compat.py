@@ -76,53 +76,16 @@ GATED_WRITE_TOOLS = [
 ]
 
 
-@pytest.fixture()
-def sdk_protocol_versions() -> list[str]:
-    from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
+def test_package_metadata_allows_both_sdk_families():
+    """Published metadata admits tested 1.x/2.x releases, not untested 3.x."""
+    from packaging.requirements import Requirement
 
-    return list(SUPPORTED_PROTOCOL_VERSIONS)
-
-
-def test_installed_sdk_floor_is_pinned(sdk_protocol_versions):
-    """The SDK must support the pinned minimum protocol revision."""
-    assert MIN_PROTOCOL_VERSION in sdk_protocol_versions, (
-        f"installed mcp SDK dropped {MIN_PROTOCOL_VERSION}; update docs/mcp-compatibility.md"
-    )
-
-
-def test_installed_sdk_supports_latest_revision(sdk_protocol_versions):
-    """The SDK must support 2025-11-25 when available (it is at verified 1.28.x)."""
-    assert LATEST_PROTOCOL_VERSION in sdk_protocol_versions, (
-        f"installed mcp SDK dropped {LATEST_PROTOCOL_VERSION}; update docs/mcp-compatibility.md"
-    )
-
-
-def test_package_metadata_allows_mcp_1x_floor():
-    """pyproject.toml keeps the mcp SDK 1.x floor (not a hard 1.28 pin)."""
     dist = importlib.metadata.distribution("hermes-gpt")
-    for req in dist.requires or []:
-        if req.lower().startswith("mcp"):
-            assert ">=" in req and "<2" in req, f"mcp floor drifted: {req}"
-
-
-@pytest.mark.parametrize("protocol", [MIN_PROTOCOL_VERSION, LATEST_PROTOCOL_VERSION])
-def test_initialize_negotiation_accepts_protocol(protocol):
-    """FastMCP initialize accepts a supported protocol revision."""
-    from mcp.server.fastmcp import FastMCP
-
-    server = FastMCP("hermes-gpt-test")
-    # FastMCP stores the protocol version it will negotiate.
-    assert getattr(server, "protocol_version", None) in (
-        None,
-        protocol,
-        LATEST_PROTOCOL_VERSION,
-    )
-    # The server's underlying mcp session advertises supported versions.
-    from mcp.server.session import ServerSession
-    from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
-
-    assert protocol in SUPPORTED_PROTOCOL_VERSIONS
-    assert ServerSession is not None
+    requirements = [Requirement(r) for r in dist.requires or []]
+    mcp = next(r for r in requirements if r.name == "mcp")
+    for version in ("1.28.1", "2.0.0", "2.2.0"):
+        assert version in mcp.specifier
+    assert "3.0.0" not in mcp.specifier
 
 
 def test_http_tool_metadata_noauth_when_unconfigured(monkeypatch):
@@ -274,7 +237,7 @@ def test_all_tools_have_valid_input_schema(built_tools):
     """Proof 2: every registered tool exposes a valid MCP inputSchema."""
     assert built_tools, "no tools registered"
     for name, tool in built_tools.items():
-        schema = tool.inputSchema
+        schema = tool.model_dump(by_alias=True)["inputSchema"]
         assert isinstance(schema, dict), f"{name}: inputSchema not a dict"
         assert schema.get("type") == "object", f"{name}: inputSchema.type != object"
         properties = schema.get("properties")
@@ -288,14 +251,14 @@ def test_read_only_flight_deck_tools_carry_read_only_annotation(built_tools):
     for name in READ_ONLY_ANNOTATED_TOOLS:
         tool = built_tools[name]
         assert tool.annotations is not None, f"{name}: annotations missing"
-        assert tool.annotations.readOnlyHint is True, f"{name}: readOnlyHint not set"
+        assert tool.annotations.model_dump(by_alias=True)["readOnlyHint"] is True, f"{name}: readOnlyHint not set"
 
 
 def test_oauth_revoke_carries_destructive_annotation(built_tools):
     """F4: the destructive revoke tool carries destructiveHint for client UI."""
     tool = built_tools["hermes_oauth_revoke"]
     assert tool.annotations is not None, "hermes_oauth_revoke: annotations missing"
-    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.model_dump(by_alias=True)["destructiveHint"] is True
 
 
 def test_flight_deck_tools_have_titles(built_tools):
@@ -327,38 +290,27 @@ def test_build_server_is_stable_across_calls(monkeypatch):
     assert first  # non-empty
 
 
-def test_initialize_advertises_server_version(built_server):
-    """Proof 9: initialize advertises serverInfo.version == versioning.VERSION
-    and negotiates a supported protocol revision that includes the pinned
-    floor (2024-11-05). This makes stale-schema processes detectable."""
-    import anyio
+@pytest.mark.parametrize("protocol", [MIN_PROTOCOL_VERSION, LATEST_PROTOCOL_VERSION])
+def test_initialize_advertises_server_version(protocol):
+    """Test the real HTTP handshake instead of SDK-private session internals."""
+    from starlette.testclient import TestClient
+
+    import server
     import versioning
-    from mcp.client.session import ClientSession
-    from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 
-    assert built_server._mcp_server.version == versioning.VERSION
-    opts = built_server._mcp_server.create_initialization_options()
-    assert opts.server_version == versioning.VERSION
-
-    async def _handshake():
-        c2s_send, c2s_recv = anyio.create_memory_object_stream()
-        s2c_send, s2c_recv = anyio.create_memory_object_stream()
-        task = asyncio.create_task(
-            built_server._mcp_server.run(c2s_recv, s2c_send, opts)
-        )
-        try:
-            async with ClientSession(s2c_recv, c2s_send) as client:
-                result = await client.initialize()
-                return result
-        finally:
-            task.cancel()
-
-    result = asyncio.run(_handshake())
-    assert result.serverInfo.name == "hermes-gpt"
-    assert result.serverInfo.version == versioning.VERSION
-    assert result.protocolVersion in SUPPORTED_PROTOCOL_VERSIONS
-    # The pinned floor remains negotiable on the running SDK.
-    assert MIN_PROTOCOL_VERSION in SUPPORTED_PROTOCOL_VERSIONS
+    built = server.build_server(http=True)
+    app = server.build_asgi_app(built, http=True)
+    with TestClient(app, base_url="http://127.0.0.1:7677") as client:
+        response = client.post("/mcp", headers={"Accept": "application/json, text/event-stream"}, json={
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": protocol, "capabilities": {},
+                       "clientInfo": {"name": "pytest", "version": "1"}},
+        })
+        assert response.status_code == 200, response.text
+        result = response.json()["result"]
+        assert result["serverInfo"]["name"] == "hermes-gpt"
+        assert result["serverInfo"]["version"] == versioning.VERSION
+        assert result["protocolVersion"] == protocol
 
 
 def test_gated_write_tools_refuse_without_owner_direct_confirm(built_tools, tmp_path):

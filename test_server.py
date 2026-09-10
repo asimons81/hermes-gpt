@@ -1340,4 +1340,4 @@ def test_v09_connector_surface_acceptance(monkeypatch):
     assert len(set(names)) == len(names), "duplicate tool registration"
 
     # serverInfo.version must track the checkout version, not the SDK version.
-    assert built._mcp_server.version == versioning.VERSION == "0.10.0"
+    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.10.0"

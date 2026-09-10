@@ -13,6 +13,7 @@
 - **GitHub release target:** v0.10.0
 - **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
+- **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 

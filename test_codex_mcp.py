@@ -17,7 +17,7 @@ def test_codex_mcp_registry_is_curated_and_complete():
         version="test",
         imports_ready=lambda: True,
         gateway_snapshot=lambda: {"gateway": {"running": False}},
-        gateway_diagnostics_callback=lambda: {},
+        gateway_diagnostics_callback=dict,
         vision_analyze=lambda path, prompt: {},
         web_search=lambda query, limit: {},
         web_extract=lambda urls, limit: {},
@@ -39,17 +39,41 @@ def test_codex_mcp_registry_is_curated_and_complete():
 def test_operator_toolset_is_opt_in_and_namespaced(monkeypatch):
     monkeypatch.setenv(codex_core.CODEX_TOOLSET_ENV, "operator")
     core = codex_core.CodexToolCore(
-        version="test", imports_ready=lambda: True, gateway_snapshot=lambda: {},
-        gateway_diagnostics_callback=lambda: {}, vision_analyze=lambda path, prompt: {},
+        version="test", imports_ready=lambda: True, gateway_snapshot=dict,
+        gateway_diagnostics_callback=dict, vision_analyze=lambda path, prompt: {},
         web_search=lambda query, limit: {}, web_extract=lambda urls, limit: {},
         cron_create_callback=lambda schedule, prompt, dry_run: {},
         skill_create_callback=lambda name, content, dry_run: {},
     )
     def policy() -> str:
         return json.dumps({"success": True, "token": "secret-token-123456789"})
-    server = codex_mcp.build_codex_server(core, operator_tools={"hermes_operator_policy": policy})
+
+    def skill_view(name: str) -> str:
+        return f"# {name}\nPlain skill instructions."
+
+    server = codex_mcp.build_codex_server(core, http=True, operator_tools={
+        "hermes_operator_policy": policy, "hermes_operator_skill_view": skill_view,
+    })
     names = {tool.name for tool in asyncio.run(server.list_tools())}
     assert "hermes_operator_policy" in names
+    from starlette.testclient import TestClient
+
+    with TestClient(server.streamable_http_app(), base_url="http://127.0.0.1:7677") as client:
+        for name, arguments in [("hermes_operator_policy", {}), ("hermes_operator_skill_view", {"name": "example"})]:
+            response = client.post("/mcp", headers={"Accept": "application/json, text/event-stream"}, json={
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            })
+            assert response.status_code == 200, response.text
+            result = response.json()["result"]
+            assert not result.get("isError", False), result
+            text = next(c["text"] for c in result["content"] if c["type"] == "text")
+            assert "secret-token-123456789" not in text
+            assert result.get("structuredContent") is None
+            if name == "hermes_operator_policy":
+                assert json.loads(text)["success"] is True
+            else:
+                assert text == "# example\nPlain skill instructions."
 
 
 def test_invalid_toolset_fails_safely(monkeypatch):

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
-
-from mcp.server.fastmcp import FastMCP
+from collections.abc import Callable
+from typing import Any
 
 from codex_core import CodexToolCore, codex_toolset
+from mcp_compat import HermesMCP as FastMCP
 from versioning import VERSION
-
 
 NOAUTH_META = {"securitySchemes": [{"type": "noauth"}]}
 
@@ -28,6 +27,7 @@ def build_codex_server(core: CodexToolCore, *, host: str = "127.0.0.1", port: in
                        operator_tools: dict[str, Callable[..., Any]] | None = None) -> FastMCP:
     server = FastMCP(
         "hermes-gpt",
+        version=VERSION,
         host=host,
         port=port,
         streamable_http_path="/mcp",
@@ -36,12 +36,6 @@ def build_codex_server(core: CodexToolCore, *, host: str = "127.0.0.1", port: in
         stateless_http=http,
         json_response=http,
     )
-    # Advertise the hermes-gpt app version in the initialize handshake so a
-    # client can detect a stale process exposing an old schema. mcp 1.28.x has
-    # no public FastMCP version hook; the low-level Server falls back to the
-    # SDK version when self.version is unset, so set it on the private instance
-    # (same documented seam as server.build_server()).
-    server._mcp_server.version = VERSION
 
     def hermes_status() -> dict[str, Any]:
         """Check the local Hermes GPT and Hermes Agent gateway state."""
@@ -96,6 +90,7 @@ def build_codex_server(core: CodexToolCore, *, host: str = "127.0.0.1", port: in
                 return _structured_redacted(__callback(*args, **kwargs))
             wrapper.__name__ = alias
             wrapper.__doc__ = callback.__doc__ or f"Hermes Operator tool alias for {callback.__name__}."
-            wrapper.__signature__ = __import__("inspect").signature(callback)  # type: ignore[attr-defined]
+            # The wrapper parses JSON strings; its result is not the callback's str.
+            wrapper.__signature__ = __import__("inspect").signature(callback).replace(return_annotation=Any)  # type: ignore[attr-defined]
             server.add_tool(wrapper, name=alias, meta=NOAUTH_META)
     return server
