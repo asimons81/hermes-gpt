@@ -92,5 +92,7 @@ def build_codex_server(core: CodexToolCore, *, host: str = "127.0.0.1", port: in
             wrapper.__doc__ = callback.__doc__ or f"Hermes Operator tool alias for {callback.__name__}."
             # The wrapper parses JSON strings; its result is not the callback's str.
             wrapper.__signature__ = __import__("inspect").signature(callback).replace(return_annotation=Any)  # type: ignore[attr-defined]
-            server.add_tool(wrapper, name=alias, meta=NOAUTH_META)
+            # Do not rely on how a Python version classifies typing.Any when
+            # inferring a schema: these callbacks can also return plain text.
+            server.add_tool(wrapper, name=alias, meta=NOAUTH_META, structured_output=False)
     return server
