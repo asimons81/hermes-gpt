@@ -15,7 +15,7 @@ The built-in authorization server is intentionally narrow:
   without a stored S256 challenge can never be exchanged, so a stolen or
   intercepted code is useless without the verifier;
 - one configured Hermes resource scope (required on every issued token) plus the connector compatibility scopes `openid` and `offline_access`;
-- one-hour access tokens;
+- one-hour HMAC-signed access tokens (verifiable by any origin that shares the confidential client secret);
 - 30-day refresh tokens with rotation and replay rejection;
 - signed, five-minute stateless authorization codes plus bounded process-memory replay, access-token, and refresh-token stores;
 - no dynamic client registration, user accounts, persistent plaintext token database, or OpenID Provider claims.
@@ -103,19 +103,51 @@ ChatGPT may add `openid` to the authorization request. `offline_access` is requi
 
 An authorization-code exchange returns an access token with `expires_in=3600`. If `offline_access` was granted, it also returns a refresh token. A successful refresh returns a new access token and rotates the refresh token; replaying the old refresh token fails with `invalid_grant`.
 
+Access tokens are HMAC-SHA256 signed with a key derived from the confidential
+client secret. Clustered origins that share the same issuer, client id, client
+secret, and resource can validate a ChatGPT bearer issued by another origin
+**only when that token is still present in the shared encrypted durable token
+store**. A valid signature alone is never sufficient: in server mode the
+durable store is the revocation authority, so `hermes_oauth_revoke` removes
+access and refresh tokens everywhere at once: the envelope is deleted, a
+durable revocation epoch is advanced (fencing off any clustered peer that
+still holds pre-revocation tokens in memory and would otherwise re-persist
+them), and the live process drops its caches and rotates the
+authorization-code signing key. Issuance merges into the shared envelope
+rather than replacing it, so one origin's issuance never evicts another
+origin's valid tokens. Opaque legacy access tokens
+remain valid on the issuing origin via the in-memory/durable store until they
+expire. Rotating the client secret invalidates every signed access token.
+
 Authorization codes are short-lived signed values. Only used-code replay state,
 access tokens, and refresh tokens are held in process memory. Since v0.7,
 issued access and refresh tokens are also persisted to an **encrypted durable
 token store** so a server restart does not invalidate credentials:
 
-- envelope: `<hermes_data>/secrets/hermes_gpt_tokens.json` (0600), AES-256-GCM;
+- store: `<hermes_data>/secrets/hermes_gpt_tokens.db` (0600, SQLite WAL) —
+  one transactional store; each row is AES-256-GCM ciphertext keyed by
+  sha256(token value), so no token material is stored in plaintext. A
+  flock-serialized mutation lock (`hermes_gpt_tokens.db.lock`) orders
+  issuance, rotation, and revocation across processes;
+- retirement tombstones: rotated/revoked token hashes stay retired forever
+  (past their original expiry), so a stale peer cache can never resurrect
+  them; the revocation epoch lives in the store's metadata and is advanced
+  on every revocation;
+- legacy upgrade: pre-SQLite JSON artifacts (`hermes_gpt_tokens.json`,
+  `hermes_gpt_token_ledger`, `hermes_gpt_token_epoch`) are migrated into
+  the store in one transaction at first use, preserving retirement marks
+  and the revocation epoch fail-closed, then removed;
 - key management precedence: OS keyring (`keyring` lib) → key file
   `<hermes_data>/secrets/hermes_gpt_token_key` (0600, created on first use) →
   env `HERMES_GPT_TOKEN_MASTER_KEY` (CI/test only, weakest — documented);
 - no token material is ever written to the audit log or any MCP response;
   `hermes_oauth_status` reports presence/expiry only;
 - explicit revocation: `hermes_oauth_revoke` (owner + direct + confirm)
-  deletes the envelope and optionally rotates the master key.
+  retires every token and advances the epoch in one transaction, then — under
+  the same mutation lock — drops the live process's caches, rotates the
+  authorization-code key, and optionally rotates the ACTIVE master key
+  (keyring overwrite or key-file regeneration; an env-managed key is
+  reported as not rotated with a note to rotate it externally).
 
 The durable store is **subject to legal review before shipping** (ADR-001,
 risk R4). On hosts without a keyring service the key-file fallback keeps the

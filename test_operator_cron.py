@@ -697,3 +697,40 @@ def test_cron_create_direct_with_named_profile(hermes_root, clean_env, audit_ove
     jobs = oc._read_jobs(target_home)
     assert len(jobs) == 1
     assert jobs[0]["name"] == "health-check"
+
+
+def test_cron_create_scheduler_contract_model_fields(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    out = oc.hermes_cron_create(
+        profile="default", schedule="every 30m", prompt="run report",
+        name="model-job", model_provider="openai", model_name="gpt-5",
+        dry_run=False, hermes_root=hermes_root,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    # Scheduler contract: model_name -> string "model", provider alongside it.
+    # (the returned job view is redacted; verify the persisted job dict)
+    jobs = oc._read_jobs(hermes_root)
+    written = next(j for j in jobs if j["id"] == parsed["job_id"])
+    assert written["model"] == "gpt-5"
+    assert written["provider"] == "openai"
+    assert not isinstance(written["model"], dict)
+def test_cron_create_model_only_scheduler_contract(hermes_root, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "cron")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    out = oc.hermes_cron_create(
+        profile="default", schedule="every 1h", prompt="check status",
+        name="model-only", model_name="claude-sonnet-4",
+        dry_run=False, hermes_root=hermes_root,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    jobs = oc._read_jobs(hermes_root)
+    written = next(j for j in jobs if j["id"] == parsed["job_id"])
+    assert written["model"] == "claude-sonnet-4"
+    assert "provider" not in written
+    assert not isinstance(written["model"], dict)
+

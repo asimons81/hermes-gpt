@@ -629,6 +629,125 @@ def test_safe_completion_filters_hidden_data_and_parses_decorative_nested_utf8(m
     assert "TOKEN" not in rendered and "hidden prompt" not in rendered and "tool_traces" not in rendered
 
 
+def _official_peer_env(monkeypatch, *, name: str = "macbook-m5", token: str = "peer-token"):
+    monkeypatch.setattr(fleet, "_registered_agent", lambda *args, **kwargs: (name, None))
+    monkeypatch.setattr(
+        fleet,
+        "_a2a_peers_with_resolved_tokens",
+        lambda: {name: {"url": f"http://{name}.example:9900", "auth": {"type": "bearer", "token": token}}},
+    )
+
+
+def test_official_fleet_task_then_result_lifecycle_forwards_peer_bearer(monkeypatch):
+    enable_read_only(monkeypatch)
+    _official_peer_env(monkeypatch)
+    calls: list[tuple[str, dict, dict]] = []
+    bundle = {
+        "completion_bundle": {
+            "status": "completed",
+            "node": "macbook-m5",
+            "profile": "default",
+            "summary": "audit complete",
+            "changed_paths": ["report.md"],
+            "artifacts": ["audit.txt"],
+            "verification": ["read-only"],
+            "residual_risk": "none",
+            "recommended_next_action": "review",
+            "authorization": {"class": "read_only", "approved": False},
+            "environment": {"TOKEN": "do-not-return"},
+        }
+    }
+    remote_task = {
+        "id": "task-d2b6290bcf064baa",
+        "status": {"state": "TASK_STATE_COMPLETED", "timestamp": "2026-08-25T21:48:01.743Z"},
+        "artifacts": [{"parts": [{"text": json.dumps(bundle)}]}],
+    }
+
+    def fake_post(url, body, headers, timeout):
+        calls.append((url, body, headers))
+        assert headers.get("Authorization") == "Bearer peer-token"
+        assert body["method"] == "GetTask"
+        assert body["params"]["id"] == "task-d2b6290bcf064baa"
+        return {"result": remote_task}
+
+    monkeypatch.setattr(fleet, "_fetch_card", lambda *args, **kwargs: {})
+    monkeypatch.setattr(fleet, "_http_post_json", fake_post)
+
+    task = json.loads(fleet.hermes_fleet_task("macbook-m5", "task-d2b6290bcf064baa"))
+    result = json.loads(fleet.hermes_fleet_result("macbook-m5", "task-d2b6290bcf064baa"))
+
+    assert task == {
+        "success": True,
+        "agent": "macbook-m5",
+        "task_id": "task-d2b6290bcf064baa",
+        "state": "TASK_STATE_COMPLETED",
+        "timestamp": "2026-08-25T21:48:01.743Z",
+        "artifact_count": 1,
+    }
+    assert result["success"] is True
+    assert result["task_id"] == "task-d2b6290bcf064baa"
+    assert result["status"] == "completed"
+    assert result["node"] == "macbook-m5"
+    assert result["summary"] == "audit complete"
+    assert result["artifacts"] == ["audit.txt"]
+    assert result["changed_paths"] == ["report.md"]
+    assert set(result) <= {
+        "success",
+        "task_id",
+        "status",
+        "node",
+        "profile",
+        "summary",
+        "changed_paths",
+        "artifacts",
+        "verification",
+        "residual_risk",
+        "recommended_next_action",
+        "authorization",
+    }
+    rendered = json.dumps(result)
+    assert "TOKEN" not in rendered and "peer-token" not in rendered
+    assert len(calls) == 2
+    assert all(call[2].get("Authorization") == "Bearer peer-token" for call in calls)
+
+
+def test_fleet_result_rejects_unauthenticated_and_unauthorized_callers(monkeypatch):
+    monkeypatch.delenv(op.OPERATOR_ENABLED_ENV, raising=False)
+    out = json.loads(fleet.hermes_fleet_result("macbook-m5", "task-d2b6290bcf064baa", runner=runner_with({}, []), hermes_bin=HERMES))
+    assert out["code"] == "FLEET_POLICY_DENIED"
+
+    enable_read_only(monkeypatch)
+    calls: list[list[str]] = []
+    runner = runner_with(
+        {(HERMES, "a2a", "registry", "list", "--json"): (0, json.dumps(REGISTRY), "")},
+        calls,
+    )
+    unknown_peer = json.loads(fleet.hermes_fleet_result("not-a-peer", "task-d2b6290bcf064baa", runner=runner, hermes_bin=HERMES))
+    assert unknown_peer["code"] == "UNKNOWN_AGENT"
+    assert all("task" not in call for call in calls)
+
+    unknown_task = json.loads(fleet.hermes_fleet_result("rza", "!!!", runner=runner, hermes_bin=HERMES))
+    assert unknown_task["code"] == "INVALID_TASK_ID"
+
+
+def test_official_fleet_result_does_not_leak_peer_token_on_http_401(monkeypatch):
+    enable_read_only(monkeypatch)
+    _official_peer_env(monkeypatch, token="super-secret-peer-token")
+    import urllib.error
+
+    def fake_post(url, body, headers, timeout):
+        raise urllib.error.HTTPError(url, 401, "unauthorized", hdrs=None, fp=None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(fleet, "_fetch_card", lambda *args, **kwargs: {})
+    monkeypatch.setattr(fleet, "_http_post_json", fake_post)
+    out = json.loads(fleet.hermes_fleet_result("macbook-m5", "task-d2b6290bcf064baa"))
+    rendered = json.dumps(out)
+    assert out["success"] is False
+    assert out["code"] == "FLEET_RESULT_ERROR"
+    assert "super-secret-peer-token" not in rendered
+    assert "Bearer " not in rendered
+
+
 def test_result_rejects_truncated_and_oversized_remote_output(monkeypatch):
     enable_read_only(monkeypatch)
     for remote in ('{"task":', '{"task":"' + ("x" * fleet._MAX_REMOTE_BYTES) + '"}'):

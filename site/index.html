@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hermes GPT v0.8.0 Fabric | Local-First Distributed Execution for Hermes Agent</title>
-  <meta name="description" content="Hermes GPT v0.8.0 Fabric adds authenticated cross-machine Swarm execution, capability-aware routing, verified remote evidence and artifacts, reconciliation, and Fabric Flight Deck visibility while preserving local-first authority and human approval.">
+  <title>Hermes GPT v0.10.0 vNext | Supervised Mission Control for Hermes Agent</title>
+  <meta name="description" content="Hermes GPT v0.10.0 vNext adds a supervised, decision-only mission controller: MissionPlan decomposition DAGs, derived capability-manifest and mission-ledger views, a dry-run budget envelope, placement scoring, failure semantics, and a shadow/observe reconciler — 27 new tools, none can mutate, dispatch, or approve.">
   <meta name="theme-color" content="#030303">
-  <meta property="og:title" content="Hermes GPT v0.8.0 | Fabric">
-  <meta property="og:description" content="Authenticated cross-machine Swarm execution with capability-aware routing, verified evidence and artifacts, reconciliation, and preserved coordinator authority.">
-  <meta property="og:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.8.0-readme-hero.jpg">
+  <meta property="og:title" content="Hermes GPT v0.10.0 | vNext — Supervised Mission Controller">
+  <meta property="og:description" content="Decision-only mission autonomy for Hermes Agent: MissionPlan DAGs, capability manifest + mission ledger, budget envelope, placement scoring, failure taxonomy, and a shadow controller that proposes but never acts.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.10.0-readme-hero.jpg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Hermes GPT v0.8.0 | Fabric">
-  <meta name="twitter:description" content="A local-first distributed execution fabric for Hermes Agent.">
-  <meta name="twitter:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.8.0-readme-hero.jpg">
+  <meta name="twitter:title" content="Hermes GPT v0.10.0 | vNext — Supervised Mission Controller">
+  <meta name="twitter:description" content="Supervised, decision-only mission autonomy for Hermes Agent.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.10.0-readme-hero.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -24,55 +24,55 @@
     <header class="topbar reveal">
       <a class="brand" href="#top" aria-label="Hermes GPT Home">
         <span class="brand-mark" aria-hidden="true">HG</span>
-        <span class="brand-copy"><strong>Hermes GPT</strong><small>v0.8.0 Fabric</small></span>
+        <span class="brand-copy"><strong>Hermes GPT</strong><small>v0.10.0 vNext</small></span>
       </a>
       <nav class="topnav" aria-label="Primary navigation">
-        <a href="#fabric">Fabric</a><a href="#how-it-works">How it works</a><a href="#simulator">Simulator</a><a href="#features">Features</a><a href="#install">Install</a>
+        <a href="#vnext">vNext</a><a href="#how-it-works">How it works</a><a href="#simulator">Simulator</a><a href="#features">Features</a><a href="#install">Install</a>
       </nav>
       <a class="ghost-link" href="https://github.com/asimons81/hermes-gpt" rel="noreferrer noopener" target="_blank">GitHub</a>
     </header>
 
     <section class="hero section-pad reveal">
       <div class="hero-copy">
-        <p class="eyebrow">v0.8.0 Fabric &bull; Local-first &bull; Authenticated cross-machine execution</p>
-        <h1>Hermes Agent now has a <span>distributed execution fabric</span>.</h1>
-        <p class="lede">Hermes GPT v0.8.0 turns the v0.7 control plane into Fabric. Bounded Swarm stages can execute on authenticated remote Hermes machines while the coordinator keeps Work Contract semantics, server-controlled authority, observed-state evidence, independent review, and final human approval on the trusted side of the boundary.</p>
+        <p class="eyebrow">v0.10.0 vNext &bull; Local-first &bull; Supervised mission autonomy</p>
+        <h1>Hermes Agent now has a <span>supervised mission controller</span>.</h1>
+        <p class="lede">Hermes GPT v0.10.0 ships vNext slice 1: deterministic MissionPlan decomposition, read-only capability-manifest and mission-ledger views, a dry-run budget envelope, placement scoring, semantic failure classification, and a shadow/observe controller. The slice is strictly additive and decision-only — none of the 27 new tools can mutate a Mission, dispatch work, or approve anything.</p>
         <div class="cta-row">
-          <a class="button button-primary" href="#install"><span>Install v0.8.0</span><span class="btn-arrow" aria-hidden="true">→</span></a>
-          <a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/blob/master/docs/release-notes-v0.8.0.md" rel="noreferrer noopener" target="_blank">Read release notes</a>
+          <a class="button button-primary" href="#install"><span>Install v0.10.0</span><span class="btn-arrow" aria-hidden="true">→</span></a>
+          <a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/releases/tag/v0.10.0" rel="noreferrer noopener" target="_blank">Read release notes</a>
         </div>
         <div class="hero-metrics">
-          <div class="metric-card"><span>Execution</span><strong>Cross-Machine Swarms</strong><small>Authenticated Fabric peers can execute bounded stages without widening coordinator-controlled authority.</small></div>
-          <div class="metric-card"><span>Routing</span><strong>Capability-Aware Auto</strong><small><code>execution.backend=auto</code> ranks eligible local and remote runtimes using current capability, health, freshness, policy, workspace, and authority constraints.</small></div>
-          <div class="metric-card"><span>Validation</span><strong>Verified Evidence</strong><small>Required remote evidence fails closed and admitted artifact bytes are hash-verified by the coordinator.</small></div>
+          <div class="metric-card"><span>Planning</span><strong>MissionPlan DAGs</strong><small>Deterministic, bounded decomposition over a <code>MissionSpec</code> with a validated state machine — dry-run-first, and read-only toward the Mission lifecycle.</small></div>
+          <div class="metric-card"><span>Visibility</span><strong>Manifest + Ledger</strong><small>A queryable derived capability index and a replayable, cursor-paginated per-mission event timeline. Both read-only, source-allowlisted, and audited.</small></div>
+          <div class="metric-card"><span>Autonomy</span><strong>Shadow Controller</strong><small>A shadow/observe reconciler that classifies authoritative state and proposes the smallest recovery action. <code>would_execute</code> is always false.</small></div>
         </div>
       </div>
       <div class="hero-visual reveal">
         <div class="double-bezel-outer"><div class="double-bezel-inner"><figure class="brand-image-wrapper">
-          <img src="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.8.0-readme-hero.jpg" alt="Hermes GPT v0.8.0 Fabric connecting ChatGPT to an authenticated Hermes Agent fleet with cross-machine Swarms, capability-aware routing, verified evidence, artifact hashing, and reconciliation">
+          <img src="./assets/hermes-gpt-v0.10.0-readme-hero.jpg" alt="Hermes GPT v0.10.0 vNext: the Hermes operator above a mission-fleet constellation with MissionPlan DAG nodes, a capability manifest, budget envelope, placement scoring, failure taxonomy, and a shadow controller proposing — never executing — actions">
         </figure></div></div>
       </div>
     </section>
 
-    <section class="section reveal" id="fabric">
-      <div class="section-head"><p class="eyebrow">Fabric</p><h2>Remote execution without surrendering authority.</h2><p>Remote worker self-report is transport data, not proof of completion. Fabric keeps placement, evidence admission, reconciliation, contract validation, and approval anchored to the coordinator.</p></div>
+    <section class="section reveal" id="vnext">
+      <div class="section-head"><p class="eyebrow">vNext slice 1</p><h2>Decision-only autonomy. Nothing ships without you.</h2><p>Every new surface preserves the read-only / dry-run / shadow authority ladder. Derived views inform; the controller proposes; existing authority surfaces decide.</p></div>
       <div class="bento-grid">
-        <article class="bento-card col-span-2"><span class="card-num">01</span><h3>Authenticated Fabric Peers</h3><p>The packaged <code>hermes-gpt-fabric-peer</code> runtime handles remote execution. Non-loopback peer serving requires direct TLS with both certificate and key.</p></article>
-        <article class="bento-card"><span class="card-num">02</span><h3>Capability-Aware Routing</h3><p>Durable capability manifests, health and freshness state, deterministic ranking, exclusion reasons, backend availability, profile policy, workspace constraints, and authority ceilings all feed placement.</p></article>
-        <article class="bento-card"><span class="card-num">03</span><h3>Verified Artifacts</h3><p>Remote artifact admission uses immutable manifests and content hashing. The coordinator verifies received bytes instead of trusting a worker claim.</p></article>
-        <article class="bento-card col-span-2"><span class="card-num">04</span><h3>Same-Attempt Reconciliation</h3><p>Restart, timeout, and cancellation recovery reconcile the original distributed attempt when possible. Write-ownership and write-epoch guards block duplicate or ambiguous mutation paths.</p></article>
-        <article class="bento-card col-span-3"><span class="card-num">05</span><h3>Fabric Flight Deck</h3><p>Read-only node, placement, attempt, evidence, and routing views expose the authoritative selected route, including health, capability freshness, eligibility, transport backend, and authority ceiling.</p></article>
-        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Real Two-Machine Acceptance</h3><p>The final Fabric target passed fresh G6 acceptance on distinct Linux machines with authenticated remote execution, induced transport loss, same-attempt recovery, artifact re-hash, fail-closed missing evidence, Work Contract validation, approval gating, and independent review.</p></article>
+        <article class="bento-card col-span-2"><span class="card-num">01</span><h3>MissionPlan Decomposition</h3><p><code>hermes_plan_create/get/list/validate/decompose/review/node_transition/set_status</code>: a deterministic, bounded decomposition DAG over a MissionSpec. Plan mutations touch only the isolated plan store and are read-only with respect to the Mission lifecycle.</p></article>
+        <article class="bento-card"><span class="card-num">02</span><h3>Capability Manifest + Mission Ledger</h3><p><code>hermes_capability_manifest</code> folds the Fabric node registry, Fleet authority manifest, profile toolsets/skills, and provider manifests into one queryable index. <code>hermes_mission_ledger</code> is a merged, replayable, cursor-paginated event timeline. No mutation path exists.</p></article>
+        <article class="bento-card"><span class="card-num">03</span><h3>Budget Envelope (dry-run)</h3><p><code>hermes_budget_set/get/check/record</code>: a per-mission spend envelope with a read-only <code>budget_check</code> evaluation surface. The hard-block path is designed but flag-default-off in this slice.</p></article>
+        <article class="bento-card col-span-2"><span class="card-num">04</span><h3>Placement Scoring (dry-run)</h3><p><code>hermes_placement_score/candidates/get/list</code>: deterministic hard filters then soft scores over the derived capability index. Decision output only — <code>would_assign</code> is always <code>False</code>; actual dispatch stays on the existing contract, fleet, and delegation authority surfaces.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">05</span><h3>Failure Semantics + Recovery Matrix</h3><p>An 8-class taxonomy classifies an authoritative observation envelope and proposes the deterministic smallest-first recovery action. <code>would_execute</code> is always <code>False</code>; the sole durable write is a <code>controller_plan</code> row.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Shadow Controller + Telemetry</h3><p><code>hermes_controller_reconcile/status/lease_list/trigger</code>: a T1–T5 trigger model, per-mission pass leases (TTL, heartbeat-renewed, crash-reclaimed), and a single shadow reconcile pass that emits proposals only. Telemetry tiers GREEN / YELLOW / RED; RED spools a fleet-attention interrupt to the delivery-broker lane.</p></article>
       </div>
     </section>
 
     <section class="section reveal" id="how-it-works">
-      <div class="section-head"><p class="eyebrow">System Architecture</p><h2>Coordinator authority, distributed execution.</h2><p>Hermes GPT remains a local-first sidecar. Fabric adds authenticated remote placement while keeping the trusted coordinator authoritative.</p></div>
+      <div class="section-head"><p class="eyebrow">System Architecture</p><h2>Observe, classify, propose. Humans decide.</h2><p>The controller watches authoritative state through derived views and proposes the smallest recovery action. It never dispatches, completes, or approves.</p></div>
       <div class="timeline-container">
         <div class="timeline-step"><span class="step-num">01</span><strong>Client Request</strong><p>ChatGPT, Codex, Cursor, Claude Desktop, or another trusted MCP client submits a bounded request to Hermes GPT.</p></div>
-        <div class="timeline-step"><span class="step-num">02</span><strong>Policy + Placement</strong><p>The coordinator evaluates Operator level, workspace, backend, node health, capability freshness, and authority ceiling before selecting an eligible route.</p></div>
-        <div class="timeline-step"><span class="step-num">03</span><strong>Local or Remote Execution</strong><p>The bounded stage runs locally or through an authenticated Fabric peer. Explicit operator overrides remain preserved.</p></div>
-        <div class="timeline-step"><span class="step-num">04</span><strong>Evidence + Validation</strong><p>Evidence and artifacts return to the coordinator, which performs admission, hashing, Work Contract validation, reconciliation when needed, and final approval gating.</p></div>
+        <div class="timeline-step"><span class="step-num">02</span><strong>Observe</strong><p>The controller observes authoritative mission, plan, delegation, and runner state through the derived capability manifest and mission ledger.</p></div>
+        <div class="timeline-step"><span class="step-num">03</span><strong>Classify + Propose</strong><p>The 8-class failure taxonomy classifies observed state and the recovery matrix emits the smallest recovery action as a proposal — <code>would_execute</code> always false.</p></div>
+        <div class="timeline-step"><span class="step-num">04</span><strong>Human Decision</strong><p>Dispatch, completion, and approval remain on the existing authority surfaces: Work Contracts, Fabric, delegations, and Owner-gated final approval.</p></div>
       </div>
     </section>
 
@@ -92,14 +92,14 @@
     </section>
 
     <section class="section reveal" id="features">
-      <div class="section-head"><p class="eyebrow">Capabilities</p><h2>Local-first control plane, now distributed.</h2><p>v0.8 adds Fabric without weakening the security and evidence invariants shipped in earlier releases.</p></div>
+      <div class="section-head"><p class="eyebrow">Capabilities</p><h2>Local-first control plane, now supervised.</h2><p>vNext adds the controller layer without weakening the security and evidence invariants shipped in v0.6 through v0.9.</p></div>
       <div class="bento-grid">
         <article class="bento-card col-span-2"><span class="card-num">01</span><h3>Operator and Owner Policy</h3><p>Tiered authority from <code>read_only</code> through <code>owner</code>, with explicit direct mode, confirmation gates, and dry-run-first mutation.</p></article>
         <article class="bento-card"><span class="card-num">02</span><h3>Work Contracts</h3><p>Completion is validated from observed state. Missing required evidence cannot become <code>SATISFIED</code>.</p></article>
-        <article class="bento-card"><span class="card-num">03</span><h3>Swarm Orchestration</h3><p>Bounded DAG workflows with explicit ownership, capped concurrency, review independence, rework limits, and final human approval.</p></article>
-        <article class="bento-card col-span-2"><span class="card-num">04</span><h3>OpenAI Secure MCP Tunnel</h3><p>Supported OpenAI products can reach loopback Hermes GPT through an outbound-only private tunnel path without publishing a public Hermes GPT hostname.</p></article>
-        <article class="bento-card col-span-3"><span class="card-num">05</span><h3>Bounded Binary Export</h3><p><code>hermes_export_file</code> provides workspace-authorized binary transfer with denied-path enforcement, symlink escape refusal, size caps, extension controls, and safe audit metadata.</p></article>
-        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Flight Deck + Diagnostics</h3><p>Mission Control, event history, review evidence, diagnostics, recovery tools, and Fabric routing views keep long-running autonomy inspectable without creating a bypass.</p></article>
+        <article class="bento-card"><span class="card-num">03</span><h3>Missions, Delegations + Live Events</h3><p>v0.9 adds the first-class durable Mission runtime with Owner-gated final approval, unified delegation lineage, a durable event bus with a WebSocket stream, and runner-neutral job supervision.</p></article>
+        <article class="bento-card col-span-2"><span class="card-num">04</span><h3>Fabric Cross-Machine Execution</h3><p>v0.8 Fabric: authenticated peers, capability-aware <code>auto</code> routing, hash-verified remote evidence and artifacts, and same-attempt reconciliation — with the coordinator authoritative.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">05</span><h3>OpenAI Secure MCP Tunnel + Bounded Export</h3><p>Supported OpenAI products reach loopback Hermes GPT through an outbound-only private tunnel path, and <code>hermes_export_file</code> provides workspace-authorized binary transfer with denied-path enforcement and size caps.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Flight Deck + Connector Gate</h3><p>Mission Control, event history, review evidence, diagnostics, recovery tools, and Fabric routing views keep long-running autonomy inspectable. The connector acceptance gate pins the merged v0.10.0 surface at 137 tools with no duplicate registration.</p></article>
       </div>
     </section>
 
@@ -119,9 +119,11 @@ hermes-gpt</code></pre></div>
     </section>
 
     <section class="section reveal" id="changelog">
-      <div class="section-head"><p class="eyebrow">Changelog</p><h2>Release history.</h2><p>The current release is v0.8.0 Fabric.</p></div>
+      <div class="section-head"><p class="eyebrow">Changelog</p><h2>Release history.</h2><p>The current release is v0.10.0 vNext slice 1.</p></div>
       <div class="timeline-container">
-        <div class="timeline-step"><span class="step-num">v0.8.0</span><strong>Fabric</strong><p>Authenticated cross-machine Swarm execution, capability-aware routing, remote evidence and artifact admission, restart/timeout/cancel reconciliation, write-ownership safeguards, and Fabric Flight Deck visibility. Final implementation passed fresh real two-machine G6 acceptance and independent review.</p></div>
+        <div class="timeline-step"><span class="step-num">v0.10.0</span><strong>vNext — Supervised Mission Controller</strong><p>MissionPlan decomposition DAGs, read-only capability-manifest and mission-ledger views, a dry-run budget envelope, placement scoring, an 8-class failure taxonomy with recovery matrix, and a shadow/observe controller with GREEN/YELLOW/RED telemetry. 27 new tools (137 total); none can mutate a Mission, dispatch, or approve.</p></div>
+        <div class="timeline-step"><span class="step-num">v0.9.0</span><strong>Missions + Delegations + Live Events</strong><p>First-class durable Missions with Owner-gated final approval, unified delegation lineage across runners, a durable live-event bus with WebSocket stream, runner-neutral job supervision, and the bounded Finance bridge.</p></div>
+        <div class="timeline-step"><span class="step-num">v0.8.0</span><strong>Fabric</strong><p>Authenticated cross-machine Swarm execution, capability-aware routing, remote evidence and artifact admission, restart/timeout/cancel reconciliation, write-ownership safeguards, and Fabric Flight Deck visibility. Passed fresh real two-machine G6 acceptance and independent review.</p></div>
         <div class="timeline-step"><span class="step-num">v0.7.0</span><strong>Flight Deck</strong><p>Production review evidence, structured redacted event history, durable encrypted token storage, and restart-safe Swarm continuity.</p></div>
         <div class="timeline-step"><span class="step-num">v0.6.0</span><strong>Mission Control + Work Contracts + Swarms</strong><p>Read-only operational views, observed-state completion validation, and bounded DAG orchestration with explicit ownership and human approval.</p></div>
         <div class="timeline-step"><span class="step-num">v0.5.0</span><strong>Two-Way Codex Bridge</strong><p>Codex as MCP client plus policy-gated delegated Codex CLI work and review.</p></div>

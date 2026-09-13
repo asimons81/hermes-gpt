@@ -82,7 +82,7 @@ envelope boundary cannot drift apart.
   model. Name LABELS (`name: …`) and honorific forms still redact.
 - Absolute filesystem paths (POSIX home paths, Windows drive paths, UNC, `~/...`) →
   `[REDACTED_PATH]`; secret-file paths (`secrets/…`, `.env`, `auth.json`,
-  `hermes_gpt_tokens.json`, `hermes_gpt_token_key`, `.ssh/…`) →
+  `hermes_gpt_tokens.json`, `hermes_gpt_tokens.db`, `hermes_gpt_token_key`, `.ssh/…`) →
   `[REDACTED_SECRETS_PATH]`. Store paths are never exposed.
 - Length cap, applied BEFORE any redaction pass: every string in strict
   mode is truncated to `HERMES_GPT_UI_TOOL_PREVIEW_BYTES` (default 8192) with

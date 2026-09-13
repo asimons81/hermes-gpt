@@ -16,21 +16,23 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.8.0**. The GitHub release target is `v0.8.0`; verify the public GitHub Releases and PyPI channels independently.
+Repository version: **0.10.0**. The GitHub release target is `v0.10.0`; verify the public GitHub Releases and PyPI channels independently.
 
-PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.8 Fabric behavior requires a published PyPI version of 0.8.0 or newer.
+PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.10 vNext derived views / controller surfaces and v0.9 Mission/delegation/live-event behavior require a published PyPI version of 0.10.0 (or 0.9.0) or newer, respectively.
 
 ## Current operational docs
 
 | Document | Authority | Use it for |
 | --- | --- | --- |
 | [`../README.md`](../README.md) | current | project overview, current release, quickstart, safety invariants, entry-point selection |
+| [`runtime-checkout.md`](runtime-checkout.md) | host deployment provenance | which checkout the live `hermes-gpt-server.service` serves, and a caution that it is not the branch you happened to inspect |
 | [`oauth.md`](oauth.md) | current | static bearer and confidential-client OAuth configuration, token lifecycle, refresh rotation, and remote authentication limits |
 | [`mcp-compatibility.md`](mcp-compatibility.md) | current | pinned MCP protocol revisions, transport matrix, trusted-client auth metadata |
 | [`file-export.md`](file-export.md) | current | bounded binary file transfer, workspace/denied-path gates, size/extension limits, MCP embedded-resource semantics |
 | [`openai-secure-mcp-tunnel.md`](openai-secure-mcp-tunnel.md) | current | outbound-only private access from supported OpenAI products to loopback Hermes GPT |
 | [`cloudflare-tunnel.md`](cloudflare-tunnel.md) | current | public Cloudflare HTTPS proxy deployment and Host allowlist behavior |
 | [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration, v0.8 Fabric execution, and Flight Deck surfaces |
+| [`finance.md`](finance.md) | current | bounded ChatGPT-to-Hermes Finance bridge, finance evidence/decision contracts, persistence boundary, activation, and verification |
 | [`missions.md`](missions.md) | current | v0.9 first-class Mission lifecycle, bounded context/skills manifests, attachments, reconciliation, and Owner approval |
 | [`live-events.md`](live-events.md) | current | v0.9 durable event cursor/long-poll and authenticated WebSocket wake-up stream |
 | [`flight-deck-missions.md`](flight-deck-missions.md) | current | v0.9 read-only Mission/delegation Flight Deck views with durable live refresh |

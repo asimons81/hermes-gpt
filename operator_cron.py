@@ -971,13 +971,12 @@ def hermes_cron_create(
             new_job["context_from"] = list(context_from)
         if enabled_toolsets:
             new_job["enabled_toolsets"] = list(enabled_toolsets)
-        if model_provider or model_name:
-            model: dict[str, str] = {}
-            if model_provider:
-                model["provider"] = model_provider
-            if model_name:
-                model["model"] = model_name
-            new_job["model"] = model
+        # Hermes Agent scheduler contract: job["model"] is the model name string
+        # and job["provider"] carries the provider (no nested model dict).
+        if model_name:
+            new_job["model"] = model_name
+        if model_provider:
+            new_job["provider"] = model_provider
 
         if policy.effective_dry_run(dry_run):
             plan = {

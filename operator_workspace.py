@@ -111,7 +111,10 @@ def _read_gateway_state(state_path: Path) -> dict[str, Any]:
         loaded = json.loads(state_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             return loaded
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError, UnicodeDecodeError):
+        # Undecodable bytes (invalid UTF-8) or malformed JSON are a state,
+        # not an error: the caller sees an empty state and reports the
+        # gateway as not running rather than crashing the doctor pass.
         pass
     return {}
 

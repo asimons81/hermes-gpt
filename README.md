@@ -3,23 +3,48 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.8.0 - Fabric: Cross-Machine Swarm Execution, Capability-Aware Routing, and Verified Evidence](assets/hermes-gpt-v0.8.0-readme-hero.jpg)
+![Hermes GPT v0.10.0 - vNext slice 1: Supervised Mission Controller with MissionPlan DAGs, Derived Capability Manifest and Mission Ledger Views, Budget Envelope, Placement Scoring, Failure Semantics, and a Shadow Controller](assets/hermes-gpt-v0.10.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
 ## Current status
 
-- **Repository version:** 0.8.0
-- **GitHub release target:** v0.8.0
+- **Repository version:** 0.10.0
+- **GitHub release target:** v0.10.0
 - **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 
 > [!IMPORTANT]
-> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.8 features unless the badge reports v0.8.0 or newer.
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.10 features unless the badge reports v0.10.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.10.0 adds
+
+v0.10.0 is the vNext slice-1 release: additive, decision-only derived mission views plus a shadow/observe mission controller, preserving the read-only / dry-run / shadow authority ladder. It adds ~27 MCP tools; none can mutate a Mission, dispatch work, or approve anything in this release.
+
+1. **MissionPlan (decomposition DAG)** - `hermes_plan_create/get/list/validate/decompose/review/node_transition/set_status`: a deterministic, bounded decomposition DAG over a MissionSpec. Plan create/node-transition/set-status mutate only the isolated plan store (dry-run-first) and are read-only with respect to the Mission lifecycle.
+2. **Derived capability-manifest and mission-ledger views (read-only)** - `hermes_capability_manifest`, `hermes_mission_ledger`, `hermes_mission_ledger_replay`: a queryable capability index and a merged, replayable, cursor-paginated per-mission event timeline, both with explicit read-only hints and no mutation path.
+3. **Mission budget envelope (dry-run)** - `hermes_budget_set/get/check/record`: a per-mission spend envelope and read-only `budget_check` evaluation surface. The D3 hard-block path is designed but flag-default-off.
+4. **Deterministic placement scoring (dry-run)** - `hermes_placement_score/candidates/get/list`: filter-and-score over the derived capability index; decision output only (`would_assign` always `False`), no assignment executes.
+5. **Semantic failure classification + recovery matrix** - `hermes_failure_classify`, `hermes_failure_taxonomy`, `hermes_recovery_matrix`, `hermes_controller_plan_list`: the Ops 8-class taxonomy and deterministic smallest-first recovery matrix; decision output only (`would_execute` always `False`).
+6. **Supervised mission controller — shadow/observe reconciler loop** - `hermes_controller_reconcile/status/lease_list/trigger`: a T1-T5 trigger model, per-mission pass lease, and a single shadow reconcile pass that emits the smallest recovery action as a proposal only. `controller_telemetry` reports deterministic GREEN / YELLOW / RED health.
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.10 change list; the vNext design notes are in [docs/design/](docs/design/) and the manifest/ledger guide is [docs/vnext-capability-manifest-and-mission-ledger.md](docs/vnext-capability-manifest-and-mission-ledger.md).
+
+## What v0.9.0 adds
+
+v0.9.0 completes the control-plane layer with first-class durable Missions, a unified delegation lifecycle, and a durable live-event bus:
+
+1. **First-class Mission lifecycle** - a bounded, restart-safe parent record that groups an objective, acceptance criteria, bounded context references, an explicit skills manifest, Swarm/work/delegation attachments, and a final Owner approval that defaults on. Tools: `hermes_mission_create/get/list/update/attach/transition/reconcile/approve`. See [Missions (v0.9)](docs/missions.md).
+2. **Unified delegation lineage** - a durable, normalized delegation lifecycle (`hermes_delegation_dispatch/get/list/reconcile/cancel`) above existing Work Contract and runner/Fabric execution. It is lineage/state metadata, not a second execution authority; terminal success stays `reconciling` until the matching immutable contract has a `SATISFIED` verdict. Adds `opencode` as a first-class local runner backend. See [Delegations (v0.9)](docs/delegations.md).
+3. **Durable live events** - an authenticated, bounded event bus with `hermes_live_events_cursor` / `hermes_live_events_since` plus an `/events/ws` WebSocket stream, for completion and wake-up delivery without polling every underlying store. Events are notifications, never proof. See [Live events (v0.9)](docs/live-events.md).
+4. **Runner-neutral job supervision** - `hermes_job_status` / `hermes_job_wait` background-job polling regardless of backend.
+5. **Bounded Finance bridge** - opt-in `hermes_finance_analyze` for the local `finance` profile (`HERMES_GPT_ENABLE_FINANCE=1`).
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.9 change list and the individual surface guides linked below.
 
 ## What v0.8.0 adds
 
@@ -66,6 +91,10 @@ See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention poli
 | Verify the MCP protocol surface | [MCP compatibility manifest](docs/mcp-compatibility.md) |
 | Use Codex as an MCP client | [Codex guide](docs/codex.md) |
 | Use ChatGPT or another trusted client to operate Hermes | [Operator Mode](docs/operator-mode.md) |
+| Group and approve a larger objective under one lifecycle | [Missions (v0.9)](docs/missions.md) |
+| Understand unified delegation lineage across runners | [Delegations (v0.9)](docs/delegations.md) |
+| Consume durable live events / wake-up stream | [Live events (v0.9)](docs/live-events.md) |
+| Send bounded financial evidence to the local Finance profile | [Finance bridge](docs/finance.md) |
 | Understand cross-machine Fabric execution and its release boundary | [v0.8.0 Fabric release notes](docs/release-notes-v0.8.0.md) |
 | Let ChatGPT dispatch bounded work to the Codex CLI on Windows | [Windows ChatGPT -> Codex guide](docs/windows-chatgpt-codex.md) |
 | Update an install safely | [Updating](docs/updating.md) |
@@ -91,7 +120,7 @@ python -m pip install .
 hermes-gpt
 ```
 
-The final v0.6.0 wheel and sdist are also attached to the [GitHub v0.6.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.6.0). The v0.7.0 release notes cover the Flight Deck surfaces (`hermes_review_accept`, `hermes_events_*`, `hermes_oauth_*`, `hermes_swarm_reconcile`); operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
+The final v0.10.0 wheel and sdist are also attached to the [GitHub v0.10.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.10.0). The v0.8.0 release notes cover the Fabric surfaces (`hermes-gpt-fabric-peer`, capability-aware routing, remote evidence admission, reconciliation); the v0.9 surfaces (Missions `hermes_mission_*`, delegations `hermes_delegation_*`, live events `hermes_live_events_*`, `hermes_job_status/wait`) are documented in [docs/missions.md](docs/missions.md), [docs/delegations.md](docs/delegations.md), and [docs/live-events.md](docs/live-events.md). Operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
 
 ## Default local MCP surface
 
@@ -310,9 +339,14 @@ Git checkout updates require a clean checkout on the default branch and use fast
 Current operational documentation:
 
 - [Documentation map and source-of-truth rules](docs/README.md)
+- [Runtime checkout pin (which checkout is live)](docs/runtime-checkout.md)
+- [Reuse / do-not-rebuild boundary](BOUNDARY.md)
 - [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md)
 - [OAuth and bearer authentication](docs/oauth.md)
 - [Operator Mode](docs/operator-mode.md)
+- [Missions (v0.9)](docs/missions.md)
+- [Delegations (v0.9)](docs/delegations.md)
+- [Live events (v0.9)](docs/live-events.md)
 - [Codex integration](docs/codex.md)
 - [Windows ChatGPT -> Codex deployment](docs/windows-chatgpt-codex.md)
 - [Updating](docs/updating.md)

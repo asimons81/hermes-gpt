@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import oauth_auth
 import operator_policy as op
 
 
@@ -145,6 +146,10 @@ def hermes_oauth_revoke(
 
     try:
         result = token_store.revoke_tokens(root, rotate_key=rotate_key)
+        # Notify the live OAuth state (if installed) that the durable envelope
+        # was revoked, so in-memory caches are dropped and a later issuance
+        # cannot re-persist pre-revocation tokens.
+        oauth_auth.run_revocation_hook()
     except Exception as exc:
         payload = op.make_error_envelope(
             layer="operator",

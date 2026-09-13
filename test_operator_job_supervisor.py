@@ -96,8 +96,15 @@ os._exit(0)
         encoding="utf-8",
     )
 
+    child_env = os.environ.copy()
+    module_root = os.path.dirname(os.path.abspath(jobs.__file__))
+    existing_pythonpath = child_env.get("PYTHONPATH", "")
+    child_env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (module_root, existing_pythonpath) if part
+    )
     parent = subprocess.Popen(
-        [sys.executable, str(launcher_path), str(worker_path), str(tmp_path), job_id]
+        [sys.executable, str(launcher_path), str(worker_path), str(tmp_path), job_id],
+        env=child_env,
     )
     assert parent.wait(timeout=5) == 0
 

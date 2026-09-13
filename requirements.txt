@@ -1,2 +1,5 @@
 mcp[cli]>=1.0,<2
 uvicorn
+packaging>=23
+cryptography>=42
+pyyaml
