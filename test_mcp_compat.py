@@ -13,6 +13,8 @@ import importlib.metadata
 
 import pytest
 
+from conftest import wire
+
 MIN_PROTOCOL_VERSION = "2024-11-05"
 LATEST_PROTOCOL_VERSION = "2025-11-25"
 
@@ -237,7 +239,7 @@ def test_all_tools_have_valid_input_schema(built_tools):
     """Proof 2: every registered tool exposes a valid MCP inputSchema."""
     assert built_tools, "no tools registered"
     for name, tool in built_tools.items():
-        schema = tool.model_dump(by_alias=True)["inputSchema"]
+        schema = wire(tool)["inputSchema"]
         assert isinstance(schema, dict), f"{name}: inputSchema not a dict"
         assert schema.get("type") == "object", f"{name}: inputSchema.type != object"
         properties = schema.get("properties")
@@ -251,14 +253,14 @@ def test_read_only_flight_deck_tools_carry_read_only_annotation(built_tools):
     for name in READ_ONLY_ANNOTATED_TOOLS:
         tool = built_tools[name]
         assert tool.annotations is not None, f"{name}: annotations missing"
-        assert tool.annotations.model_dump(by_alias=True)["readOnlyHint"] is True, f"{name}: readOnlyHint not set"
+        assert wire(tool.annotations)["readOnlyHint"] is True, f"{name}: readOnlyHint not set"
 
 
 def test_oauth_revoke_carries_destructive_annotation(built_tools):
     """F4: the destructive revoke tool carries destructiveHint for client UI."""
     tool = built_tools["hermes_oauth_revoke"]
     assert tool.annotations is not None, "hermes_oauth_revoke: annotations missing"
-    assert tool.annotations.model_dump(by_alias=True)["destructiveHint"] is True
+    assert wire(tool.annotations)["destructiveHint"] is True
 
 
 def test_flight_deck_tools_have_titles(built_tools):

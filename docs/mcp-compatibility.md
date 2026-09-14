@@ -95,5 +95,24 @@ Python snake_case attributes do not alter the expected wire contract.
 The matrix covers tool inventory, annotations, result schemas, binary export,
 authentication and permission gates. Codex Operator aliases return redacted content blocks without an output schema:
 some callbacks return JSON objects and others return plain skill text. Their
-signature uses `Any` instead of promising the original callback's string result.
+signature omits an output schema instead of promising the original
+callback's string result.
 Core tools returning typed dictionaries continue to provide structured content.
+
+Tests read MCP results through the `wire()` helper in `conftest.py`, which
+serializes a model by its protocol field names. Hermes builds results with
+those same names (`isError`, `structuredContent`), so a test never depends on
+whether the installed SDK spells the Python attribute `isError` or `is_error`.
+
+## Checking the other SDK locally
+
+CI covers both families, but a contributor can reproduce either one in a
+throwaway environment before pushing:
+
+```sh
+python -m venv .venv-sdk2 && .venv-sdk2/bin/pip install -e ".[dev]" "mcp>=2,<3"
+.venv-sdk2/bin/python -m pytest -q
+```
+
+Swap the specifier for `"mcp>=1.28.1,<2"` to check SDK 1. Two runs cover the
+compatibility surface; the suite takes roughly a minute per run.
