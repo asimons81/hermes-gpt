@@ -10,6 +10,7 @@ import pytest
 
 import codex_core
 import codex_mcp
+from conftest import wire
 
 
 def test_codex_mcp_registry_is_curated_and_complete():
@@ -58,7 +59,7 @@ def test_operator_toolset_is_opt_in_and_namespaced(monkeypatch):
     assert "hermes_operator_policy" in names
     for tool in asyncio.run(server.list_tools()):
         if tool.name.startswith("hermes_operator_"):
-            assert tool.model_dump(by_alias=True).get("outputSchema") is None
+            assert wire(tool).get("outputSchema") is None
     from starlette.testclient import TestClient
 
     with TestClient(server.streamable_http_app(), base_url="http://127.0.0.1:7677") as client:

@@ -24,8 +24,10 @@ class HermesMCP(_Server):
         port: int = 7677, streamable_http_path: str = "/mcp",
         sse_path: str = "/sse", message_path: str = "/messages/",
         stateless_http: bool = False, json_response: bool = False,
-        transport_security: Any = None,
+        transport_security: Any = None, **extra: Any,
     ) -> None:
+        # ``extra`` forwards any SDK constructor option Hermes does not
+        # translate (instructions, auth, token_verifier, lifespan, ...).
         self._hermes_http_options = {
             "host": host, "streamable_http_path": streamable_http_path,
             "stateless_http": stateless_http, "json_response": json_response,
@@ -36,11 +38,11 @@ class HermesMCP(_Server):
             "transport_security": transport_security,
         }
         if SDK_V2:
-            super().__init__(name, version=version)
+            super().__init__(name, version=version, **extra)
         else:
             super().__init__(
                 name, port=port, sse_path=sse_path, message_path=message_path,
-                **self._hermes_http_options,
+                **self._hermes_http_options, **extra,
             )
             # SDK 1 has no public app-version constructor parameter.
             self._mcp_server.version = version

@@ -101,6 +101,17 @@ for _ext, _mime in _OFFICE_MIME.items():
         _mimetypes.add_type(_mime, _ext)
 
 
+def wire(model):
+    """Read an MCP model by its protocol field names.
+
+    Hermes builds MCP results with the wire names (``isError``,
+    ``structuredContent``). SDK 2 renamed the Python attributes to snake_case
+    while keeping those wire names, so tests read the serialized form and stay
+    correct on both SDK families.
+    """
+    return model.model_dump(by_alias=True)
+
+
 @pytest.fixture(autouse=True)
 def isolate_operator_environment(monkeypatch):
     for name in _ISOLATED_ENV_VARS:

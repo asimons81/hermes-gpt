@@ -77,11 +77,11 @@ def test_http_sdk_compatibility(surface, protocol, monkeypatch, tmp_path):
         assert not (tmp_path / "skills" / "sdk-must-not-create").exists()
         # An explicit Host outside the default loopback boundary stays denied.
         response = client.post("/mcp", headers={**headers, "Host": "untrusted.example"}, json={
-            "jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {},
+            "jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {},
         })
         assert response.status_code == 421
         response = client.post("/mcp", headers={**headers, "Origin": "https://untrusted.example"}, json={
-            "jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {},
+            "jsonrpc": "2.0", "id": 6, "method": "tools/list", "params": {},
         })
         assert response.status_code == 403
 
@@ -130,3 +130,12 @@ def test_sse_rejects_untrusted_host_and_origin(surface):
         assert response.status_code == 421
         response = client.get("/sse", headers={"Origin": "https://untrusted.example"})
         assert response.status_code == 403
+
+
+def test_hermes_mcp_forwards_untranslated_sdk_options():
+    """Options the adapter does not translate reach the SDK constructor."""
+    from mcp_compat import HermesMCP
+
+    built = HermesMCP("hermes-gpt-test", version=VERSION, instructions="Adapter passthrough.")
+    assert built.instructions == "Adapter passthrough."
+    assert built.name == "hermes-gpt-test"

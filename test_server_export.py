@@ -7,6 +7,7 @@ from mcp.types import BlobResourceContents, CallToolResult, EmbeddedResource
 
 import operator_policy as op
 import server
+from conftest import wire
 
 
 def _configure_workspace(monkeypatch, root) -> None:
@@ -21,7 +22,7 @@ def test_export_tool_is_registered_read_only() -> None:
     tool = next(item for item in tools if item.name == "hermes_export_file")
 
     assert tool.annotations is not None
-    assert tool.annotations.model_dump(by_alias=True)["readOnlyHint"] is True
+    assert wire(tool.annotations)["readOnlyHint"] is True
 
 
 def test_export_tool_round_trips_binary_through_fastmcp(monkeypatch, tmp_path) -> None:
@@ -36,8 +37,8 @@ def test_export_tool_round_trips_binary_through_fastmcp(monkeypatch, tmp_path) -
         result = asyncio.run(mcp.call_tool("hermes_export_file", {"path": str(source)}))
 
         assert isinstance(result, CallToolResult)
-        assert result.model_dump(by_alias=True)["isError"] is False
-        assert result.model_dump(by_alias=True)["structuredContent"]["filename"] == "report.xlsx"
+        assert wire(result)["isError"] is False
+        assert wire(result)["structuredContent"]["filename"] == "report.xlsx"
         embedded = next(item for item in result.content if isinstance(item, EmbeddedResource))
         assert isinstance(embedded.resource, BlobResourceContents)
         assert base64.b64decode(embedded.resource.blob) == payload
@@ -56,5 +57,5 @@ def test_export_tool_refuses_without_workspace_authority(monkeypatch, tmp_path) 
     result = asyncio.run(mcp.call_tool("hermes_export_file", {"path": str(source)}))
 
     assert isinstance(result, CallToolResult)
-    assert result.model_dump(by_alias=True)["isError"] is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
