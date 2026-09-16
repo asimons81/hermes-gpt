@@ -9,6 +9,7 @@ from mcp.types import BlobResourceContents, EmbeddedResource, TextContent
 
 import operator_export as export
 import operator_policy as op
+from conftest import wire
 
 
 def _configure_workspace(monkeypatch, root) -> None:
@@ -36,9 +37,9 @@ def test_export_returns_mcp_embedded_blob_without_local_path(monkeypatch, tmp_pa
 
         result = export.hermes_export_file(str(source))
 
-        assert result.isError is False
-        assert result.structuredContent is not None
-        metadata = result.structuredContent
+        assert wire(result)["isError"] is False
+        assert wire(result)["structuredContent"] is not None
+        metadata = wire(result)["structuredContent"]
         assert metadata["success"] is True
         assert metadata["filename"] == "report.xlsx"
         assert metadata["mime_type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -56,7 +57,7 @@ def test_export_returns_mcp_embedded_blob_without_local_path(monkeypatch, tmp_pa
 
         embedded = _blob_block(result)
         assert isinstance(embedded.resource, BlobResourceContents)
-        assert embedded.resource.mimeType == metadata["mime_type"]
+        assert wire(embedded.resource)["mimeType"] == metadata["mime_type"]
         assert str(embedded.resource.uri) == metadata["resource_uri"]
         assert base64.b64decode(embedded.resource.blob) == payload
 
@@ -81,9 +82,9 @@ def test_export_requires_workspace_level(monkeypatch, tmp_path) -> None:
 
     result = export.hermes_export_file(str(source))
 
-    assert result.isError is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
-    assert result.structuredContent["code"] == "FILE_EXPORT_ERROR"
+    assert wire(result)["structuredContent"]["code"] == "FILE_EXPORT_ERROR"
 
 
 def test_export_requires_nonempty_allowed_paths(monkeypatch, tmp_path) -> None:
@@ -94,7 +95,7 @@ def test_export_requires_nonempty_allowed_paths(monkeypatch, tmp_path) -> None:
 
     result = export.hermes_export_file(str(source))
 
-    assert result.isError is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
 
 
@@ -109,9 +110,9 @@ def test_export_rejects_file_outside_allowed_root(monkeypatch, tmp_path) -> None
 
     result = export.hermes_export_file(str(source))
 
-    assert result.isError is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
-    assert str(outside) not in json.dumps(result.structuredContent)
+    assert str(outside) not in json.dumps(wire(result)["structuredContent"])
 
 
 def test_export_rejects_symlink_escape_outside_allowed_root(monkeypatch, tmp_path) -> None:
@@ -130,9 +131,9 @@ def test_export_rejects_symlink_escape_outside_allowed_root(monkeypatch, tmp_pat
 
     result = export.hermes_export_file(str(link))
 
-    assert result.isError is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
-    assert "%PDF-outside" not in json.dumps(result.structuredContent)
+    assert "%PDF-outside" not in json.dumps(wire(result)["structuredContent"])
 
 
 def test_export_rejects_secret_path_even_under_allowed_root(monkeypatch, tmp_path) -> None:
@@ -142,9 +143,9 @@ def test_export_rejects_secret_path_even_under_allowed_root(monkeypatch, tmp_pat
 
     result = export.hermes_export_file(str(source))
 
-    assert result.isError is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
-    assert "do-not-export" not in json.dumps(result.structuredContent)
+    assert "do-not-export" not in json.dumps(wire(result)["structuredContent"])
 
 
 def test_export_enforces_configured_size_cap(monkeypatch, tmp_path) -> None:
@@ -155,7 +156,7 @@ def test_export_enforces_configured_size_cap(monkeypatch, tmp_path) -> None:
 
     result = export.hermes_export_file(str(source))
 
-    assert result.isError is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
 
 
@@ -167,7 +168,7 @@ def test_export_rejects_max_above_hard_cap(monkeypatch, tmp_path) -> None:
 
     result = export.hermes_export_file(str(source))
 
-    assert result.isError is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)
 
 
@@ -182,8 +183,8 @@ def test_export_optional_extension_allowlist(monkeypatch, tmp_path) -> None:
     denied_result = export.hermes_export_file(str(denied))
     allowed_result = export.hermes_export_file(str(allowed))
 
-    assert denied_result.isError is True
-    assert allowed_result.isError is False
+    assert wire(denied_result)["isError"] is True
+    assert wire(allowed_result)["isError"] is False
     assert isinstance(_blob_block(allowed_result).resource, BlobResourceContents)
 
 
@@ -195,5 +196,5 @@ def test_export_empty_extension_allowlist_fails_closed(monkeypatch, tmp_path) ->
 
     result = export.hermes_export_file(str(source))
 
-    assert result.isError is True
+    assert wire(result)["isError"] is True
     assert not any(isinstance(item, EmbeddedResource) for item in result.content)

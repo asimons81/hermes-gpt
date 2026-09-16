@@ -1,12 +1,12 @@
 # Hermes session history
 
-Hermes GPT exposes four optional, read-only MCP tools for finding and reviewing
-existing Hermes sessions. These capabilities were originally available only
-through the full ChatGPT connector. The separately installed **Hermes GPT
-Session History** integration brings the same four operations to Codex as
-native tools. They query Hermes' installed session APIs; they do not create
-sessions, resume conversations, rebuild search indexes, or write exports to
-disk.
+Hermes GPT exposes five optional, read-only MCP tools for finding and reviewing
+existing Hermes sessions, including canonical Bot Chats. These capabilities
+were originally available only through the full ChatGPT connector. The separately
+installed **Hermes GPT Session History** integration brings the same read-only
+operations to Codex as native tools. They query Hermes' installed session APIs;
+they do not create sessions, resume conversations, rebuild search indexes, or
+write exports to disk.
 
 ## Client availability
 
@@ -14,11 +14,15 @@ disk.
   server when the session-search gate is enabled.
 - **Codex:** the curated `core` and `operator` toolsets did not originally
   include session history. Install and enable the Hermes GPT Session History
-  integration to make the four exact native tool names available in Codex.
+  integration to make the session-history native tool names available in Codex.
 
 Tool availability alone does not bypass Hermes' server-side gates or privacy
-controls. After installing or updating an integration, restart or reconnect the
-client so it refreshes the native tool manifest.
+controls. ChatGPT uses a frozen snapshot of an approved MCP app's tools and
+inputs. A backend restart does not update that snapshot. After adding a tool or
+changing its input schema, refresh the app's actions in ChatGPT workspace
+settings, review and enable the new actions, and publish the update before
+opening a new chat. Business workspaces that cannot update a published app must
+recreate and republish it. See [OpenAI's MCP app guidance](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
 
 ## Enable locally
 
@@ -30,17 +34,65 @@ $env:HERMES_GPT_ENABLE_SESSION_SEARCH="1"
 python server.py
 ```
 
-The four tools are:
+The five tools are:
 
 | Tool | Purpose |
 | --- | --- |
-| `hermes_session_list` | Return bounded, safely projected session metadata. |
+| `hermes_session_list` | Return bounded, safely projected regular-session metadata. |
 | `hermes_session_search` | Search the installed read-only FTS API and return its bounded plain-text response. |
 | `hermes_session_read` | Return bounded messages from an exact or uniquely prefixed session ID. |
 | `hermes_session_export` | Return a bounded in-memory JSON or Markdown transcript. |
+| `hermes_bot_chat_get` | Resolve a profile's canonical `Bot Chat` registry row and its current compression-tip session ID. |
+
+All five tools accept an optional `profile` argument. It defaults to `default` for backward compatibility. Named profiles are resolved to that profile's `state.db` without changing process-global `HERMES_HOME`, and are permitted only when the profile exists and is included in `HERMES_GPT_OPERATOR_ALLOWED_PROFILES`. This makes routed Hermes bot profiles such as `project-manager`, `builder`, or `tech-ops` independently searchable while preserving the existing read-only `SessionDB(read_only=True)` boundary.
+
+Canonical Bot Chat registry rows and compression continuations may be marked hidden by Hermes and therefore omitted from `hermes_session_list`, which intentionally lists regular visible sessions. This is not a missing-session condition. Use `hermes_bot_chat_get(profile)` to resolve the authoritative registry/current IDs and `hermes_bot_chat_send(profile, prompt)` to act on the current tip. The `current_session_id` is also actionable through `hermes_session_continue` or `hermes_session_send` when the same explicit `profile` is supplied.
 
 Session control is a separate feature with a separate gate. Reading history
-does not enable `hermes_session_continue` or `hermes_session_send`.
+does not enable `hermes_session_continue`, `hermes_session_send`, or
+`hermes_bot_chat_send`.
+
+## Sending ChatGPT output back into Hermes sessions
+
+Enable session control only on a trusted local MCP server:
+
+```powershell
+$env:HERMES_GPT_ENABLE_SESSION_CONTROL="1"
+```
+
+The session-control tools are profile-aware:
+
+| Tool | Purpose |
+| --- | --- |
+| `hermes_session_continue` | Start one bounded asynchronous turn in an existing session. |
+| `hermes_session_send` | Send terminology alias for `hermes_session_continue`. |
+| `hermes_bot_chat_send` | Resolve a profile's canonical Bot Chat/current compression tip and send one bounded turn directly to it. |
+| `hermes_session_job_status` | Poll the asynchronous send/continue job. |
+| `hermes_session_job_result` | Return the bounded, redacted result from the completed job. |
+
+`hermes_session_continue` and `hermes_session_send` accept
+`profile="default"` for backward compatibility. The server resolves the
+session ID inside that profile before dispatch and launches the Hermes
+`--resume --oneshot` subprocess with the same `HERMES_PROFILE`, preserving
+profile isolation.
+
+For routed bots, prefer `hermes_bot_chat_send`:
+
+```text
+hermes_bot_chat_send(
+  profile="project-manager",
+  prompt="<handoff or output from ChatGPT>"
+)
+```
+
+This lets ChatGPT hand work directly to Project Manager, Hermes Manager,
+Builder, Tech Ops, or another authorized profile without manually copying text
+into Hermes. The tool targets the current Bot Chat compression tip rather than
+assuming the original registry session remains current.
+
+The returned job ID can be checked with `hermes_session_job_status` and
+`hermes_session_job_result`. Only one job may run concurrently for the same
+profile+session pair.
 
 ## Privacy defaults
 

@@ -9,6 +9,9 @@ The first workflow uses the Codex/MCP feature gates. The second uses Operator `w
 
 For documentation authority rules, see [docs/README.md](README.md).
 
+Both workflows support MCP Python SDK 1.28.1+ and 2.x. See the
+[MCP compatibility guide](mcp-compatibility.md) for the transport and test matrix.
+
 ## Workflow A: Codex as an MCP client
 
 ### Install the MCP entry

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Support MCP Python SDK 2.x alongside 1.28.1+, preserving local stdio, HTTP/SSE transport settings, authentication and Operator gates.
+- Correct the Codex Operator aliases' return signatures to describe normalized results, avoiding SDK 2 output-validation failures.
+- Test both SDK families and minimum versions in CI, with wire-level negotiation and result assertions.
+
 ## 0.10.0 - 2026-09-07
 
 vNext slice-1 derived mission views and the supervised mission controller (shadow): deterministic MissionPlan decomposition, read-only capability-manifest and mission-ledger views, a dry-run budget envelope, dry-run placement scoring, semantic failure classification with a smallest-first recovery matrix, and a shadow/observe controller reconciler — all additive and decision-only, preserving the existing read-only/dry-run, read-only, and shadow authority ladder. This slice adds ~27 new MCP tools; none of them can mutate a Mission, dispatch work, or approve anything in this release.
