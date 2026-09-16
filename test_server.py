@@ -105,6 +105,7 @@ def test_default_tool_surface_is_read_or_local_metadata_only(monkeypatch):
         "hermes_session_search",
         "hermes_session_continue",
         "hermes_session_send",
+        "hermes_bot_chat_send",
         "hermes_session_job_status",
         "hermes_session_job_result",
         "hermes_vision_analyze",
@@ -160,6 +161,7 @@ def test_env_gates_expose_high_risk_tools(monkeypatch):
     assert "hermes_session_search" in names
     assert "hermes_session_continue" in names
     assert "hermes_session_send" in names
+    assert "hermes_bot_chat_send" in names
     assert "hermes_session_job_status" in names
     assert "hermes_session_job_result" in names
     assert "hermes_vision_analyze" in names
@@ -556,6 +558,27 @@ class _Phase1FakeSessionDB:
             return "session-1"
         return None if value in {"missing", "ambiguous"} else value
 
+    def get_session_by_title(self, title):
+        self.calls.append(("get_session_by_title", title))
+        for row in self.session_rows:
+            if row.get("title") == title:
+                return dict(row)
+        return None
+
+    def get_compression_tip(self, session_id):
+        self.calls.append(("get_compression_tip", session_id))
+        for row in self.session_rows:
+            if row.get("_compression_tip_for") == session_id:
+                return row.get("id")
+        return session_id
+
+    def get_session(self, session_id):
+        self.calls.append(("get_session", session_id))
+        for row in self.session_rows:
+            if row.get("id") == session_id:
+                return dict(row)
+        return None
+
     def get_messages(self, session_id, **kwargs):
         self.calls.append(("get_messages", {"session_id": session_id, **kwargs}))
         offset = kwargs.get("offset", 0)
@@ -594,7 +617,8 @@ def test_phase1_adapter_opens_read_only_and_disposes_raw_connection_once():
         connection_type=_Phase1FakeConnection,
     ).open()
 
-    assert captured["kwargs"] == {"read_only": True}
+    assert captured["kwargs"]["read_only"] is True
+    assert captured["kwargs"]["db_path"].name == "state.db"
     adapter.dispose_safely()
     adapter.dispose_safely()
     assert connection.close_calls == 1
@@ -885,6 +909,7 @@ def test_phase2_tools_are_gated_and_registered(monkeypatch):
     assert "hermes_session_list" in names
     assert "hermes_session_read" in names
     assert "hermes_session_export" in names
+    assert "hermes_bot_chat_get" in names
     assert "hermes_session_lineage_export" not in names
 
 
@@ -911,6 +936,90 @@ def test_session_continue_resolves_id_before_runner_dispatch(monkeypatch, tmp_pa
     assert dispatched["prompt"] == "continue safely"
     assert dispatched["timeout"] == 123
     assert dispatched["hermes_root"] == tmp_path
+    assert dispatched["profile"] == "default"
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("select 1")
+
+
+def test_session_continue_resolves_id_in_requested_profile(monkeypatch, tmp_path):
+    monkeypatch.setenv(server.ENABLE_SESSION_CONTROL_ENV, "1")
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "_validate_session_profile", lambda profile="default": profile)
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(connection)
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    monkeypatch.setattr(server, "_default_hermes_root", lambda: tmp_path)
+    dispatched = {}
+
+    def fake_continue(session_id, prompt, timeout, **kwargs):
+        dispatched.update(
+            session_id=session_id, prompt=prompt, timeout=timeout, **kwargs
+        )
+        return {"success": True, "job_id": "b" * 32, "status": "running"}
+
+    monkeypatch.setattr(server.op_session, "hermes_session_continue", fake_continue)
+    result = server.hermes_session_continue(
+        "prefix",
+        "send to project manager",
+        timeout=60,
+        profile="project-manager",
+    )
+
+    assert result["success"] is True
+    assert dispatched["session_id"] == "session-1"
+    assert dispatched["profile"] == "project-manager"
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute("select 1")
+
+
+def test_bot_chat_send_targets_current_tip_in_requested_profile(monkeypatch):
+    monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "_validate_session_profile", lambda profile="default": profile)
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        session_rows=[
+            {
+                "id": "bot-registry",
+                "title": "Bot Chat",
+                "source": "desktop",
+                "archived": 0,
+            },
+            {
+                "id": "bot-current",
+                "source": "desktop",
+                "archived": 0,
+                "_compression_tip_for": "bot-registry",
+            },
+        ],
+    )
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    dispatched = {}
+
+    def fake_continue(session_id, prompt, timeout=900, profile="default"):
+        dispatched.update(
+            session_id=session_id,
+            prompt=prompt,
+            timeout=timeout,
+            profile=profile,
+        )
+        return {"success": True, "job_id": "c" * 32, "status": "running"}
+
+    monkeypatch.setattr(server, "hermes_session_continue", fake_continue)
+    result = server.hermes_bot_chat_send(
+        "handoff from ChatGPT",
+        profile="project-manager",
+        timeout=321,
+    )
+
+    assert result["success"] is True
+    assert dispatched == {
+        "session_id": "bot-current",
+        "prompt": "handoff from ChatGPT",
+        "timeout": 321,
+        "profile": "project-manager",
+    }
     with pytest.raises(sqlite3.ProgrammingError):
         connection.execute("select 1")
 
@@ -954,6 +1063,100 @@ def test_phase2_session_list_projects_metadata_and_paginates(monkeypatch):
     assert fake_db.close_calls == 0
     with pytest.raises(sqlite3.ProgrammingError):
         connection.execute("select 1")
+
+
+def test_phase2_bot_chat_get_resolves_hidden_registry_to_current_tip(monkeypatch):
+    monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        session_rows=[
+            {
+                "id": "bot-root",
+                "title": "Bot Chat",
+                "hidden": 1,
+                "source": "desktop",
+                "started_at": 1.0,
+                "ended_at": 2.0,
+                "last_active": 2.0,
+                "message_count": 40,
+                "tool_call_count": 5,
+                "archived": 0,
+            },
+            {
+                "id": "bot-tip",
+                "title": None,
+                "hidden": 1,
+                "source": "desktop",
+                "started_at": 3.0,
+                "ended_at": None,
+                "last_active": 9.0,
+                "message_count": 18,
+                "tool_call_count": 2,
+                "archived": 0,
+                "_compression_tip_for": "bot-root",
+            },
+        ],
+    )
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+
+    result = json.loads(server.hermes_bot_chat_get())
+    assert result["success"] is True
+    assert result["profile"] == "default"
+    assert result["kind"] == "bot_chat"
+    assert result["canonical_title"] == "Bot Chat"
+    assert result["registry_session_id"] == "bot-root"
+    assert result["current_session_id"] == "bot-tip"
+    assert result["compression_continuation"] is True
+    assert result["session_list_visibility"] == "canonical_bot_chat_may_be_hidden"
+    assert result["preferred_send_tool"] == "hermes_bot_chat_send"
+    assert result["registry"]["id"] == "bot-root"
+    assert result["current"]["id"] == "bot-tip"
+    assert result["current"]["last_active"] == 9.0
+    assert "title" not in result["registry"]
+    assert "hidden" not in result["registry"]
+
+
+def test_phase2_bot_chat_get_uses_exact_title_even_when_current_row_is_visible(monkeypatch):
+    monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        session_rows=[{
+            "id": "bot-current",
+            "title": "Bot Chat",
+            "hidden": 0,
+            "source": "desktop",
+            "started_at": 3.0,
+            "last_active": 9.0,
+            "message_count": 12,
+            "archived": 0,
+        }],
+    )
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+
+    result = json.loads(server.hermes_bot_chat_get())
+    assert result["success"] is True
+    assert result["registry_session_id"] == "bot-current"
+    assert result["current_session_id"] == "bot-current"
+    assert result["compression_continuation"] is False
+
+
+def test_phase2_bot_chat_get_rejects_internal_source(monkeypatch):
+    monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    connection = sqlite3.connect(":memory:")
+    fake_db = _Phase1FakeSessionDB(
+        connection,
+        session_rows=[{"id": "internal", "title": "Bot Chat", "source": "tool", "archived": 0}],
+    )
+    monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+
+    result = json.loads(server.hermes_bot_chat_get())
+    assert result["success"] is False
+    assert result["error"]["code"] == "BOT_CHAT_NOT_FOUND"
 
 
 def test_phase2_session_read_filters_and_resolves_ids(monkeypatch):
@@ -1189,6 +1392,51 @@ def test_phase1_existing_tool_surface_remains_unchanged(monkeypatch):
     assert "hermes_search_files" in names
 
 
+def test_profile_aware_session_tools_expose_profile_parameter():
+    import inspect
+
+    for func in (
+        server.hermes_session_list,
+        server.hermes_session_search,
+        server.hermes_session_read,
+        server.hermes_session_export,
+        server.hermes_bot_chat_get,
+    ):
+        parameter = inspect.signature(func).parameters["profile"]
+        assert parameter.default == "default"
+
+
+def test_profile_aware_session_adapter_uses_named_profile_state_db(monkeypatch, tmp_path):
+    root = tmp_path / "profile-aware-hermes"
+    profile_home = root / "profiles" / "project-manager"
+    profile_home.mkdir(parents=True)
+    monkeypatch.setattr(server, "_default_hermes_root", lambda: root)
+    monkeypatch.setenv(server.op_policy.OPERATOR_ALLOWED_PROFILES_ENV, "default,project-manager")
+
+    connection = _Phase1FakeConnection()
+    fake_db = _Phase1FakeSessionDB(connection)
+    factory, captured = _phase1_adapter_factory(fake_db)
+    adapter = server.ReadOnlySessionAdapter(
+        db_factory=factory,
+        connection_type=_Phase1FakeConnection,
+        profile="project-manager",
+    ).open()
+
+    assert captured["kwargs"]["read_only"] is True
+    assert captured["kwargs"]["db_path"] == profile_home / "state.db"
+    adapter.dispose_safely()
+
+
+def test_profile_aware_session_adapter_rejects_unallowed_profile(monkeypatch, tmp_path):
+    root = tmp_path / "profile-aware-hermes-denied"
+    (root / "profiles" / "project-manager").mkdir(parents=True)
+    monkeypatch.setattr(server, "_default_hermes_root", lambda: root)
+    monkeypatch.setenv(server.op_policy.OPERATOR_ALLOWED_PROFILES_ENV, "default")
+
+    with pytest.raises(PermissionError):
+        server.ReadOnlySessionAdapter(profile="project-manager")
+
+
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -1341,3 +1589,36 @@ def test_v09_connector_surface_acceptance(monkeypatch):
 
     # serverInfo.version must track the checkout version, not the SDK version.
     assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.10.0"
+
+
+def test_history_enabled_connector_surface_acceptance(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setenv(server.op_finance.ENABLE_FINANCE_ENV, "1")
+    monkeypatch.setenv("HERMES_HOME", str(Path(server.__file__).resolve().parent))
+
+    disabled = server.build_server()
+    disabled_names = tool_names(disabled)
+    assert len(disabled_names) == len(set(disabled_names)) == V09_CONNECTOR_TOOL_COUNT
+
+    monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
+    enabled = server.build_server()
+    enabled_tools = asyncio.run(enabled.list_tools())
+    enabled_names = sorted(tool.name for tool in enabled_tools)
+    expected_history_tools = {
+        "hermes_session_search",
+        "hermes_session_list",
+        "hermes_session_read",
+        "hermes_session_export",
+        "hermes_bot_chat_get",
+    }
+
+    assert len(enabled_names) == len(set(enabled_names)) == 142
+    assert set(enabled_names) - set(disabled_names) == expected_history_tools
+    assert set(disabled_names) - set(enabled_names) == set()
+
+    enabled_by_name = {tool.name: tool for tool in enabled_tools}
+    for name in expected_history_tools:
+        schema = enabled_by_name[name].model_dump(by_alias=True)["inputSchema"]
+        assert schema["properties"]["profile"]["default"] == "default"
+
+    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.10.0"

@@ -51,12 +51,34 @@ def test_ciphertext_on_disk_no_plaintext(hermes_root):
     assert ts.lookup_token(hermes_root, "access", "tok-1234567890abcdef") is not None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX file modes")
 def test_store_file_mode_is_0600(hermes_root):
     state = _oauth_state()
     state.access_tokens["tok-1234567890abcdef"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": 10**12}
     state.persist_tokens(hermes_root)
     mode = os.stat(hermes_root / "secrets" / "hermes_gpt_tokens.db").st_mode & 0o777
     assert mode == 0o600
+
+
+def test_windows_store_lock_uses_one_byte_region(hermes_root, monkeypatch):
+    calls = []
+
+    class FakeMsvcrt:
+        LK_NBLCK = 1
+        LK_UNLCK = 2
+
+        @staticmethod
+        def locking(fd, mode, size):
+            calls.append((fd, mode, size))
+
+    monkeypatch.setattr(ts, "_fcntl", None)
+    monkeypatch.setattr(ts, "_msvcrt", FakeMsvcrt)
+
+    with ts._StoreLock(hermes_root):
+        assert calls[-1][1:] == (FakeMsvcrt.LK_NBLCK, 1)
+
+    assert calls[-1][1:] == (FakeMsvcrt.LK_UNLCK, 1)
+    assert ts._store_lock_path(hermes_root).read_bytes() == b"\0"
 
 
 def test_restart_reload_roundtrip(hermes_root):

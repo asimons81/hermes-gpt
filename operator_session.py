@@ -90,7 +90,9 @@ def _hermes_executable(agent_root: Path | None = None) -> str:
     return shutil.which("hermes") or "hermes"
 
 
-def _validate_start(session_id: str, prompt: str, timeout: int) -> tuple[str, str, int] | dict[str, Any]:
+def _validate_start(
+    session_id: str, prompt: str, timeout: int, profile: str = "default"
+) -> tuple[str, str, int, str] | dict[str, Any]:
     if not op.env_truthy(ENABLE_SESSION_CONTROL_ENV):
         return _error(
             "SESSION_CONTROL_DISABLED",
@@ -105,7 +107,11 @@ def _validate_start(session_id: str, prompt: str, timeout: int) -> tuple[str, st
         return _error("PROMPT_TOO_LARGE", f"prompt exceeds the {MAX_PROMPT_CHARS}-character limit.", "Send a shorter prompt.")
     if isinstance(timeout, bool) or not isinstance(timeout, int):
         return _error("INVALID_TIMEOUT", "timeout must be an integer number of seconds.", f"Choose {MIN_TIMEOUT} to {MAX_TIMEOUT} seconds.")
-    return session_id.strip(), prompt, max(MIN_TIMEOUT, min(timeout, MAX_TIMEOUT))
+    try:
+        safe_profile = op.validate_profile_name(profile)
+    except Exception:
+        return _error("INVALID_PROFILE", "profile is not a valid Hermes profile name.", "Use an authorized profile name.")
+    return session_id.strip(), prompt, max(MIN_TIMEOUT, min(timeout, MAX_TIMEOUT)), safe_profile
 
 
 def hermes_session_continue(
@@ -115,17 +121,20 @@ def hermes_session_continue(
     *,
     hermes_root: Path | None = None,
     agent_root: Path | None = None,
+    profile: str = "default",
 ) -> dict[str, Any]:
     """Start one bounded non-interactive turn in an existing Hermes session."""
-    checked = _validate_start(session_id, prompt, timeout)
+    checked = _validate_start(session_id, prompt, timeout, profile)
     if isinstance(checked, dict):
         return checked
-    safe_id, safe_prompt, safe_timeout = checked
+    safe_id, safe_prompt, safe_timeout, safe_profile = checked
     argv = [_hermes_executable(agent_root), "--resume", safe_id, "--oneshot", safe_prompt]
+    active_key = f"{safe_profile}:{safe_id}"
     job_id = uuid4().hex
     meta = {
         "job_id": job_id,
         "session_id": safe_id,
+        "profile": safe_profile,
         "status": "starting",
         "created_at": _now(),
         "started_at": None,
@@ -140,7 +149,7 @@ def hermes_session_continue(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output = open(output_path, "w", encoding="utf-8")
     with _lock:
-        active_job = _active_sessions.get(safe_id)
+        active_job = _active_sessions.get(active_key)
         if active_job:
             output.close()
             output_path.unlink(missing_ok=True)
@@ -149,7 +158,16 @@ def hermes_session_continue(
                 "This Hermes session already has a running session-control job.",
                 f"Wait for job {active_job} to finish before sending another turn.",
             )
-        _active_sessions[safe_id] = job_id
+        _active_sessions[active_key] = job_id
+    child_env = os.environ.copy()
+    base_home = (
+        Path(hermes_root)
+        if hermes_root is not None
+        else Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+    )
+    profile_home = op.resolve_profile_home(safe_profile, base_home)
+    child_env["HERMES_HOME"] = str(profile_home)
+    child_env["HERMES_PROFILE"] = safe_profile
     try:
         proc = subprocess.Popen(
             argv,
@@ -157,6 +175,7 @@ def hermes_session_continue(
             stderr=subprocess.STDOUT,
             text=True,
             shell=False,
+            env=child_env,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
             start_new_session=os.name != "nt",
         )
@@ -164,8 +183,8 @@ def hermes_session_continue(
         output.close()
         output_path.unlink(missing_ok=True)
         with _lock:
-            if _active_sessions.get(safe_id) == job_id:
-                _active_sessions.pop(safe_id, None)
+            if _active_sessions.get(active_key) == job_id:
+                _active_sessions.pop(active_key, None)
         return _error(
             "HERMES_START_FAILED",
             op.redact_output(str(exc)),
@@ -180,7 +199,13 @@ def hermes_session_continue(
         args=(job_id, proc, output, safe_timeout, hermes_root),
         daemon=True,
     ).start()
-    return _redact({"success": True, "job_id": job_id, "session_id": safe_id, "status": "running"})
+    return _redact({
+        "success": True,
+        "job_id": job_id,
+        "session_id": safe_id,
+        "profile": safe_profile,
+        "status": "running",
+    })
 
 
 def _watch(job_id: str, proc: subprocess.Popen[str], output: Any, timeout: int, hermes_root: Path | None) -> None:
@@ -196,9 +221,11 @@ def _watch(job_id: str, proc: subprocess.Popen[str], output: Any, timeout: int, 
         _processes.pop(job_id, None)
     meta = _load(job_id, hermes_root) or {"job_id": job_id}
     session_id = str(meta.get("session_id", ""))
+    profile = str(meta.get("profile", "default") or "default")
+    active_key = f"{profile}:{session_id}"
     with _lock:
-        if _active_sessions.get(session_id) == job_id:
-            _active_sessions.pop(session_id, None)
+        if _active_sessions.get(active_key) == job_id:
+            _active_sessions.pop(active_key, None)
     meta.update({"status": status, "return_code": proc.poll(), "ended_at": _now()})
     _save(meta, hermes_root)
 
@@ -266,6 +293,7 @@ def hermes_session_job_result(job_id: str, max_chars: int = MAX_RESULT_CHARS, he
         "success": True,
         "job_id": job_id,
         "session_id": meta.get("session_id"),
+        "profile": meta.get("profile", "default"),
         "status": meta.get("status"),
         "return_code": meta.get("return_code"),
         "response": response[:cap],

@@ -16,7 +16,6 @@ Token store is NOT an MCP mutation surface: only ``oauth_auth`` calls it.
 from __future__ import annotations
 
 import base64
-import fcntl
 import hashlib
 import json
 import os
@@ -28,6 +27,14 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+try:
+    import fcntl as _fcntl
+except ImportError:  # Windows
+    _fcntl = None
+    import msvcrt as _msvcrt
+else:
+    _msvcrt = None
 
 ENVELOPE_VERSION = 1
 ENVELOPE_FILENAME = "hermes_gpt_tokens.json"
@@ -279,29 +286,56 @@ def _store_lock_path(hermes_root: Path) -> Path:
 
 
 class _StoreLock:
-    """Cross-process mutex around credential mutations (flock-based).
+    """Cross-process mutex around credential mutations.
 
-    flock locks are owned by the kernel and released automatically when the
-    process dies, so there is no stale-lock breaking to get wrong. Used to
-    serialize the revocation commit + master-key rotation against new
-    issuance: a grant that commits while a rotation is mid-flight would
-    produce a row encrypted under a key that is about to disappear.
+    POSIX uses flock; Windows uses a one-byte msvcrt.locking region.
+    Both are OS-owned and released when the process/file descriptor closes,
+    so there is no stale-lock file to break. Used to serialize revocation
+    and master-key rotation against new issuance.
     """
 
     def __init__(self, hermes_root: Path) -> None:
         self.path = _store_lock_path(hermes_root)
         self.fd: int | None = None
 
+    def _acquire(self) -> None:
+        assert self.fd is not None
+        if _fcntl is not None:
+            _fcntl.flock(self.fd, _fcntl.LOCK_EX)
+            return
+        if os.fstat(self.fd).st_size == 0:
+            os.write(self.fd, b"\0")
+        os.lseek(self.fd, 0, os.SEEK_SET)
+        while True:
+            try:
+                _msvcrt.locking(self.fd, _msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time.sleep(0.05)
+
+    def _release(self) -> None:
+        assert self.fd is not None
+        if _fcntl is not None:
+            _fcntl.flock(self.fd, _fcntl.LOCK_UN)
+            return
+        os.lseek(self.fd, 0, os.SEEK_SET)
+        _msvcrt.locking(self.fd, _msvcrt.LK_UNLCK, 1)
+
     def __enter__(self) -> "_StoreLock":
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
-        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        try:
+            self._acquire()
+        except Exception:
+            os.close(self.fd)
+            self.fd = None
+            raise
         return self
 
     def __exit__(self, *exc: Any) -> None:
         if self.fd is not None:
             try:
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
+                self._release()
             finally:
                 os.close(self.fd)
                 self.fd = None
