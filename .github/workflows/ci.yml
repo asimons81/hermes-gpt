@@ -1,24 +1,35 @@
 name: CI
 
+# One CI run per branch: pull_request fires for the PR branch, and push
+# covers only master (the merge destination). Without the branch filter
+# every PR update fired the full matrix twice - once for the push, once
+# for the pull_request event - doubling pool occupancy (U104).
 on:
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
   workflow_call:
+
+# A newer run for the same branch supersedes and cancels the one in
+# flight instead of stacking another full matrix onto the pool.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        os: [self-hosted]
         python: ['3.10', '3.11', '3.12']
         sdk: ['mcp>=1.28.1,<2', 'mcp>=2,<3']
         include:
-          - os: ubuntu-latest
+          - os: self-hosted
             python: '3.10'
             sdk: 'mcp==1.28.1'
-          - os: ubuntu-latest
+          - os: self-hosted
             python: '3.10'
             sdk: 'mcp==2.0.0'
     runs-on: ${{ matrix.os }}
@@ -82,7 +93,7 @@ jobs:
         run: git diff --check
 
   compatibility:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -97,7 +108,7 @@ jobs:
           test_operator_runners.py
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -121,7 +132,7 @@ jobs:
           ui_api.py ui_fabric.py ui_missions.py test_ui_missions.py
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: web
@@ -137,7 +148,7 @@ jobs:
       - run: npm run build
 
   windows-docs:
-    runs-on: windows-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - name: Parse Secure MCP Tunnel PowerShell examples
@@ -163,7 +174,7 @@ jobs:
 
   build:
     needs: [test, compatibility, lint, web, windows-docs]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

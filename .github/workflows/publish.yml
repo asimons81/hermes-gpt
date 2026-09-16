@@ -11,7 +11,7 @@ jobs:
 
   publish:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       id-token: write
     environment: pypi
