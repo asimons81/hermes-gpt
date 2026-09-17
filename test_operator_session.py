@@ -105,3 +105,43 @@ def test_reconcile_marks_unowned_running_job_orphaned(tmp_path):
     result = session.hermes_session_job_status(job_id, tmp_path)
     assert result["job"]["status"] == "orphaned"
     assert "ownership" in result["job"]["reconciliation"]
+
+
+def test_job_wait_returns_early_on_terminal_state(tmp_path):
+    job_id = "c" * 32
+    session._save(
+        {"job_id": job_id, "session_id": "s", "profile": "dev", "status": "completed", "return_code": 0},
+        tmp_path,
+    )
+    result = session.hermes_session_job_wait(job_id, wait_seconds=5, hermes_root=tmp_path)
+    assert result["success"] is True
+    assert result["status"] == "completed"
+    assert result["return_code"] == 0
+    assert result["await"]["timed_out"] is False
+
+
+def test_job_wait_times_out_on_nonterminal_state(monkeypatch, tmp_path):
+    job_id = "d" * 32
+    monkeypatch.setattr(session, "_reconcile", lambda *a, **k: None)
+    session._save({"job_id": job_id, "session_id": "s", "status": "running"}, tmp_path)
+    result = session.hermes_session_job_wait(job_id, wait_seconds=0, hermes_root=tmp_path)
+    assert result["success"] is True
+    assert result["status"] == "running"
+    assert result["await"]["timed_out"] is True
+
+
+def test_job_wait_clamps_seconds(tmp_path):
+    job_id = "e" * 32
+    session._save({"job_id": job_id, "session_id": "s", "status": "failed"}, tmp_path)
+    result = session.hermes_session_job_wait(job_id, wait_seconds=99999, hermes_root=tmp_path)
+    assert result["status"] == "failed"
+    assert result["await"]["wait_seconds"] == session.MAX_JOB_WAIT_SECONDS
+
+    result_bad = session.hermes_session_job_wait(job_id, wait_seconds="junk", hermes_root=tmp_path)
+    assert result_bad["status"] == "failed"
+    assert result_bad["await"]["wait_seconds"] == session.MAX_JOB_WAIT_SECONDS
+
+
+def test_job_wait_missing_job(tmp_path):
+    result = session.hermes_session_job_wait("f" * 32, wait_seconds=0, hermes_root=tmp_path)
+    assert result["code"] == "JOB_NOT_FOUND"

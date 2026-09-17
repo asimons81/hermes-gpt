@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -23,6 +24,8 @@ MAX_PROMPT_CHARS = 65_536
 MAX_RESULT_CHARS = 24_000
 MIN_TIMEOUT = 10
 MAX_TIMEOUT = 3_600
+MAX_JOB_WAIT_SECONDS = 120
+_SESSION_TERMINAL_STATES = frozenset({"completed", "failed", "timed_out", "orphaned"})
 
 _lock = threading.RLock()
 _processes: dict[str, subprocess.Popen[str]] = {}
@@ -298,4 +301,54 @@ def hermes_session_job_result(job_id: str, max_chars: int = MAX_RESULT_CHARS, he
         "return_code": meta.get("return_code"),
         "response": response[:cap],
         "truncated": truncated,
+    })
+
+
+def hermes_session_job_wait(
+    job_id: str,
+    wait_seconds: int = MAX_JOB_WAIT_SECONDS,
+    hermes_root: Path | None = None,
+) -> dict[str, Any]:
+    """Long-poll a Hermes session-control job to terminal state (max 120s).
+
+    Returns early when the job reaches a terminal state (``completed``,
+    ``failed``, ``timed_out``, or ``orphaned``) or when the bounded wait
+    window elapses. The response mirrors :func:`hermes_session_job_status`
+    plus an ``await`` block describing the wait outcome. Read-only: no
+    operator level required (same gate as status/result).
+    """
+    try:
+        seconds = max(0, min(int(wait_seconds or 0), MAX_JOB_WAIT_SECONDS))
+    except (TypeError, ValueError):
+        seconds = MAX_JOB_WAIT_SECONDS
+    _reconcile(hermes_root)
+    started = time.monotonic()
+    deadline = started + seconds
+    while True:
+        meta = _load(job_id, hermes_root)
+        if not meta:
+            return _error(
+                "JOB_NOT_FOUND",
+                "Hermes session job was not found.",
+                "Check the job ID returned by hermes_session_continue.",
+            )
+        status = str(meta.get("status") or "").lower()
+        if status in _SESSION_TERMINAL_STATES:
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
+    terminal = str((meta or {}).get("status") or "").lower() in _SESSION_TERMINAL_STATES
+    return _redact({
+        "success": True,
+        "job_id": job_id,
+        "session_id": (meta or {}).get("session_id"),
+        "profile": (meta or {}).get("profile", "default"),
+        "status": (meta or {}).get("status"),
+        "return_code": (meta or {}).get("return_code"),
+        "await": {
+            "timed_out": not terminal,
+            "wait_seconds": seconds,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+        },
     })

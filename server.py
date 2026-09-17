@@ -1362,6 +1362,13 @@ def hermes_session_job_result(
     return op_session.hermes_session_job_result(job_id, max_chars, _default_hermes_root())
 
 
+def hermes_session_job_wait(
+    job_id: str, wait_seconds: int = op_session.MAX_JOB_WAIT_SECONDS
+) -> dict[str, Any]:
+    """Long-poll a Hermes session-control job to terminal state (max 120s)."""
+    return op_session.hermes_session_job_wait(job_id, wait_seconds, _default_hermes_root())
+
+
 # ---------------------------------------------------------------------------
 # Hermes tool wrappers (env-gated)
 # ---------------------------------------------------------------------------
@@ -3206,6 +3213,7 @@ def register_tools(server: FastMCP) -> None:
             server.add_tool(hermes_bot_chat_send, meta=tool_meta())
         server.add_tool(hermes_session_job_status, meta=tool_meta())
         server.add_tool(hermes_session_job_result, meta=tool_meta())
+        server.add_tool(hermes_session_job_wait, meta=tool_meta())
     if env_enabled(ENABLE_VISION_ENV):
         server.add_tool(hermes_vision_analyze, meta=tool_meta())
     if env_enabled(ENABLE_WEB_ENV):

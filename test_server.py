@@ -164,6 +164,7 @@ def test_env_gates_expose_high_risk_tools(monkeypatch):
     assert "hermes_bot_chat_send" in names
     assert "hermes_session_job_status" in names
     assert "hermes_session_job_result" in names
+    assert "hermes_session_job_wait" in names
     assert "hermes_vision_analyze" in names
     assert "hermes_web_search" in names
     assert "hermes_web_extract" in names
