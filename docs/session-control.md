@@ -16,7 +16,7 @@ Read-only history remains separately controlled by `HERMES_GPT_ENABLE_SESSION_SE
 ## Workflow
 
 1. Find a session ID with `hermes_session_list` when history is enabled.
-2. Call `hermes_session_continue(session_id, prompt, timeout)` or its `hermes_session_send` alias.
+2. Call `hermes_session_continue(session_id, prompt, max_job_runtime_seconds)` or its `hermes_session_send` alias.
 3. Save the returned `job_id`.
 4. Poll `hermes_session_job_status(job_id)` until the status is `completed`, `failed`, `timed_out`, or `orphaned`.
 5. Call `hermes_session_job_result(job_id)` for the bounded, redacted final output.
@@ -32,7 +32,7 @@ No shell is used. Hermes restores the resumed session's recorded working directo
 ## Bounds and persistence
 
 - Prompt: maximum 65,536 characters.
-- Timeout: clamped to 10–3600 seconds; default 900.
+- Max job runtime: `max_job_runtime_seconds` clamped to 10–7,200 seconds; default 7,200. Independent of `hermes_session_job_wait` (max 120 s per poll, never kills).
 - Returned result: clamped to 500–24,000 characters.
 - Concurrency: only one session-control job may run for a given session at a time.
 - Job metadata: stored under the Hermes data root in `session-jobs/`.
@@ -44,4 +44,4 @@ Session control can consume the configured provider's quota or incur provider ch
 
 ## Validation without a real model call
 
-The automated tests replace process launch with a fake Hermes process. They verify the fixed CLI arguments, `shell=False`, prompt-free metadata, timeout bounds, restart reconciliation, redaction, tool registration gates, and status/result flow. The test suite does not resume a real session or contact a model provider.
+The automated tests replace process launch with a fake Hermes process. They verify the fixed CLI arguments, `shell=False`, prompt-free metadata, runtime-limit bounds, restart reconciliation, redaction, tool registration gates, and status/result flow. The test suite does not resume a real session or contact a model provider.

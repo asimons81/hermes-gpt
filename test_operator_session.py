@@ -54,7 +54,7 @@ def test_mocked_continue_status_and_result(monkeypatch, tmp_path):
     started = session.hermes_session_continue(
         "20260810_143227_6b0982",
         prompt,
-        timeout=99999,
+        max_job_runtime_seconds=99999,
         hermes_root=tmp_path,
         agent_root=tmp_path / "agent",
         profile="project-manager",
@@ -69,7 +69,8 @@ def test_mocked_continue_status_and_result(monkeypatch, tmp_path):
 
     status = session.hermes_session_job_status(started["job_id"], tmp_path)
     assert status["job"]["status"] == "completed"
-    assert status["job"]["timeout"] == session.MAX_TIMEOUT
+    assert status["job"]["timeout"] == session.MAX_JOB_RUNTIME_SECONDS
+    assert status["job"]["max_job_runtime_seconds"] == session.MAX_JOB_RUNTIME_SECONDS
     assert status["job"]["profile"] == "project-manager"
     metadata_text = json.dumps(status)
     assert prompt not in metadata_text
@@ -89,7 +90,7 @@ def test_job_lookup_and_input_bounds(monkeypatch, tmp_path):
     assert session.hermes_session_continue(
         "s", "x" * (session.MAX_PROMPT_CHARS + 1), hermes_root=tmp_path
     )["code"] == "PROMPT_TOO_LARGE"
-    assert session.hermes_session_continue("s", "x", timeout=True, hermes_root=tmp_path)["code"] == "INVALID_TIMEOUT"
+    assert session.hermes_session_continue("s", "x", max_job_runtime_seconds=True, hermes_root=tmp_path)["code"] == "INVALID_MAX_JOB_RUNTIME_SECONDS"
 
 
 def test_same_session_cannot_run_concurrently(monkeypatch, tmp_path):

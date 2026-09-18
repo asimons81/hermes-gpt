@@ -923,19 +923,19 @@ def test_session_continue_resolves_id_before_runner_dispatch(monkeypatch, tmp_pa
     monkeypatch.setattr(server, "_default_hermes_root", lambda: tmp_path)
     dispatched = {}
 
-    def fake_continue(session_id, prompt, timeout, **kwargs):
+    def fake_continue(session_id, prompt, max_job_runtime_seconds, **kwargs):
         dispatched.update(
-            session_id=session_id, prompt=prompt, timeout=timeout, **kwargs
+            session_id=session_id, prompt=prompt, max_job_runtime_seconds=max_job_runtime_seconds, **kwargs
         )
         return {"success": True, "job_id": "a" * 32, "status": "running"}
 
     monkeypatch.setattr(server.op_session, "hermes_session_continue", fake_continue)
-    result = server.hermes_session_continue("prefix", "continue safely", timeout=123)
+    result = server.hermes_session_continue("prefix", "continue safely", max_job_runtime_seconds=123)
 
     assert result["success"] is True
     assert dispatched["session_id"] == "session-1"
     assert dispatched["prompt"] == "continue safely"
-    assert dispatched["timeout"] == 123
+    assert dispatched["max_job_runtime_seconds"] == 123
     assert dispatched["hermes_root"] == tmp_path
     assert dispatched["profile"] == "default"
     with pytest.raises(sqlite3.ProgrammingError):
@@ -952,9 +952,9 @@ def test_session_continue_resolves_id_in_requested_profile(monkeypatch, tmp_path
     monkeypatch.setattr(server, "_default_hermes_root", lambda: tmp_path)
     dispatched = {}
 
-    def fake_continue(session_id, prompt, timeout, **kwargs):
+    def fake_continue(session_id, prompt, max_job_runtime_seconds, **kwargs):
         dispatched.update(
-            session_id=session_id, prompt=prompt, timeout=timeout, **kwargs
+            session_id=session_id, prompt=prompt, max_job_runtime_seconds=max_job_runtime_seconds, **kwargs
         )
         return {"success": True, "job_id": "b" * 32, "status": "running"}
 
@@ -962,7 +962,7 @@ def test_session_continue_resolves_id_in_requested_profile(monkeypatch, tmp_path
     result = server.hermes_session_continue(
         "prefix",
         "send to project manager",
-        timeout=60,
+        max_job_runtime_seconds=60,
         profile="project-manager",
     )
 
@@ -998,11 +998,11 @@ def test_bot_chat_send_targets_current_tip_in_requested_profile(monkeypatch):
     monkeypatch.setattr(server, "SessionDB", lambda **kwargs: fake_db)
     dispatched = {}
 
-    def fake_continue(session_id, prompt, timeout=900, profile="default"):
+    def fake_continue(session_id, prompt, max_job_runtime_seconds=900, profile="default"):
         dispatched.update(
             session_id=session_id,
             prompt=prompt,
-            timeout=timeout,
+            max_job_runtime_seconds=max_job_runtime_seconds,
             profile=profile,
         )
         return {"success": True, "job_id": "c" * 32, "status": "running"}
@@ -1011,14 +1011,14 @@ def test_bot_chat_send_targets_current_tip_in_requested_profile(monkeypatch):
     result = server.hermes_bot_chat_send(
         "handoff from ChatGPT",
         profile="project-manager",
-        timeout=321,
+        max_job_runtime_seconds=321,
     )
 
     assert result["success"] is True
     assert dispatched == {
         "session_id": "bot-current",
         "prompt": "handoff from ChatGPT",
-        "timeout": 321,
+        "max_job_runtime_seconds": 321,
         "profile": "project-manager",
     }
     with pytest.raises(sqlite3.ProgrammingError):
@@ -1623,3 +1623,27 @@ def test_history_enabled_connector_surface_acceptance(monkeypatch):
         assert schema["properties"]["profile"]["default"] == "default"
 
     assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.10.0"
+
+def test_session_continue_schema_exposes_max_job_runtime(monkeypatch):
+    clear_gate_envs(monkeypatch)
+    monkeypatch.setenv(server.ENABLE_SESSION_CONTROL_ENV, "1")
+    srv = server.build_server()
+    tools = asyncio.run(srv.list_tools())
+    by_name = {}
+    for t in tools:
+        s = t.input_schema
+        if hasattr(s, "model_dump"):
+            s = s.model_dump()
+        by_name[t.name] = s
+    cont = by_name["hermes_session_continue"]
+    props = cont["properties"]
+    assert "timeout" not in props
+    rt = props["max_job_runtime_seconds"]
+    assert rt["default"] == server.DEFAULT_SESSION_MAX_RUNTIME_SECONDS
+    assert rt["maximum"] == server.DEFAULT_SESSION_MAX_RUNTIME_SECONDS
+    assert rt["minimum"] == server.op_session.MIN_JOB_RUNTIME_SECONDS
+    assert "job_wait" in rt["description"]
+    wait = by_name["hermes_session_job_wait"]["properties"]["wait_seconds"]
+    assert wait["default"] == 120
+    assert "wait_seconds" not in props
+    assert "max_job_runtime_seconds" not in by_name["hermes_session_job_wait"]["properties"]

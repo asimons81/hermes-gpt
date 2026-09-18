@@ -12,7 +12,9 @@ import sqlite3
 import sys
 import urllib.parse
 from pathlib import Path
-from typing import Any, List
+from typing import Annotated, Any, List
+
+from pydantic import Field
 
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
@@ -80,7 +82,7 @@ MAX_QUERY_LENGTH = 512
 MAX_RESPONSE_BYTES = 262_144
 MAX_MESSAGE_SCAN_ROWS = 1_000
 DEFAULT_SESSION_OFFSET = 0
-DEFAULT_SESSION_TIMEOUT = 900
+DEFAULT_SESSION_MAX_RUNTIME_SECONDS = 7_200
 
 _DEFAULT_MESSAGE_ROLES = {"user", "assistant"}
 _INTERNAL_MESSAGE_ROLES = {"system", "tool", "function"}
@@ -993,7 +995,7 @@ def hermes_bot_chat_get(profile: str = "default") -> str:
 def hermes_bot_chat_send(
     prompt: str,
     profile: str = "default",
-    timeout: int = 900,
+    max_job_runtime_seconds: int = DEFAULT_SESSION_MAX_RUNTIME_SECONDS,
 ) -> dict[str, Any]:
     """Send one bounded turn directly to a profile's canonical Bot Chat."""
     safe_profile = _validate_session_profile(profile)
@@ -1019,8 +1021,8 @@ def hermes_bot_chat_send(
         return hermes_session_continue(
             resolved["current_session_id"],
             prompt,
-            timeout,
-            safe_profile,
+            max_job_runtime_seconds=max_job_runtime_seconds,
+            profile=safe_profile,
         )
     except Exception as exc:
         return op_policy.make_error_envelope(
@@ -1295,7 +1297,18 @@ def hermes_session_search(
 def hermes_session_continue(
     session_id: str,
     prompt: str,
-    timeout: int = DEFAULT_SESSION_TIMEOUT,
+    max_job_runtime_seconds: Annotated[
+        int,
+        Field(
+            description=(
+                "Durée maximale du travail Hermes en secondes : à expiration, Hermes"
+                " et ses enfants sont arrêtés. Sans rapport avec hermes_session_job_wait"
+                " (max 120 s, ne tue jamais le job)."
+            ),
+            ge=op_session.MIN_JOB_RUNTIME_SECONDS,
+            le=DEFAULT_SESSION_MAX_RUNTIME_SECONDS,
+        ),
+    ] = DEFAULT_SESSION_MAX_RUNTIME_SECONDS,
     profile: str = "default",
 ) -> dict[str, Any]:
     """Start one bounded, asynchronous turn in an existing Hermes session for a profile."""
@@ -1307,7 +1320,7 @@ def hermes_session_continue(
             return op_session.hermes_session_continue(
                 session_id,
                 prompt,
-                timeout,
+                max_job_runtime_seconds=max_job_runtime_seconds,
                 hermes_root=_default_hermes_root(),
                 agent_root=HERMES_ROOT,
                 profile=safe_profile,
@@ -1324,7 +1337,7 @@ def hermes_session_continue(
         return op_session.hermes_session_continue(
             resolved_id,
             prompt,
-            timeout,
+            max_job_runtime_seconds=max_job_runtime_seconds,
             hermes_root=_default_hermes_root(),
             agent_root=HERMES_ROOT,
             profile=safe_profile,
@@ -1343,11 +1356,20 @@ def hermes_session_continue(
 def hermes_session_send(
     session_id: str,
     prompt: str,
-    timeout: int = DEFAULT_SESSION_TIMEOUT,
+    max_job_runtime_seconds: Annotated[int, Field(
+        description="Durée maximale du travail Hermes en secondes : à expiration, Hermes et ses enfants sont arrêtés. Sans rapport avec hermes_session_job_wait.",
+        ge=op_session.MIN_JOB_RUNTIME_SECONDS,
+        le=DEFAULT_SESSION_MAX_RUNTIME_SECONDS,
+    )] = DEFAULT_SESSION_MAX_RUNTIME_SECONDS,
     profile: str = "default",
 ) -> dict[str, Any]:
     """Alias for profile-aware hermes_session_continue for clients that use send terminology."""
-    return hermes_session_continue(session_id, prompt, timeout, profile)
+    return hermes_session_continue(
+        session_id,
+        prompt,
+        max_job_runtime_seconds=max_job_runtime_seconds,
+        profile=profile,
+    )
 
 
 def hermes_session_job_status(job_id: str) -> dict[str, Any]:

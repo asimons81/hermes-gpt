@@ -22,8 +22,8 @@ import operator_policy as op
 ENABLE_SESSION_CONTROL_ENV = "HERMES_GPT_ENABLE_SESSION_CONTROL"
 MAX_PROMPT_CHARS = 65_536
 MAX_RESULT_CHARS = 24_000
-MIN_TIMEOUT = 10
-MAX_TIMEOUT = 3_600
+MIN_JOB_RUNTIME_SECONDS = 10
+MAX_JOB_RUNTIME_SECONDS = 7_200
 MAX_JOB_WAIT_SECONDS = 120
 _SESSION_TERMINAL_STATES = frozenset({"completed", "failed", "timed_out", "orphaned"})
 
@@ -94,7 +94,7 @@ def _hermes_executable(agent_root: Path | None = None) -> str:
 
 
 def _validate_start(
-    session_id: str, prompt: str, timeout: int, profile: str = "default"
+    session_id: str, prompt: str, max_job_runtime_seconds: int, profile: str = "default"
 ) -> tuple[str, str, int, str] | dict[str, Any]:
     if not op.env_truthy(ENABLE_SESSION_CONTROL_ENV):
         return _error(
@@ -108,26 +108,30 @@ def _validate_start(
         return _error("INVALID_PROMPT", "prompt must not be empty.", "Provide the next instruction for the existing Hermes session.")
     if len(prompt) > MAX_PROMPT_CHARS:
         return _error("PROMPT_TOO_LARGE", f"prompt exceeds the {MAX_PROMPT_CHARS}-character limit.", "Send a shorter prompt.")
-    if isinstance(timeout, bool) or not isinstance(timeout, int):
-        return _error("INVALID_TIMEOUT", "timeout must be an integer number of seconds.", f"Choose {MIN_TIMEOUT} to {MAX_TIMEOUT} seconds.")
+    if isinstance(max_job_runtime_seconds, bool) or not isinstance(max_job_runtime_seconds, int):
+        return _error(
+            "INVALID_MAX_JOB_RUNTIME_SECONDS",
+            "max_job_runtime_seconds must be an integer number of seconds.",
+            f"Choose {MIN_JOB_RUNTIME_SECONDS} to {MAX_JOB_RUNTIME_SECONDS} seconds.",
+        )
     try:
         safe_profile = op.validate_profile_name(profile)
     except Exception:
         return _error("INVALID_PROFILE", "profile is not a valid Hermes profile name.", "Use an authorized profile name.")
-    return session_id.strip(), prompt, max(MIN_TIMEOUT, min(timeout, MAX_TIMEOUT)), safe_profile
+    return session_id.strip(), prompt, max(MIN_JOB_RUNTIME_SECONDS, min(max_job_runtime_seconds, MAX_JOB_RUNTIME_SECONDS)), safe_profile
 
 
 def hermes_session_continue(
     session_id: str,
     prompt: str,
-    timeout: int = 900,
+    max_job_runtime_seconds: int = MAX_JOB_RUNTIME_SECONDS,
     *,
     hermes_root: Path | None = None,
     agent_root: Path | None = None,
     profile: str = "default",
 ) -> dict[str, Any]:
     """Start one bounded non-interactive turn in an existing Hermes session."""
-    checked = _validate_start(session_id, prompt, timeout, profile)
+    checked = _validate_start(session_id, prompt, max_job_runtime_seconds, profile)
     if isinstance(checked, dict):
         return checked
     safe_id, safe_prompt, safe_timeout, safe_profile = checked
@@ -147,6 +151,7 @@ def hermes_session_continue(
         "timeout": safe_timeout,
         "prompt_len": len(safe_prompt),
         "prompt_sha256": hashlib.sha256(safe_prompt.encode("utf-8")).hexdigest(),
+        "max_job_runtime_seconds": safe_timeout,
     }
     _, output_path = _paths(job_id, hermes_root)
     output_path.parent.mkdir(parents=True, exist_ok=True)
