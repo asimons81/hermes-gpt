@@ -27,6 +27,73 @@ MAX_JOB_RUNTIME_SECONDS = 7_200
 MAX_JOB_WAIT_SECONDS = 120
 _SESSION_TERMINAL_STATES = frozenset({"completed", "failed", "timed_out", "orphaned"})
 
+# -- Enveloppe MCP : budget en octets de la reponse complete (correction troncature) --
+# La serilisation JSON Python (défaut ensure_ascii=True) echappe les accents (\uXXXX,
+# x6) ; ce budget borne la réponse MCP COMPLETE sous cette representation reelle.
+MAX_MCP_RESULT_BYTES = 16_384  # 16 KiB — conservateur, sous toute limite observee (OpenAI inconnue)
+MCP_RESULT_BUDGET_ENV = "HERMES_GPT_MCP_RESULT_BUDGET_BYTES"
+_MCP_OVERHEAD = 1024  # marge pour les metadonnees annexes (offset, original_*, budget_*)
+
+
+def _mcp_result_budget() -> int:
+    raw = os.environ.get(MCP_RESULT_BUDGET_ENV, "").strip()
+    if raw:
+        try:
+            v = int(raw)
+            if v > 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    return MAX_MCP_RESULT_BYTES
+
+
+def _env_bytes_size(value: dict[str, Any]) -> int:
+    """Taille JSON transportee par defaut (json.dumps ensure_ascii=True)."""
+    return len(json.dumps(value, ensure_ascii=True).encode("utf-8"))
+
+
+def _utf8_slice(text: str, start: int, max_bytes: int) -> tuple[str, int, int]:
+    """Tranche de `text` par octets UTF-8, sans couper un caractere :
+    retourne (sous-chaine, offset_debut_ajuste, offset_fin)."""
+    data = text.encode("utf-8")
+    total = len(data)
+    start = max(0, min(int(start), total))
+    while start < total and (data[start] & 0xC0) == 0x80:
+        start += 1  # avancer jusqu'au debut d'un caractere
+    end = min(start + max(0, int(max_bytes)), total)
+    while end > start:
+        try:
+            data[start:end].decode("utf-8")
+            break
+        except UnicodeDecodeError:
+            end -= 1
+    return data[start:end].decode("utf-8"), start, end
+
+
+def _bound_result_for_mcp(meta: dict[str, Any], response: str, budget: int) -> tuple[str, bool]:
+    """Reduit `response` (slicing UTF-8 safe) pour que l'enveloppe MCP complete
+    tienne sous `budget`. Retourne (response_bornee, limite_par_budget)."""
+    def size_for(n: int) -> int:
+        d = dict(meta)
+        d["response"] = response[:n]
+        return _env_bytes_size(d)
+
+    if size_for(len(response)) <= budget:
+        return response, False
+    lo, hi = 0, len(response)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if size_for(mid) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    d = dict(meta)
+    d["response"] = response[:lo]
+    while lo > 0 and _env_bytes_size(d) > budget:
+        lo -= 1
+        d["response"] = response[:lo]
+    return response[:lo], True
+
 _lock = threading.RLock()
 _processes: dict[str, subprocess.Popen[str]] = {}
 _active_sessions: dict[str, str] = {}
@@ -279,6 +346,14 @@ def hermes_session_job_status(job_id: str, hermes_root: Path | None = None) -> d
     return _redact({"success": True, "job": meta})
 
 
+def _load_result_text(job_id: str, hermes_root: Path | None) -> str:
+    _, output_path = _paths(job_id, hermes_root)
+    try:
+        return output_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def hermes_session_job_result(job_id: str, max_chars: int = MAX_RESULT_CHARS, hermes_root: Path | None = None) -> dict[str, Any]:
     _reconcile(hermes_root)
     meta = _load(job_id, hermes_root)
@@ -290,22 +365,85 @@ def hermes_session_job_result(job_id: str, max_chars: int = MAX_RESULT_CHARS, he
         cap = max(500, min(int(max_chars), MAX_RESULT_CHARS))
     except (TypeError, ValueError):
         return _error("INVALID_MAX_CHARS", "max_chars must be an integer.", f"Choose 500 to {MAX_RESULT_CHARS} characters.")
-    _, output_path = _paths(job_id, hermes_root)
-    try:
-        response = output_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        response = ""
-    response = op.redact_output(response)
-    truncated = len(response) > cap
-    return _redact({
+    text = op.redact_output(_load_result_text(job_id, hermes_root))
+    original_chars = len(text)
+    original_bytes = len(text.encode("utf-8"))
+    budget = _mcp_result_budget()
+    include = {
         "success": True,
         "job_id": job_id,
         "session_id": meta.get("session_id"),
         "profile": meta.get("profile", "default"),
         "status": meta.get("status"),
         "return_code": meta.get("return_code"),
-        "response": response[:cap],
-        "truncated": truncated,
+    }
+    char_limited = len(text) > cap
+    preview, budget_limited = _bound_result_for_mcp(include, (text[:cap] if char_limited else text), budget - _MCP_OVERHEAD)
+    preview_bytes = len(preview.encode("utf-8"))
+    if char_limited and not budget_limited:
+        why = "max_chars"
+    elif budget_limited:
+        why = "budget"
+    else:
+        why = None
+    return _redact({
+        **include,
+        "response": preview,
+        "truncated": char_limited or budget_limited,
+        "truncated_by": why,
+        "original_chars": original_chars,
+        "original_bytes": original_bytes,
+        "offset": 0,
+        "next_offset": preview_bytes,
+        "bytes_returned": preview_bytes,
+        "budget_bytes": budget,
+    })
+
+
+def hermes_session_job_result_page(
+    job_id: str, offset: int = 0, max_bytes: int = 4096, hermes_root: Path | None = None
+) -> dict[str, Any]:
+    """Page suivante du resultat (par octets UTF-8, sans couper un caractere).
+
+    Déterministe/idempotente : meme offset -> meme page. Continuez depuis
+    job_result.next_offset / page.end_offset. L'enveloppe tient sous budget.
+    """
+    _reconcile(hermes_root)
+    meta = _load(job_id, hermes_root)
+    if not meta:
+        return _error("JOB_NOT_FOUND", "Hermes session job was not found.", "Check the job ID returned by hermes_session_continue.")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
+        return _error("INVALID_MAX_BYTES", "max_bytes must be a positive integer.", f"Choose 64 to {MAX_MCP_RESULT_BYTES} bytes.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        return _error("INVALID_OFFSET", "offset must be a non-negative integer.", "Use job_result.next_offset / a previous page end_offset.")
+    text = op.redact_output(_load_result_text(job_id, hermes_root))
+    total = len(text.encode("utf-8"))
+    budget = _mcp_result_budget()
+    include = {
+        "success": True,
+        "job_id": job_id,
+        "session_id": meta.get("session_id"),
+        "profile": meta.get("profile", "default"),
+        "status": meta.get("status"),
+        "return_code": meta.get("return_code"),
+    }
+    want = min(max_bytes, max(budget - _MCP_OVERHEAD - 4096, 64))
+    chunk, start, end = _utf8_slice(text, offset, want)
+    while _env_bytes_size({**include, "offset": start, "end_offset": end, "response": chunk}) > (budget - _MCP_OVERHEAD) and want > 64:
+        want = max(want // 2, 64)
+        chunk, start, end = _utf8_slice(text, offset, want)
+    eof = end >= total
+    return _redact({
+        **include,
+        "response": chunk,
+        "offset": start,
+        "end_offset": end,
+        "bytes_read": end - start,
+        "chars_read": len(chunk),
+        "original_bytes": total,
+        "eof": eof,
+        "truncated": not eof,
+        "budget_bytes": budget,
     })
 
 
