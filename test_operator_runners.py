@@ -159,7 +159,7 @@ def test_pi_rpc_prompt_rejection_fails_immediately(tmp_path: Path, monkeypatch: 
 
     fake_pi = tmp_path / "fake-pi"
     fake_pi.write_text(
-        "#!/usr/bin/env python3\n"
+        "#!/usr/bin/python3\n"
         "import json, sys\n"
         "assert '--no-extensions' in sys.argv\n"
         "json.loads(sys.stdin.readline())\n"
@@ -184,7 +184,7 @@ def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest
 
     fake_pi = tmp_path / "fake-pi-noisy-stderr"
     fake_pi.write_text(
-        "#!/usr/bin/env python3\n"
+        "#!/usr/bin/python3\n"
         "import json, os, sys\n"
         "json.loads(sys.stdin.readline())\n"
         "os.write(sys.stderr.fileno(), b'x' * (2 * 1024 * 1024))\n"
@@ -256,7 +256,7 @@ def test_opencode_worker_pipes_prompt_and_uses_confinement(tmp_path: Path, monke
     monkeypatch.setattr(runners, "_opencode_runtime_material", lambda *args, **kwargs: material)
     fake = tmp_path / "fake-opencode"
     fake.write_text(
-        "#!/usr/bin/env python3\n"
+        "#!/usr/bin/python3\n"
         "import json, os, sys\n"
         "prompt = sys.stdin.read()\n"
         "config = os.environ['OPENCODE_CONFIG_CONTENT']\n"
@@ -394,7 +394,7 @@ def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path):
     ws.mkdir()
     fake_omx = tmp_path / "fake-omx-descendant"
     fake_omx.write_text(
-        "#!/usr/bin/env python3\n"
+        "#!/usr/bin/python3\n"
         "import subprocess, sys, time\n"
         "subprocess.Popen([sys.executable, '-c', \"import sys,time; sys.stdout.write('held'); sys.stdout.flush(); time.sleep(60)\"])\n"
         "time.sleep(60)\n",
