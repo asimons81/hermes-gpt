@@ -376,7 +376,7 @@ Historical release notes and pre-release design / risk / planning artifacts rema
 ## Development and verification
 
 ```bash
-python -m pip install -r requirements-dev.txt
+python -m pip install -e ".[dev]"
 python -m pytest
 python tools/check_package_hygiene.py dist/*
 ```

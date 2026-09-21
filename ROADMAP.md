@@ -203,8 +203,6 @@ Review loop: independent review 6084fc89 PASS with 4 findings -> fix 711573d0 (n
 - Watch **test_mcp_compat.py:81** in CI: its assess-time failure no longer reproduces in-session (passes in-suite and standalone) — env-state-dependent, needs a skip guard for bare checkouts regardless.
 - Remaining design-gated/low items unchanged: rm-019, rm-020, rm-022, rm-025.
 
-<<<<<<< HEAD
-=======
 <!-- cycle-1 additions below: run fd2bc85ff5994b8fa6b59f286efedce7 (assess db8d375501724, research 9662e1e8286) -->
 
 Interlock (2026-09-21): run fd2bc85ff599 is a third parallel repository-maintenance cycle-1 run on the same base c1785b22e5. Its assess independently re-confirmed at this HEAD — on the baseline interpreter (py3.11.15/mcp 2.0.0/pytest 9.1.1) in CI's exact serial shape (HERMES_HTTP_TEST=1, log /tmp/assess-db8d3755-full.log) — the 4 stale empty-challenge PKCE failures (rm-003; defs :348/:492/:812/:941 failing at oauth_auth.py:477-480 fail-closed guard), test_mcp_compat.py:81 metadata failure (rm-007), token_store.py:1097-1141 dead block with 5x F821 (rm-016), the curated CI lint-list gap (rm-017), unbounded uvicorn/pyyaml (rm-023 bounded uvicorn on the sibling branch; pyyaml remains), and the 3.12 matrix ceiling (rm-024). No delegation/g4c flake reproduces serially. Adopt sibling implementations by content at the merge gates; do not re-implement.
@@ -254,6 +252,81 @@ Validation (attempts 8d1e62ec implement, 3b787ac5 targeted_tests): ruff --isolat
 - CHANGELOG Unreleased entry for B1 added at compound time; release-notes/commit message at the commit gate should reference the adoption provenance (2ff57351b7, 89865b1281).
 
 <!-- restored 2026-09-21 (prioritize attempt 87402e78): roadmap-phase write was cut off mid-edit; block re-emitted verbatim from the folded roadmap phase_result -->
+<!-- cycle-1 additions below: run 634bf4516c834979b8df90376760a3c2 (assess 0c118051, research aa5dfed3; parallel repository-maintenance cycle-1 sibling of a51c/6d49 runs) -->
 
->>>>>>> a47bca6f0c (test: restore pr63 PKCE regression contracts, green the baseline (B1))
+Fresh re-verification (2026-09-21, assess attempt 0c118051 at HEAD c1785b22e5, clean tree): the sibling pending-merge defects still reproduce here — 4 stale-PKCE failures in test_codex_pr63_remediation.py:348/:492/:812/:941 vs oauth_auth.py:474-479 fail-closed PKCE (rm-003's target; full suite 1640 tests / 5 failed on baseline venv, identical set under -n 8 and mcp 2.0.0/2.2.0), token_store.py:1096-1141 orphaned block with 5x F821 (rm-016), repo-wide F401 x11/F841 x16 non-test (rm-017), test_mcp_compat.py:81 PackageNotFoundError on bare checkouts (rm-007). Confirms none of the a51c/6d49 branches have merged into this lineage yet — adopt-by-content interlock still stands. New items below extend (do not replace) the sibling state.
+
+### Upstream v0.11.0 catch-up with explicit PKCE-semantics reconciliation
+- id: `rm-030` | track: compatibility | priority: 115.0 | status: candidate (designated next-cycle headline; do not fold into a green-suite batch)
+- signals: conductor.run-634bf451:research, upstream asimons81/hermes-gpt v0.11.0 released 2026-09-18 (PyPI live; fork still 0.10.0): exactly 5 commits HEAD..upstream/master (da39b19e8c..7795aa3ce8, PRs #69-#73). PR #69 adds the opt-in Gemini Spark OAuth client profile (oauth_auth.py +157 lines, docs/gemini-spark.md 141 lines, test_gemini_compat.py 1087 lines) with OPTIONAL PKCE (`require_pkce`, default True) — a semantic conflict with this fork's mandatory fail-closed PKCE (oauth_auth.py:474-479) and its second non-RFC7009 token endpoint; #71 security remediation = unauthenticated MCP shutdown port removed + mcp[cli] floor bump; pyproject widened to mcp[cli]>=1.28.1,<3; assets/docs updates in #70/#72/#73
+- acceptance: PRs #69-#73 merged or cherry-picked with a written decision note on PKCE semantics (fork default stays fail-closed mandatory; `require_pkce` opt-out allowed only inside the Gemini Spark profile contract with tests); test_server.py tool-count pin updated if the upstream diff changes registration; full suite green on mcp 1.x and 2.x lanes including the new test_gemini_compat.py; docs/gemini-spark.md added to data-files; CHANGELOG entry records the catch-up and the PKCE decision
+- evidence: `git rev-list --count HEAD..upstream/master` == 0 post-merge; full-suite green logs on both SDK families; decision note (commit message or docs); CI green
+
+### MCP spec-revision lineage refresh (2025-06-18) + SDK 2.3.x lane
+- id: `rm-031` | track: compatibility | priority: 70.0 | status: candidate
+- signals: conductor.run-634bf451:research, modelcontextprotocol/specification current revision is 2025-06-18 (docs/mcp-compatibility.md:22-24 still claims latest = 2026-07-28 — stale); python-sdk 2.3.4 (2026-09-13) targets 2025-06-18; rm-009's assertion test pins LATEST_PROTOCOL_VERSION=='2026-07-28' and will go red the moment an SDK 2.3.x lane exists; CI pins (1.28.1/2.0.0 + 2.2.0/1.30.0 lanes) stop below 2.3.x
+- acceptance: docs/mcp-compatibility.md corrected to describe the revision lineage (2026-07-28 pinned for SDK <=2.2, 2025-06-18 for 2.3+) instead of claiming one "latest"; the rm-009 revision assertion parameterized per installed SDK pin (still fails loudly on unexpected revisions); a mcp==2.3.x lane added to CI (or pins refreshed per rm-009's cadence rule) with a spec-delta review note for hermes surfaces; MCP-Auth cross-RFC notes (RFC 9728/9700 now Proposed Standard, draft-ietf-oauth-parallel-refresh adopted) reflected in docs/oauth.md where they touch hermes behavior
+- evidence: docs diff; assertion test green per lane; ci.yml matrix diff; delta-review note
+
+### Remove 12 unresolvable gitlinks and correct the c1785b22e5 record
+- id: `rm-026` | track: reliability | priority: 72.0 | status: implemented (pending commit gate, run 634bf4516c83 cycle 1, 2026-09-22)
+- signals: conductor.run-634bf451:assess, `git ls-files -s | grep -c '^160000'` == 12 (design-canon-* x8, review-bench, review-compat, review-fixtures, review-qa) with NO .gitmodules and all 12 dirs empty on disk; commit c1785b22e5's message claims it dropped the design-canon-adr002 gitlink but its diff only deleted .gitmodules — the gitlink remains in the index (commit-message/diff mismatch)
+- acceptance: all 12 gitlinks removed from the index (git rm --cached) OR a .gitmodules restored with resolvable URLs if any are intentionally real; `git ls-files -s | grep -c '^160000'` == 0; a fresh `git clone --recurse-submodules` does not fail; commit message truthfully states what was removed (supersedes the c1785b22e5 claim)
+- evidence: command outputs pre/post; CI unaffected (actions/checkout submodules:false) — green run confirms
+
+### Ship-or-de-reference README-referenced docs; add a shipped-docs guard test
+- id: `rm-027` | track: maintainability | priority: 60.0 | status: partially implemented (run 634bf4516c83 cycle 1, 2026-09-22 — remainder: data-files +2 docs, runtime-checkout.md historical re-label, guard test, CHANGELOG; needs re-dispatch before commit gate)
+- signals: conductor.run-634bf451:assess, docs/runtime-checkout.md and docs/vnext-capability-manifest-and-mission-ledger.md exist in docs/ and are referenced by README.md:36, README.md:343, docs/README.md:28 (the documentation authority map) but are absent from [tool.setuptools.data-files] — installed users get a docs map pointing at files that do not ship; no test guards the shipped-docs list (test_export_docs.py pins only file-export.md; test_package_hygiene.py pins release notes); docs/runtime-checkout.md:18 additionally pins host state ('mcp[cli]>=1.0,<2' vs pyproject's >=1.28.1,<3; /home/tony paths; port 4750)
+- acceptance: both docs either added to data-files or de-referenced from README/docs map; NEW guard test asserts every docs/*.md link target in README.md and docs/README.md is in data-files (explicit allowlist for intentionally-unshipped historical docs); runtime-checkout.md refresh or re-label as historical per AGENTS.md documentation rules
+- evidence: guard test added and green; `python -m build` + tools/check_package_hygiene.py show the shipped docs set
+
+### Stop .gitignore '*.ps1' from swallowing new example scripts
+- id: `rm-028` | track: reliability | priority: 55.0 | status: implemented (pending commit gate, run 634bf4516c83 cycle 1, 2026-09-22)
+- signals: conductor.run-634bf451:assess, .gitignore '*.ps1' rule matches examples/*.example.ps1 (verified: `git check-ignore examples/foo.example.ps1` matches) — the exact pattern pyproject data-files ships; existing examples are tracked only because they predate the rule, so any NEW example .ps1 is invisible to `git add .` yet claimed by data-files
+- acceptance: negation rule added (e.g. `!examples/*.ps1`); `git check-ignore examples/foo.example.ps1` exits 1 post-fix; tracked example set unchanged (`git ls-files examples/` identical); packaging still ships them
+- evidence: check-ignore probe before/after; ls-files diff empty; data-files listing in the built wheel/sdist
+
+### pyyaml bound (last bare runtime dependency)
+- id: `rm-032` | track: reliability | priority: 58.0 | status: implemented (pending commit gate, run 634bf4516c83 cycle 1, 2026-09-22)
+- signals: conductor.run-634bf451:research, pyproject dependencies list pyyaml unbounded; PyPI 6.0.3 (2026-08-25) fixed CVE-2026-31132; rm-023 left pyyaml as the only bare runtime dep (uvicorn already >=0.30,<1)
+- acceptance: pyyaml bounded `>=6.0.3,<7` in pyproject (and requirements.txt if rm-029 keeps that file); CHANGELOG note; a cap move is a deliberate changelog event
+- evidence: pyproject diff; full suite green; CHANGELOG entry
+
+### requirements.txt / pyproject dependency duplication + undeclared psutil
+- id: `rm-029` | track: maintainability | priority: 45.0 | status: implemented (pending commit gate, run 634bf4516c83 cycle 1, 2026-09-22; review findings #1/#2 — requirements-dev.txt '-r' include + README dev-setup path — fixed in review-fix attempt cf265a76)
+- signals: conductor.run-634bf451:assess+research, requirements.txt:1-5 duplicates the pyproject [project] dependency list as a strict subset (only the `tomli; python_version<'3.11'` conditional is absent — verified 2026-09-21) while dev extras live only in pyproject; two sources of truth for the install set. Correction of the original research note: requirements.txt does NOT add psutil — psutil is imported only as a guarded optional import (operator_workspace.py:172, operator_diagnostics.py:122) and is declared nowhere, which is acceptable for an optional enhancement
+- acceptance: single source of truth — requirements.txt removed (docs point at `pip install .[dev]`); the one live reference (docs/mcp-compatibility.md:88) updated; psutil left as a documented optional guarded import (no declaration change required) or covered by an explicit optional extra if the review prefers
+- evidence: sync guard green or removal diff; `pip install` equivalence shown; full suite green
+
+### Gemini CLI client profile (user-need evidenced by upstream #54)
+- id: `rm-033` | track: compatibility | priority: 35.0 | status: candidate (gated on rm-030)
+- signals: conductor.run-634bf451:research, upstream issue #54 (open, 2026-09-12) requests Gemini CLI support; the only open user-need signal on either tracker (fork has no open issues; upstream has no other open issues); rm-030's Gemini Spark profile provides the custom-app OAuth scaffolding to mirror
+- acceptance: opt-in Gemini CLI client profile analogous to Gemini Spark (profile-aware session history + verified setup guide), default surfaces unchanged (read-only/dry-run ladder intact), test file mirroring test_gemini_compat.py; docs/codex.md terminology rules respected (client profile vs delegated worker)
+- evidence: tests green in-suite; setup guide verified against a real custom app; upstream #54 referenced in the CHANGELOG/PR
+
+Status amendments from this run's evidence (history above preserved): rm-024 gains anyio-5.0.0 evidence (released 2026-09-21; the -n 8 uv-env log already shows anyio BlockingPortal deprecation warnings — 3.13/3.14 lanes will surface more); rm-023's pyyaml follow-on is now formalized as rm-032; rm-018's revisit precondition (sibling rm-003 merge) is unchanged and still unmet at this HEAD.
+
+## Cycle 1 outcome — run 634bf4516c83 (2026-09-22; batch B1 "Index & Packaging Truthfulness"; review loop pending — recorded post-compound)
+
+Batch B1 (prioritize attempt 13e8bd28: rm-029 → rm-032 → rm-026 → rm-028 → rm-027) implemented in worktree run-634bf4516c83 (uncommitted; commit/merge are later gates). Complete: rm-026 (12 gitlinks `git rm --cached`, index count 0), rm-029 (requirements.txt deleted; docs/mcp-compatibility.md:88 now pyproject-only; review-fix cf265a76 additionally deleted requirements-dev.txt — its line 1 was `-r requirements.txt` — and repointed README's dev setup to `pip install -e ".[dev]"`, closing review findings #1/#2), rm-032 (pyyaml `>=6.0.3,<7` in pyproject; CHANGELOG entry landed in review-fix cf265a76, closing finding #4), rm-028 (`.gitignore` `!examples/*.example.ps1` negation). Partial: rm-027 — data-files registration of docs/runtime-checkout.md + docs/vnext-capability-manifest-and-mission-ledger.md, runtime-checkout.md historical re-label, and the shipped-docs guard test remain OPEN and must land before the commit gate; the CHANGELOG Unreleased entries for B1 landed in review-fix cf265a76.
+Validation (pre-review, attempt ae8f85ab, baseline interpreter mcp 2.0.0 / pytest 9.1.1 / HERMES_HTTP_TEST=1 serial): targeted test_package_hygiene.py 48 passed / 3 skipped / exit 0; full suite exit 1 with EXACTLY 4 FAILED — all the inherited stale-PKCE class (test_codex_pr63_remediation.py, sibling rm-003's target), 0 ERROR; versus the 2026-09-21 assess baseline (5 FAILED incl. test_mcp_compat.py:81) this is zero NEW failures and one fewer — the mcp_compat metadata test passed in-suite and solo this run (env-state-dependent, exactly as cycle 1's watch-list predicted). Static acceptance: `git check-ignore examples/<new>.example.ps1` exit 1 with control `deploy-local.ps1` exit 0; `git ls-files -s | grep -c '^160000'` == 0; tomllib parse clean; log /tmp/targeted-ae8f85ab-full.log.
+
+### Cycle 1 learnings (run 634bf4516c83) — prevention rules, continued
+
+11. **One manifest for the install set.** requirements.txt was a strict-subset duplicate of pyproject dependencies — invisible drift by construction (its tomli conditional was already gone). Single source of truth: pyproject; any second manifest must be generated, never hand-maintained. Enforcement proof: the independent review (attempt 0c534991) caught requirements-dev.txt — a `-r requirements.txt` include the implement sweep missed — as a live breakage; both manifests are now gone.
+12. **Verify manifest claims against the file, not the narrative.** The original research note claimed requirements.txt "adds psutil"; the file never listed it (psutil is a guarded optional import declared nowhere). Every dependency claim got re-checked at stewardship time before it entered the batch record.
+13. **Probe .gitignore against the shipped set.** A broad ignore glob ('*.ps1') silently untracks exactly the pattern data-files ships; the durable check is a synthetic-name probe (`git check-ignore examples/x.example.ps1` → expect exit 1) plus a tracked-set diff, not eyeballing existing files (they predate the rule and stay tracked).
+14. **Commit messages are claims; the index is the state.** HEAD c1785b22e5's message said the gitlink was dropped while its diff only deleted .gitmodules — index facts (`git ls-files -s | grep '^160000'`) outrank the message. rm-026 supersedes that claim at the next commit.
+15. **Fail-set delta, not absolute green, is the pass bar when inherited failures are sibling-owned.** Record the failure set byte-for-byte (4 stale-PKCE) and classify per-test deltas before reacting: this cycle's 5→4 change was an env flip (mcp_compat metadata), not an effect of any B1 edit.
+
+### Next-cycle context (run 634bf4516c83 additions)
+
+- **rm-027 remainder is the only B1 debt** and gates the commit: guard test (with explicit allowlist for intentionally-unshipped historical docs), data-files +2, runtime-checkout.md re-label. (CHANGELOG entries landed in review-fix cf265a76.) The guard test also operationalizes rule 11's spirit for docs.
+- **Dist validation deferred by record:** `python -m build` + `twine check dist/*` + `tools/check_package_hygiene.py dist/*` with the two rm-027 docs present was NOT run in implement/targeted_tests (partial rm-027 made it moot); explicitly folded into the commit gate (review finding #5).
+- **rm-030 stays the headline** (upstream v0.11.0 catch-up + PKCE-semantics reconciliation vs oauth_auth.py:474-479); nothing this cycle changed that.
+- **Commit-gate interlocks carried forward:** B1's pyproject edits vs sibling run-6d49's uvicorn bound touch the same file — reconcile at merge, never rebase B1 onto the sibling; B1 stays separate from rm-030.
+- CHANGELOG Unreleased entries for B1 (user-visible: dependency-set consolidation, pyyaml CVE bound, index truthfulness, example-script trackability) — LANDED in review-fix cf265a76.
+
+Review loop: independent review 0c534991 returned changes_required with 6 findings; review-fix cf265a76 fixed #1 (requirements-dev.txt deleted — dev extras in pyproject are a strict superset), #2 (README dev setup repointed to `pip install -e ".[dev]"`), #3 (this roadmap corrected to match disk), #4 (CHANGELOG entries landed), #5 (dist-validation deferral recorded above); #6 was engine-side bookkeeping only. Full-suite retest at /tmp/reviewfix-cf265a76-full.log.
+
 <!-- managed by hermes-roadmap render; do not edit by hand -->

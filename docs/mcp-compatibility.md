@@ -94,7 +94,7 @@ Client notes:
 
 ## Package floor and regression coverage
 
-`pyproject.toml` and `requirements.txt` allow `mcp[cli]>=1.28.1,<3`.
+`pyproject.toml` allows `mcp[cli]>=1.28.1,<3`.
 The minimum 1.x version is the previously documented verified SDK, rather
 than the historical untested `>=1.0` metadata floor. SDK 3 is not admitted.
 
