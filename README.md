@@ -193,8 +193,10 @@ For supported OpenAI products, prefer [OpenAI Secure MCP Tunnel](docs/openai-sec
 For other remote clients, use a deliberately configured private/authenticated HTTPS boundary. The existing [Cloudflare Tunnel deployment](docs/cloudflare-tunnel.md) is a public-proxy path with a different Host/authentication boundary. Do not publish an unauthenticated Operator endpoint to the internet.
 
 Hermes GPT can enforce either a strong static bearer token or a built-in,
-single-confidential-client OAuth authorization-code flow with rotating refresh
-tokens. With Secure MCP Tunnel, static bearer authentication can be used as an
+confidential-client OAuth authorization-code flow with rotating refresh
+tokens. One statically configured client is the default; optional additional
+client profiles (for example Gemini Spark) can be registered alongside it.
+With Secure MCP Tunnel, static bearer authentication can be used as an
 optional local-hop defense in depth. Built-in OAuth requires deliberate
 browser-facing authorization-server reachability because the authorization
 server itself is not automatically tunneled. See [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md) and [OAuth and bearer authentication](docs/oauth.md); authentication does not activate Operator mutation or Owner Mode.
@@ -345,6 +347,7 @@ Current operational documentation:
 - [Reuse / do-not-rebuild boundary](BOUNDARY.md)
 - [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md)
 - [OAuth and bearer authentication](docs/oauth.md)
+- [Gemini Spark custom app](docs/gemini-spark.md)
 - [Operator Mode](docs/operator-mode.md)
 - [Missions (v0.9)](docs/missions.md)
 - [Delegations (v0.9)](docs/delegations.md)
