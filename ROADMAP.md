@@ -203,4 +203,57 @@ Review loop: independent review 6084fc89 PASS with 4 findings -> fix 711573d0 (n
 - Watch **test_mcp_compat.py:81** in CI: its assess-time failure no longer reproduces in-session (passes in-suite and standalone) — env-state-dependent, needs a skip guard for bare checkouts regardless.
 - Remaining design-gated/low items unchanged: rm-019, rm-020, rm-022, rm-025.
 
+<<<<<<< HEAD
+=======
+<!-- cycle-1 additions below: run fd2bc85ff5994b8fa6b59f286efedce7 (assess db8d375501724, research 9662e1e8286) -->
+
+Interlock (2026-09-21): run fd2bc85ff599 is a third parallel repository-maintenance cycle-1 run on the same base c1785b22e5. Its assess independently re-confirmed at this HEAD — on the baseline interpreter (py3.11.15/mcp 2.0.0/pytest 9.1.1) in CI's exact serial shape (HERMES_HTTP_TEST=1, log /tmp/assess-db8d3755-full.log) — the 4 stale empty-challenge PKCE failures (rm-003; defs :348/:492/:812/:941 failing at oauth_auth.py:477-480 fail-closed guard), test_mcp_compat.py:81 metadata failure (rm-007), token_store.py:1097-1141 dead block with 5x F821 (rm-016), the curated CI lint-list gap (rm-017), unbounded uvicorn/pyyaml (rm-023 bounded uvicorn on the sibling branch; pyyaml remains), and the 3.12 matrix ceiling (rm-024). No delegation/g4c flake reproduces serially. Adopt sibling implementations by content at the merge gates; do not re-implement.
+
+### Land upstream v0.11.0 (dual SDK support, Gemini Spark profile, security remediation bundle)
+- id: `rm-026` | track: compatibility | priority: 115.0 | status: candidate
+- signals: conductor.run-fd2bc85f:research-R1, merge-base 9f537106e9..upstream/master 7795aa3ce8 = exactly 5 commits (#69 Gemini Spark OAuth client profile + verified custom-app setup guide, #70 README OAuth-note consistency, #71 release v0.11.0 — MCP SDK 2 first-class + Bot Chat + security remediation bundle, #72 release notes PUBLISHED with GitHub+PyPI live, #73 hero assets); fork is 0.10.0 while PyPI serves 0.11.0; upstream #71 security bundle (signed tokens require durable store, revocation retires+advances epoch in one SQLite txn, atomic refresh rotation, ledger watermark pagination) supersedes fork-local PKCE repair — catch-up SUPERSEDES local test repair
+- acceptance: upstream 5-commit set merged or cherry-picked onto the fork line with oauth_auth.py/server.py conflict resolution reviewed line-by-line; full suite green in CI shape (HERMES_HTTP_TEST=1, serial, baseline interpreter) — including the 4 stale-PKCE tests, which must adopt upstream's remediated contracts rather than local re-binds; security remediation diff explicitly reviewed against fork invariants (Owner Mode break-glass, secret-path denials); version bumped to 0.11.0+ and CHANGELOG records the catch-up
+- evidence: merge commit with conflict-resolution notes; green full-suite run post-merge; CHANGELOG diff; release/PyPI links recorded
+
+### Raise build floor to setuptools>=77 (PEP 639 license string)
+- id: `rm-027` | track: reliability | priority: 62.0 | status: implemented-pending-commit-gate (run fd2bc85f B1; floor = setuptools>=77; validated 2026-09-22 via no-isolation prepare_metadata under 77.0.3 -> hermes_gpt-0.10.0.dist-info + LICENSE)
+- signals: conductor.run-fd2bc85f:assess-F6, pyproject.toml license = "MIT" (PEP 639 SPDX string) with build-system floor setuptools>=69 (pyproject.toml:2); verified repro: setuptools==69.5.1 venv, prepare_metadata_for_build_wheel fails with license schema error ('required: file/text'); CI is green only because python -m build isolation pulls current setuptools
+- acceptance: floor raised to >=77 (or license switched to table form) so declared-floor builds work; sdist+wheel build verified in a --no-isolation environment; no behavior change to isolated CI builds
+- evidence: reproducible build under the pinned floor; pyproject diff; tools/check_package_hygiene.py still passes
+
+### Re-baseline the repo-wide lint gate for ruff 0.15 default rules
+- id: `rm-028` | track: maintainability | priority: 68.0 | status: candidate
+- signals: conductor.run-fd2bc85f:assess-F4, rm-017 (sibling) drove `ruff check .` 61->0 under the classic E/F default set and widened CI lint to repo-wide; but ruff 0.15.10 `--isolated` defaults now include UP/I/BLE/TRY/RUF classes — measured 524 findings at c1785b22e5 (server.py 48, token_store.py 21, oauth_auth.py 17, operator_policy.py 17), 184 fixable under 0.15; the post-merge gate will either silently enforce a different (larger) rule set or need a committed config that pins the intended set
+- acceptance: a committed [tool.ruff] config declares the enforced rule set explicitly; decision recorded (adopt 0.15 defaults with a staged fix plan, or select the classic set); CI lint job passes under the pinned ruff (dev-extra already pins >=0.15,<0.16 per review-fix 711573d0); no unenforced class without a recorded decision
+- evidence: config diff + green lint job; finding-count table before/after (61-era vs 524-era) with the disposition of each new class
+
+### Resolve the 12 unresolved gitlink entries
+- id: `rm-029` | track: maintainability | priority: 22.0 | status: candidate
+- signals: conductor.run-fd2bc85f:assess-F9, `git ls-files -s | awk '$1==160000'` = 12 entries at HEAD (8x design-canon-*, 4x review-*) with no .gitmodules; this lineage's last three commits (c1785b22e5..) already fought individual unresolvable gitlinks in CI
+- acceptance: either a .gitmodules mapping with resolvable URLs, or the 12 entries replaced by ordinary content/excluded; `git submodule status` resolves everything it lists; CI checkout (submodules:false) unaffected — proven by a green run
+- evidence: git submodule status output; green CI run; diff
+
+## Cycle 1 outcome — run fd2bc85ff599 (2026-09-22; pre-review, compounded before review/shipping gates)
+
+Batch B1 'Truthful Green Baseline' implemented in worktree run-fd2bc85ff599-fd2bc85f at base c1785b22e5 (uncommitted; commit/merge are later gates), 4 files +57/-60, adopting validated sibling content by content where parent blobs were byte-identical to this base: (a) PKCE re-bind — sibling 2ff57351b7 (a51c) applied verbatim: module-level RFC-7636 verifier + S256 challenge, all FIVE empty-challenge sites re-bound (defs :348/:492/:941 plus the accidentally-passing :802 site and vacuously-passing :820) and NEW test_exchange_rejects_code_without_stored_challenge pinning the fail-closed contract (sibling rm-003); (b) test_mcp_compat.py:81 skip guard on PackageNotFoundError (sibling rm-007); (c) token_store.py dead block :1097-1141 deleted (sibling 89865b1281 rm-016 hunk; its out-of-scope :772 F841 removal reverted to keep the diff exactly the declared surface); (d) rm-027 setuptools>=77 floor; (e) stretch pyyaml>=6,<7 (the sibling next-cycle pyyaml candidate, now landed here). oauth_auth.py runtime untouched — the fail-closed guard at :477-480 was already correct; only the tests were stale.
+Validation (attempts 8d1e62ec implement, 3b787ac5 targeted_tests): ruff --isolated --select F821 = 0 (was 5); targeted 3-file run EXIT=0; full suite in CI's exact shape (HERMES_HTTP_TEST=1, serial, baseline interpreter) EXIT=0 with ZERO failures — twice on the identical tree (one intervening load flake, see rule 13); setuptools 77.0.3 no-isolation metadata build green. Baseline truth restored: 5 deterministic failures -> 0.
+
+### Cycle 1 learnings — prevention rules (run fd2bc85ff599 additions; rules 1-10 above remain in force)
+
+11. **Verify folded artifacts on disk before trusting the fold record.** This run hit it twice: the roadmap cycle block (rm-026..029) was claimed written but never landed — spool JSON and file write were both cut off; the block had to be re-materialized from the folded phase_result at prioritize time.
+12. **Adopt-by-content beats re-implementation when a validated sibling exists.** `git diff <sibling>^ <sibling> -- file | git apply` after proving parent-blob equality (`git rev-parse base:file == sibling^:file`) carries the sibling's two-environment validation exactly; revert out-of-scope hunks afterward so the diff stays inside the declared stewardship surfaces.
+13. **Serial runs on a saturated host can flake the concurrent-thread family too.** 4th member: test_operator_delegations.py::test_concurrent_exact_retry_invokes_backend_once failed in a SERIAL full run at load-avg ~28; passed solo and on an identical-tree serial rerun. Triage = solo rerun + identical-tree rerun; never 'fix' a passing-on-rerun flake mid-validation — it would stale the dispatch digest for zero benefit.
+14. **Declared build floors must be verified at the floor, not at whatever isolation installs.** CI stayed green while `setuptools>=69` could not build the PEP 639 license string; only a no-isolation prepare_metadata run under the pinned floor (77.0.3, unique venv) exposed and then proved the fix.
+
+### Next-cycle context (run fd2bc85ff599; carries into cycle-2 assessment)
+
+- **rm-026 (upstream v0.11.0 catch-up) is the headline** — its prerequisite green baseline now exists in this worktree; when merging, the 4+1 re-bound PKCE tests must adopt upstream's remediated contracts (rm-026 acceptance) instead of these local re-binds; conflict-hot files: oauth_auth.py, server.py.
+- **rm-028 (ruff 0.15 re-baseline)** is the top non-merge candidate: 524 isolated findings at this base, 184 fixable; needs a committed [tool.ruff] decision; note sibling rm-017 already drove the classic set to 0 repo-wide.
+- **rm-029 (12 gitlinks)** unchanged; CI unaffected (submodules:false).
+- Sibling-adoption deltas NOT in this batch remain available at merge gates: ci.yml SDK lanes (sibling rm-009), repo-wide ruff sweep (rm-017), uvicorn bound (rm-023).
+- CHANGELOG Unreleased entry for B1 added at compound time; release-notes/commit message at the commit gate should reference the adoption provenance (2ff57351b7, 89865b1281).
+
+<!-- restored 2026-09-21 (prioritize attempt 87402e78): roadmap-phase write was cut off mid-edit; block re-emitted verbatim from the folded roadmap phase_result -->
+
+>>>>>>> a47bca6f0c (test: restore pr63 PKCE regression contracts, green the baseline (B1))
 <!-- managed by hermes-roadmap render; do not edit by hand -->

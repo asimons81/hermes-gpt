@@ -15,6 +15,10 @@
 - Security and reliability remediation (post-v0.10 independent review): signed OAuth access tokens now require durable-store presence; revocation retires tokens and advances a durable epoch in one SQLite transaction; atomic refresh rotation; controller reconcile/trigger persistence gated behind workspace + direct apply mode; ledger pagination with per-source watermark cursors; PyYAML promoted to a runtime dependency; plan readiness requires every declared parent to exist and be completed; controller observation binds to the frontier node's contract hash.
 - Fleet: generic loopback Agent Card (`/.well-known/agent-card.json`) plus admission of unknown manifest peers at the lowest profile ceiling (default only), so freshly enrolled machines validate without a code change. Profile-ceiling enforcement is unchanged.
 - Fixed `hermes_operator_doctor` and mission diagnostics to handle a JSON `gateway.pid` (supersedes #62; reuses the shared gateway-PID reader and hardens it against undecodable JSON bytes).
+- Restored the stale pr63 OAuth authorization-code regression tests to real S256 challenge/verifier pairs (five sites, including one that passed only accidentally and one vacuously), and pinned the empty-challenge fail-closed contract with a new test; the runtime guard was already correct.
+- Skip the package-metadata SDK-compatibility test when installed distribution metadata is absent (bare checkouts) instead of erroring.
+- Deleted an unreachable post-return block in `token_store.py` (five undefined-name lint findings, orphaned since #64).
+- Raised the build floor to `setuptools>=77` so the PEP 639 SPDX license string builds under the declared floor, and bounded `pyyaml>=6,<7`.
 
 ## 0.10.0 - 2026-09-07
 
