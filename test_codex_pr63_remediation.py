@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -26,6 +28,17 @@ def _oauth_config() -> oauth_auth.OAuthConfig:
         client_secret="x" * 48,
         redirect_uris=("https://example.test/callback",),
     )
+
+
+def _s256(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+# Mandatory PKCE (oauth_auth.py) requires every remediation test that expects a
+# successful exchange to present a matching S256 challenge/verifier pair.
+_PKCE_VERIFIER = "x" * 48  # RFC 7636: 43-128 unreserved characters
+
 
 
 def test_signed_access_token_rejected_after_durable_revocation(tmp_path: Path):
@@ -358,13 +371,13 @@ def test_revocation_rotates_authorization_code_key(tmp_path: Path):
         redirect_uri=config.redirect_uris[0],
         scope=config.scope,
         resource=config.resource,
-        code_challenge="",
+        code_challenge=_s256(_PKCE_VERIFIER),
     )
     first = state.exchange_authorization_code(
         code=code,
         client_id=config.client_id,
         redirect_uri=config.redirect_uris[0],
-        code_verifier="",
+        code_verifier=_PKCE_VERIFIER,
     )
     assert first["access_token"]
 
@@ -376,7 +389,7 @@ def test_revocation_rotates_authorization_code_key(tmp_path: Path):
             code=code,
             client_id=config.client_id,
             redirect_uri=config.redirect_uris[0],
-            code_verifier="",
+            code_verifier=_PKCE_VERIFIER,
         )
     assert replay_exc.value.error == "invalid_grant"
     # (b) a fresh code minted before revocation is dead after key rotation
@@ -512,13 +525,13 @@ def test_post_revocation_fresh_exchange_persists(tmp_path: Path):
             redirect_uri=config.redirect_uris[0],
             scope=config.scope,
             resource=config.resource,
-            code_challenge="",
+            code_challenge=_s256(_PKCE_VERIFIER),
         )
         resp = state.exchange_authorization_code(
             code=code,
             client_id=config.client_id,
             redirect_uri=config.redirect_uris[0],
-            code_verifier="",
+            code_verifier=_PKCE_VERIFIER,
         )
     finally:
         oauth_auth.set_persist_hook(None)
@@ -793,7 +806,7 @@ def test_outstanding_code_dies_on_revocation(tmp_path: Path):
         redirect_uri=config.redirect_uris[0],
         scope=config.scope,
         resource=config.resource,
-        code_challenge="",
+        code_challenge=_s256(_PKCE_VERIFIER),
     )
     token_store.revoke_tokens(root, rotate_key=False)
     state.clear_live_tokens()
@@ -804,7 +817,7 @@ def test_outstanding_code_dies_on_revocation(tmp_path: Path):
             code=code,
             client_id=config.client_id,
             redirect_uri=config.redirect_uris[0],
-            code_verifier="",
+            code_verifier=_PKCE_VERIFIER,
         )
     assert excinfo.value.error == "invalid_grant"
 
@@ -820,7 +833,7 @@ def test_exchange_fails_loud_when_persistence_fails(tmp_path: Path):
         redirect_uri=config.redirect_uris[0],
         scope=config.scope,
         resource=config.resource,
-        code_challenge="",
+        code_challenge=_s256(_PKCE_VERIFIER),
     )
     # Break durable persistence AFTER the code decodes: the store exists
     # (epoch readable) but commits fail.
@@ -837,7 +850,7 @@ def test_exchange_fails_loud_when_persistence_fails(tmp_path: Path):
                 code=code,
                 client_id=config.client_id,
                 redirect_uri=config.redirect_uris[0],
-                code_verifier="",
+                code_verifier=_PKCE_VERIFIER,
             )
         assert excinfo.value.error in ("temporarily_unavailable", "invalid_grant")
     finally:
@@ -972,13 +985,13 @@ def test_startup_migration_preserves_positive_legacy_epoch(tmp_path: Path):
                 redirect_uri=config.redirect_uris[0],
                 scope=config.scope,
                 resource=config.resource,
-                code_challenge="",
+                code_challenge=_s256(_PKCE_VERIFIER),
             )
             resp = state.exchange_authorization_code(
                 code=code,
                 client_id=config.client_id,
                 redirect_uri=config.redirect_uris[0],
-                code_verifier="",
+                code_verifier=_PKCE_VERIFIER,
             )
             assert resp["access_token"]
             assert (

@@ -82,7 +82,13 @@ def test_package_metadata_allows_both_sdk_families():
     """Published metadata admits tested 1.x/2.x releases, not untested 3.x."""
     from packaging.requirements import Requirement
 
-    dist = importlib.metadata.distribution("hermes-gpt")
+    try:
+        dist = importlib.metadata.distribution("hermes-gpt")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip(
+            "hermes-gpt distribution metadata is not installed "
+            "(source checkout without pip install)"
+        )
     requirements = [Requirement(r) for r in dist.requires or []]
     mcp = next(r for r in requirements if r.name == "mcp")
     for version in ("1.28.1", "2.0.0", "2.2.0"):

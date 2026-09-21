@@ -89,9 +89,12 @@ Client notes:
 The minimum 1.x version is the previously documented verified SDK, rather
 than the historical untested `>=1.0` metadata floor. SDK 3 is not admitted.
 
-CI runs both SDK families on Python 3.10, 3.11 and 3.12, plus pinned 1.28.1
-and 2.0.0 floor jobs. Tests inspect serialized MCP field aliases, so SDK 2's
-Python snake_case attributes do not alter the expected wire contract.
+CI runs both SDK families on Python 3.10, 3.11 and 3.12, plus pinned 1.28.1,
+2.0.0 and 2.2.0 floor jobs on pushes to master and the nightly run.
+Pull requests run a single fast lane (Python 3.11, `mcp>=2,<3`) and defer
+the wider matrix to the post-merge runs. Tests inspect serialized MCP field
+aliases, so SDK 2's Python snake_case attributes do not alter the expected
+wire contract.
 The matrix covers tool inventory, annotations, result schemas, binary export,
 authentication and permission gates. Codex Operator aliases return redacted content blocks without an output schema:
 some callbacks return JSON objects and others return plain skill text. Their
