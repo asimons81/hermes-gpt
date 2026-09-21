@@ -133,6 +133,7 @@ py-modules = [
   "docs/ui-security-boundary.md",
   "docs/flight-deck-coverage.md",
   "docs/flight-deck-missions.md",
+  "docs/gemini-spark.md",
 ]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",

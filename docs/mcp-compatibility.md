@@ -74,6 +74,15 @@ Client notes:
 
 - **ChatGPT (chatgpt.com connector)**: uses the OAuth metadata to drive the
   ChatGPT connector flow; loopback redirect required. For private developer-mode access without a public Hermes GPT hostname, see [OpenAI Secure MCP Tunnel](openai-secure-mcp-tunnel.md).
+- **Gemini Spark (consumer Custom apps)**: connects as a manually configured
+  confidential client (Client ID and secret entered in the Gemini UI under
+  "Advanced features → Show more") because the server advertises no
+  `registration_endpoint`. Google's callback
+  (`https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-<id>-<host-with-dots-as-underscores>`)
+  must be allowlisted exactly — wildcards are not accepted, and the first
+  attempt is rejected so the exact value can be read from the server's HTTP
+  access log. PKCE S256 is supported; the OAuth boundary is streamable HTTP
+  only (`--http`). See [Gemini Spark custom app](gemini-spark.md).
 - **Codex CLI**: uses stdio or streamable HTTP with the configured scheme;
   curated tool names (`hermes_extract_page` vs `hermes_web_extract`) are
   documented in `docs/codex.md`.

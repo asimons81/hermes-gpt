@@ -40,7 +40,7 @@ def _oauth_state() -> oa.OAuthState:
 
 def test_ciphertext_on_disk_no_plaintext(hermes_root):
     state = _oauth_state()
-    state.access_tokens["tok-1234567890abcdef"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": 10**12}
+    state.access_tokens["tok-1234567890abcdef"] = {"client_id": "client-id", "scope": "hermes", "resource": "r", "expires_at": 10**12}
     state.persist_tokens(hermes_root)
 
     db_path = hermes_root / "secrets" / "hermes_gpt_tokens.db"
@@ -54,7 +54,7 @@ def test_ciphertext_on_disk_no_plaintext(hermes_root):
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX file modes")
 def test_store_file_mode_is_0600(hermes_root):
     state = _oauth_state()
-    state.access_tokens["tok-1234567890abcdef"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": 10**12}
+    state.access_tokens["tok-1234567890abcdef"] = {"client_id": "client-id", "scope": "hermes", "resource": "r", "expires_at": 10**12}
     state.persist_tokens(hermes_root)
     mode = os.stat(hermes_root / "secrets" / "hermes_gpt_tokens.db").st_mode & 0o777
     assert mode == 0o600
@@ -83,8 +83,8 @@ def test_windows_store_lock_uses_one_byte_region(hermes_root, monkeypatch):
 
 def test_restart_reload_roundtrip(hermes_root):
     state = _oauth_state()
-    state.access_tokens["tok-abc"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": time_far()}
-    state.refresh_tokens["ref-xyz"] = {"client_id": "c", "scope": "hermes", "expires_at": time_far()}
+    state.access_tokens["tok-abc"] = {"client_id": "client-id", "scope": "hermes", "resource": "r", "expires_at": time_far()}
+    state.refresh_tokens["ref-xyz"] = {"client_id": "client-id", "scope": "hermes", "expires_at": time_far()}
     state.persist_tokens(hermes_root)
 
     # Fresh state (simulated restart) restores both stores.
@@ -113,7 +113,7 @@ def test_corrupt_store_fails_closed(hermes_root):
 
 def test_revoke_retires_everything_and_rotates_key(hermes_root):
     state = _oauth_state()
-    state.access_tokens["tok-abc"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": time_far()}
+    state.access_tokens["tok-abc"] = {"client_id": "client-id", "scope": "hermes", "resource": "r", "expires_at": time_far()}
     state.persist_tokens(hermes_root)
     assert ts.lookup_token(hermes_root, "access", "tok-abc") is not None
 
@@ -129,7 +129,7 @@ def test_revoke_retires_everything_and_rotates_key(hermes_root):
 def test_env_master_key_works(hermes_root, monkeypatch):
     monkeypatch.setenv(ts.MASTER_KEY_ENV, "test-master-key")
     state = _oauth_state()
-    state.access_tokens["tok-abc"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": time_far()}
+    state.access_tokens["tok-abc"] = {"client_id": "client-id", "scope": "hermes", "resource": "r", "expires_at": time_far()}
     state.persist_tokens(hermes_root)
 
     fresh = _oauth_state()
@@ -138,7 +138,7 @@ def test_env_master_key_works(hermes_root, monkeypatch):
 
 def test_status_reveals_no_token_material(hermes_root):
     state = _oauth_state()
-    state.access_tokens["tok-secret-value"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": time_far()}
+    state.access_tokens["tok-secret-value"] = {"client_id": "client-id", "scope": "hermes", "resource": "r", "expires_at": time_far()}
     state.persist_tokens(hermes_root)
 
     out = json.loads(op_oauth.hermes_oauth_status(hermes_root=hermes_root))
@@ -187,7 +187,7 @@ def test_revoke_requires_owner(hermes_root, monkeypatch):
 
 def test_revoke_owner_gated_success(hermes_root, monkeypatch):
     state = _oauth_state()
-    state.access_tokens["tok-abc"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": time_far()}
+    state.access_tokens["tok-abc"] = {"client_id": "client-id", "scope": "hermes", "resource": "r", "expires_at": time_far()}
     state.persist_tokens(hermes_root)
 
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
@@ -204,7 +204,7 @@ def test_revoke_owner_gated_success(hermes_root, monkeypatch):
 
 def test_revoke_dry_run_does_not_delete(hermes_root, monkeypatch):
     state = _oauth_state()
-    state.access_tokens["tok-abc"] = {"client_id": "c", "scope": "hermes", "resource": "r", "expires_at": time_far()}
+    state.access_tokens["tok-abc"] = {"client_id": "client-id", "scope": "hermes", "resource": "r", "expires_at": time_far()}
     state.persist_tokens(hermes_root)
 
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
@@ -250,8 +250,8 @@ def test_restore_populates_after_restart(hermes_root):
     """oauth_state_from_env restores durable tokens after a restart (S5)."""
     state = _oauth_state()
     resource = state.config.resource
-    state.access_tokens["tok-restart"] = {"client_id": "c", "scope": "hermes", "resource": resource, "expires_at": time_far()}
-    state.refresh_tokens["ref-restart"] = {"client_id": "c", "scope": "hermes", "expires_at": time_far()}
+    state.access_tokens["tok-restart"] = {"client_id": "client-id", "scope": "hermes", "resource": resource, "expires_at": time_far()}
+    state.refresh_tokens["ref-restart"] = {"client_id": "client-id", "scope": "hermes", "expires_at": time_far()}
     state.persist_tokens(hermes_root)
 
     # Simulate a fresh OAuthState restoring from the same root.
