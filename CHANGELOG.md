@@ -1,10 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 - 2026-09-21
 
 - Support MCP Python SDK 2.x alongside 1.28.1+, preserving local stdio, HTTP/SSE transport settings, authentication and Operator gates.
 - Correct the Codex Operator aliases' return signatures to describe normalized results, avoiding SDK 2 output-validation failures.
 - Test both SDK families and minimum versions in CI, with wire-level negotiation and result assertions.
+- Added an opt-in Gemini Spark client profile for Google's consumer Gemini Apps "Custom apps for Spark" connector: an additional registered confidential OAuth client (`HERMES_GPT_OAUTH_GEMINI_ENABLE=1` plus `HERMES_GPT_OAUTH_GEMINI_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI`) isolated from the primary client with its own secret and exact-match redirect allowlist; enabling it without complete configuration fails startup validation. Setup guide: `docs/gemini-spark.md`.
+- Made MCP session history and control profile-aware and added canonical Bot Chat delivery: session tools resolve the selected Hermes profile home (validated against the operator policy allowlist), pass profile home + identity to Hermes, and key concurrency by profile + session ID; `hermes_bot_chat_get` / `hermes_bot_chat_send` deliver the canonical Bot Chat directly.
+- Made the cross-process token-store lock portable on Windows (msvcrt one-byte region locking) while retaining flock on POSIX.
+- Security and reliability remediation (post-v0.10 independent review): signed OAuth access tokens now require durable-store presence; revocation retires tokens and advances a durable epoch in one SQLite transaction; atomic refresh rotation; controller reconcile/trigger persistence gated behind workspace + direct apply mode; ledger pagination with per-source watermark cursors; PyYAML promoted to a runtime dependency; plan readiness requires every declared parent to exist and be completed; controller observation binds to the frontier node's contract hash.
+- Fleet: generic loopback Agent Card (`/.well-known/agent-card.json`) plus admission of unknown manifest peers at the lowest profile ceiling (default only), so freshly enrolled machines validate without a code change. Profile-ceiling enforcement is unchanged.
+- Fixed `hermes_operator_doctor` and mission diagnostics to handle a JSON `gateway.pid` (supersedes #62; reuses the shared gateway-PID reader and hardens it against undecodable JSON bytes).
 
 ## 0.10.0 - 2026-09-07
 
