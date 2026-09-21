@@ -494,7 +494,9 @@ def test_gemini_authorize_pkce_and_state_roundtrip(gemini_client: TestClient) ->
     assert code not in discovery_bodies, "authorization code leaked into a discovery body"
 
 
-def test_gemini_manual_confidential_client_end_to_end(gemini_client: TestClient) -> None:
+def test_gemini_manual_confidential_client_end_to_end(
+    gemini_client: TestClient, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Acceptance-shaped flow: authorize -> token -> authenticated /mcp."""
     code = acquire_code(gemini_client)
     credentials = exchange_code(gemini_client, code)
@@ -553,10 +555,18 @@ def test_gemini_manual_confidential_client_end_to_end(gemini_client: TestClient)
         # The authenticated call reached the tool layer and failed closed for
         # the one documented environment reason: hermes_skill_list needs a
         # Hermes Agent source root, which bare CI runners do not have
-        # (optional imports are non-fatal by design). "Any other" error text
-        # means the handshake or the tool layer regressed.
-        text = json.dumps(result["content"])
-        assert "Hermes imports are unavailable" in text, text[:300]
+        # (optional imports are non-fatal by design). The client-visible text
+        # differs by SDK: SDK 1 inlines the cause, SDK 2 returns a bounded
+        # "Error executing tool ..." envelope and logs the cause server-side.
+        visible = [item.get("text", "") for item in result["content"]]
+        detailed = any("Hermes imports are unavailable" in text for text in visible)
+        bounded = bool(visible) and all(
+            text == "Error executing tool hermes_skill_list" for text in visible
+        )
+        assert detailed or bounded, visible
+        if bounded and not detailed:
+            # SDK 2: the cause must still appear in the server-side error stream.
+            assert "Hermes imports are unavailable" in capfd.readouterr().err
 
 
 def test_gemini_unknown_scope_and_resource_fail_closed(gemini_client: TestClient) -> None:
