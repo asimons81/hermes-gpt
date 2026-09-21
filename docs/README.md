@@ -25,6 +25,7 @@ PyPI is an independent distribution channel. Check the PyPI badge in the root RE
 | Document | Authority | Use it for |
 | --- | --- | --- |
 | [`../README.md`](../README.md) | current | project overview, current release, quickstart, safety invariants, entry-point selection |
+| [`solutions/README.md`](solutions/README.md) | current | per-problem solutions runbooks: verified symptoms, root causes, and fix procedures |
 | [`runtime-checkout.md`](runtime-checkout.md) | host deployment provenance | which checkout the live `hermes-gpt-server.service` serves, and a caution that it is not the branch you happened to inspect |
 | [`oauth.md`](oauth.md) | current | static bearer and confidential-client OAuth configuration, token lifecycle, refresh rotation, and remote authentication limits |
 | [`mcp-compatibility.md`](mcp-compatibility.md) | current | SDK 1/2 support, protocol regression checks, transport matrix, trusted-client auth metadata |
