@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.11.0 - Gemini Spark custom-app support, MCP Python SDK 2, profile-aware Bot Chat and session delivery, and the post-v0.10 security remediation](assets/hermes-gpt-v0.11.0-readme-hero.jpg)
+![Hermes GPT v0.11.0 - Gemini Spark custom-app support, profile-aware Bot Chat and session delivery, MCP Python SDK 2 support, and the post-v0.10 security remediation](assets/hermes-gpt-v0.11.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
