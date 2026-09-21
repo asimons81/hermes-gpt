@@ -548,8 +548,15 @@ def test_gemini_manual_confidential_client_end_to_end(gemini_client: TestClient)
     )
     assert call.status_code == 200
     result = call.json()["result"]
-    assert result.get("isError") is not True, "hermes_skill_list must not fail the handshake"
     assert result["content"]
+    if result.get("isError"):
+        # The authenticated call reached the tool layer and failed closed for
+        # the one documented environment reason: hermes_skill_list needs a
+        # Hermes Agent source root, which bare CI runners do not have
+        # (optional imports are non-fatal by design). "Any other" error text
+        # means the handshake or the tool layer regressed.
+        text = json.dumps(result["content"])
+        assert "Hermes imports are unavailable" in text, text[:300]
 
 
 def test_gemini_unknown_scope_and_resource_fail_closed(gemini_client: TestClient) -> None:
