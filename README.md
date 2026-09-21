@@ -3,14 +3,14 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.10.0 - vNext slice 1: Supervised Mission Controller with MissionPlan DAGs, Derived Capability Manifest and Mission Ledger Views, Budget Envelope, Placement Scoring, Failure Semantics, and a Shadow Controller](assets/hermes-gpt-v0.10.0-readme-hero.jpg)
+![Hermes GPT v0.11.0 - Gemini Spark custom-app support, MCP Python SDK 2, profile-aware Bot Chat and session delivery, and the post-v0.10 security remediation](assets/hermes-gpt-v0.11.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
 ## Current status
 
-- **Repository version:** 0.10.0
-- **GitHub release target:** v0.10.0
+- **Repository version:** 0.11.0
+- **GitHub release target:** v0.11.0
 - **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
@@ -18,9 +18,20 @@
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 
 > [!IMPORTANT]
-> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.10 features unless the badge reports v0.10.0 or newer.
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.11 features unless the badge reports 0.11.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.11.0 adds
+
+v0.11.0 is a compatibility-and-reach release on top of the vNext slice-1 foundation: a verified Google Gemini Spark custom-app client profile, MCP Python SDK 2.x support, profile-aware Bot Chat and session delivery, and the post-v0.10 security remediation — with no change to the read-only / dry-run / shadow authority ladder and no new mutating surface enabled by default.
+
+1. **Gemini Spark custom-app support (opt-in client profile)** - `HERMES_GPT_OAUTH_GEMINI_ENABLE=1` registers a second, isolated confidential OAuth client (`_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI`) with its own secret and exact-match redirect allowlist; the primary ChatGPT client is untouched, and single-client behavior is byte-identical when the profile is disabled. Verified end-to-end against Google's consumer Gemini Apps connector with a read-only profile. Setup guide: [docs/gemini-spark.md](docs/gemini-spark.md).
+2. **MCP Python SDK 2.x support** - the server runs on `mcp` 1.28.1+ or 2.x with identical transport, auth, and Operator-gate behavior; CI tests both families with wire-level negotiation assertions. See [docs/mcp-compatibility.md](docs/mcp-compatibility.md).
+3. **Profile-aware Bot Chat and session delivery** - session history/control resolve the selected Hermes profile (allowlist-validated), and `hermes_bot_chat_get` / `hermes_bot_chat_send` deliver the canonical Bot Chat directly. The cross-process token-store lock is now portable on Windows.
+4. **Security and reliability remediation** - signed OAuth access tokens require durable-store presence, revocation advances a durable epoch transactionally, refresh rotation is atomic, controller reconcile persistence is gated behind workspace + direct apply mode, and ledger pagination uses per-source watermark cursors. Fleet loopback Agent Cards and unknown-manifest-peer admission (lowest ceiling) smooth machine enrollment.
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.11.0 change list.
 
 ## What v0.10.0 adds
 
@@ -122,7 +133,7 @@ python -m pip install .
 hermes-gpt
 ```
 
-The final v0.10.0 wheel and sdist are also attached to the [GitHub v0.10.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.10.0). The v0.8.0 release notes cover the Fabric surfaces (`hermes-gpt-fabric-peer`, capability-aware routing, remote evidence admission, reconciliation); the v0.9 surfaces (Missions `hermes_mission_*`, delegations `hermes_delegation_*`, live events `hermes_live_events_*`, `hermes_job_status/wait`) are documented in [docs/missions.md](docs/missions.md), [docs/delegations.md](docs/delegations.md), and [docs/live-events.md](docs/live-events.md). Operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
+The final v0.11.0 wheel and sdist are also attached to the [GitHub v0.11.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.11.0). The v0.10.0 release notes cover the vNext slice-1 surfaces (MissionPlan DAG, derived capability-manifest and mission-ledger views, budget envelope, placement scoring, failure semantics, and the shadow controller); the v0.8.0 release notes cover the Fabric surfaces (`hermes-gpt-fabric-peer`, capability-aware routing, remote evidence admission, reconciliation); the v0.9 surfaces (Missions `hermes_mission_*`, delegations `hermes_delegation_*`, live events `hermes_live_events_*`, `hermes_job_status/wait`) are documented in [docs/missions.md](docs/missions.md), [docs/delegations.md](docs/delegations.md), and [docs/live-events.md](docs/live-events.md). Operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
 
 ## Default local MCP surface
 

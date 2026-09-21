@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hermes GPT v0.10.0 vNext | Supervised Mission Control for Hermes Agent</title>
-  <meta name="description" content="Hermes GPT v0.10.0 vNext adds a supervised, decision-only mission controller: MissionPlan decomposition DAGs, derived capability-manifest and mission-ledger views, a dry-run budget envelope, placement scoring, failure semantics, and a shadow/observe reconciler — 27 new tools, none can mutate, dispatch, or approve.">
+  <title>Hermes GPT v0.11.0 | Gemini Spark + MCP SDK 2 + Bot Chat for Hermes Agent</title>
+  <meta name="description" content="Hermes GPT v0.11.0 adds a verified Gemini Spark custom-app client profile, MCP Python SDK 2 support, profile-aware Bot Chat and session delivery, and the post-v0.10 security remediation — local-first, read-only by default, 137 tools behind the connector acceptance gate.">
   <meta name="theme-color" content="#030303">
-  <meta property="og:title" content="Hermes GPT v0.10.0 | vNext — Supervised Mission Controller">
+  <meta property="og:title" content="Hermes GPT v0.11.0 | Gemini Spark + MCP SDK 2">
   <meta property="og:description" content="Decision-only mission autonomy for Hermes Agent: MissionPlan DAGs, capability manifest + mission ledger, budget envelope, placement scoring, failure taxonomy, and a shadow controller that proposes but never acts.">
-  <meta property="og:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.10.0-readme-hero.jpg">
+  <meta property="og:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.11.0-readme-hero.jpg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Hermes GPT v0.10.0 | vNext — Supervised Mission Controller">
+  <meta name="twitter:title" content="Hermes GPT v0.11.0 | Gemini Spark + MCP SDK 2">
   <meta name="twitter:description" content="Supervised, decision-only mission autonomy for Hermes Agent.">
-  <meta name="twitter:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.10.0-readme-hero.jpg">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.11.0-readme-hero.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -24,7 +24,7 @@
     <header class="topbar reveal">
       <a class="brand" href="#top" aria-label="Hermes GPT Home">
         <span class="brand-mark" aria-hidden="true">HG</span>
-        <span class="brand-copy"><strong>Hermes GPT</strong><small>v0.10.0 vNext</small></span>
+        <span class="brand-copy"><strong>Hermes GPT</strong><small>v0.11.0</small></span>
       </a>
       <nav class="topnav" aria-label="Primary navigation">
         <a href="#vnext">vNext</a><a href="#how-it-works">How it works</a><a href="#simulator">Simulator</a><a href="#features">Features</a><a href="#install">Install</a>
@@ -34,12 +34,12 @@
 
     <section class="hero section-pad reveal">
       <div class="hero-copy">
-        <p class="eyebrow">v0.10.0 vNext &bull; Local-first &bull; Supervised mission autonomy</p>
-        <h1>Hermes Agent now has a <span>supervised mission controller</span>.</h1>
-        <p class="lede">Hermes GPT v0.10.0 ships vNext slice 1: deterministic MissionPlan decomposition, read-only capability-manifest and mission-ledger views, a dry-run budget envelope, placement scoring, semantic failure classification, and a shadow/observe controller. The slice is strictly additive and decision-only — none of the 27 new tools can mutate a Mission, dispatch work, or approve anything.</p>
+        <p class="eyebrow">v0.11.0 &bull; Local-first &bull; Multi-client MCP control plane</p>
+        <h1>Hermes Agent now answers to <span>ChatGPT, Codex, and Gemini Spark</span>.</h1>
+        <p class="lede">Hermes GPT v0.11.0 adds a verified Google Gemini Spark custom-app client profile, MCP Python SDK 2.x support, profile-aware Bot Chat and session delivery, and the post-v0.10 security remediation — all on the same local-first, read-only-default authority ladder. No new mutating surface is enabled by default.</p>
         <div class="cta-row">
-          <a class="button button-primary" href="#install"><span>Install v0.10.0</span><span class="btn-arrow" aria-hidden="true">→</span></a>
-          <a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/releases/tag/v0.10.0" rel="noreferrer noopener" target="_blank">Read release notes</a>
+          <a class="button button-primary" href="#install"><span>Install v0.11.0</span><span class="btn-arrow" aria-hidden="true">→</span></a>
+          <a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/releases/tag/v0.11.0" rel="noreferrer noopener" target="_blank">Read release notes</a>
         </div>
         <div class="hero-metrics">
           <div class="metric-card"><span>Planning</span><strong>MissionPlan DAGs</strong><small>Deterministic, bounded decomposition over a <code>MissionSpec</code> with a validated state machine — dry-run-first, and read-only toward the Mission lifecycle.</small></div>
@@ -49,7 +49,7 @@
       </div>
       <div class="hero-visual reveal">
         <div class="double-bezel-outer"><div class="double-bezel-inner"><figure class="brand-image-wrapper">
-          <img src="./assets/hermes-gpt-v0.10.0-readme-hero.jpg" alt="Hermes GPT v0.10.0 vNext: the Hermes operator above a mission-fleet constellation with MissionPlan DAG nodes, a capability manifest, budget envelope, placement scoring, failure taxonomy, and a shadow controller proposing — never executing — actions">
+          <img src="./assets/hermes-gpt-v0.11.0-readme-hero.jpg" alt="Hermes GPT v0.11.0: the Hermes operator with a Gemini spark connected to an MCP hub, a bot chat glyph, and a v0.11.0 badge">
         </figure></div></div>
       </div>
     </section>
@@ -99,7 +99,7 @@
         <article class="bento-card"><span class="card-num">03</span><h3>Missions, Delegations + Live Events</h3><p>v0.9 adds the first-class durable Mission runtime with Owner-gated final approval, unified delegation lineage, a durable event bus with a WebSocket stream, and runner-neutral job supervision.</p></article>
         <article class="bento-card col-span-2"><span class="card-num">04</span><h3>Fabric Cross-Machine Execution</h3><p>v0.8 Fabric: authenticated peers, capability-aware <code>auto</code> routing, hash-verified remote evidence and artifacts, and same-attempt reconciliation — with the coordinator authoritative.</p></article>
         <article class="bento-card col-span-3"><span class="card-num">05</span><h3>OpenAI Secure MCP Tunnel + Bounded Export</h3><p>Supported OpenAI products reach loopback Hermes GPT through an outbound-only private tunnel path, and <code>hermes_export_file</code> provides workspace-authorized binary transfer with denied-path enforcement and size caps.</p></article>
-        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Flight Deck + Connector Gate</h3><p>Mission Control, event history, review evidence, diagnostics, recovery tools, and Fabric routing views keep long-running autonomy inspectable. The connector acceptance gate pins the merged v0.10.0 surface at 137 tools with no duplicate registration.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Flight Deck + Connector Gate</h3><p>Mission Control, event history, review evidence, diagnostics, recovery tools, and Fabric routing views keep long-running autonomy inspectable. The connector acceptance gate pins the merged v0.11.0 surface at 137 tools with no duplicate registration.</p></article>
       </div>
     </section>
 
@@ -119,8 +119,9 @@ hermes-gpt</code></pre></div>
     </section>
 
     <section class="section reveal" id="changelog">
-      <div class="section-head"><p class="eyebrow">Changelog</p><h2>Release history.</h2><p>The current release is v0.10.0 vNext slice 1.</p></div>
+      <div class="section-head"><p class="eyebrow">Changelog</p><h2>Release history.</h2><p>The current release is v0.11.0.</p></div>
       <div class="timeline-container">
+        <div class="timeline-step"><span class="step-num">v0.11.0</span><strong>Gemini Spark + MCP SDK 2 + Bot Chat</strong><p>Opt-in Gemini Spark custom-app client profile (verified end-to-end), MCP Python SDK 2.x support with SDK 1 retained, profile-aware Bot Chat and session delivery, fleet loopback Agent Cards, and the post-v0.10 security remediation. 137 tools; no new mutating surface by default.</p></div>
         <div class="timeline-step"><span class="step-num">v0.10.0</span><strong>vNext — Supervised Mission Controller</strong><p>MissionPlan decomposition DAGs, read-only capability-manifest and mission-ledger views, a dry-run budget envelope, placement scoring, an 8-class failure taxonomy with recovery matrix, and a shadow/observe controller with GREEN/YELLOW/RED telemetry. 27 new tools (137 total); none can mutate a Mission, dispatch, or approve.</p></div>
         <div class="timeline-step"><span class="step-num">v0.9.0</span><strong>Missions + Delegations + Live Events</strong><p>First-class durable Missions with Owner-gated final approval, unified delegation lineage across runners, a durable live-event bus with WebSocket stream, runner-neutral job supervision, and the bounded Finance bridge.</p></div>
         <div class="timeline-step"><span class="step-num">v0.8.0</span><strong>Fabric</strong><p>Authenticated cross-machine Swarm execution, capability-aware routing, remote evidence and artifact admission, restart/timeout/cancel reconciliation, write-ownership safeguards, and Fabric Flight Deck visibility. Passed fresh real two-machine G6 acceptance and independent review.</p></div>
