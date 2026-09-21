@@ -5,6 +5,7 @@
 - Support MCP Python SDK 2.x alongside 1.28.1+, preserving local stdio, HTTP/SSE transport settings, authentication and Operator gates.
 - Correct the Codex Operator aliases' return signatures to describe normalized results, avoiding SDK 2 output-validation failures.
 - Test both SDK families and minimum versions in CI, with wire-level negotiation and result assertions.
+- Added an opt-in Gemini Spark client profile for Google's consumer Gemini Apps "Custom apps for Spark" connector: an additional registered confidential OAuth client (`HERMES_GPT_OAUTH_GEMINI_ENABLE=1` plus `HERMES_GPT_OAUTH_GEMINI_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI`) isolated from the primary client with its own secret and exact-match redirect allowlist; enabling it without complete configuration fails startup validation. Setup guide: `docs/gemini-spark.md`.
 
 ## 0.10.0 - 2026-09-07
 

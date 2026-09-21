@@ -1,12 +1,12 @@
 # OAuth and bearer authentication
 
-Hermes GPT remains local-first. Remote Operator or Owner access is supported only when the HTTP endpoint is carried over HTTPS and protected with either a static bearer token or the built-in single-client OAuth boundary described here.
+Hermes GPT remains local-first. Remote Operator or Owner access is supported only when the HTTP endpoint is carried over HTTPS and protected with either a static bearer token or the built-in confidential-client OAuth boundary described here.
 
 ## Security model
 
 The built-in authorization server is intentionally narrow:
 
-- one statically configured confidential client;
+- one statically configured confidential client by default, plus optional additional named client profiles (see [Additional clients](#additional-clients-gemini-spark-profile));
 - exact HTTPS redirect-URI allowlisting;
 - client authentication on every authorization-code and refresh exchange;
 - optional PKCE S256 validation when a client supplies a challenge;
@@ -69,6 +69,24 @@ hermes-gpt --http --host 127.0.0.1 --port 4750 --profile remote
 ```
 
 Keep the process loopback-bound and terminate HTTPS in a deliberately configured trusted proxy or private tunnel. The public issuer must resolve to that exact server.
+
+## Additional clients (Gemini Spark profile)
+
+One statically configured confidential client remains the default. An opt-in **Gemini Spark client profile** can be registered alongside it for Google's consumer Gemini Apps "Custom apps for Spark" connector:
+
+```text
+HERMES_GPT_OAUTH_GEMINI_ENABLE=1
+HERMES_GPT_OAUTH_GEMINI_CLIENT_ID=gemini-spark-client
+HERMES_GPT_OAUTH_GEMINI_CLIENT_SECRET=<43-to-128-character-generated-secret>
+HERMES_GPT_OAUTH_GEMINI_REDIRECT_URI=https://oauth-redirect.googleusercontent.com/r/<exact-google-callback>
+```
+
+- The profile is off unless `HERMES_GPT_OAUTH_GEMINI_ENABLE` is exactly `1`; enabling it without all three `HERMES_GPT_OAUTH_GEMINI_*` values fails startup validation with a `ValueError` naming the missing variables.
+- `HERMES_GPT_OAUTH_GEMINI_REDIRECT_URI` accepts one or more exact HTTPS URIs, comma-separated, parsed exactly like the primary redirect URI. Wildcards are not accepted.
+- Both clients share the issuer, the resource, and the one configured `HERMES_GPT_OAUTH_SCOPE`; each keeps its own secret and its own exact-match redirect allowlist, and a client can only redirect to, or authenticate with, its own credentials.
+- The primary `HERMES_GPT_OAUTH_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` values are unchanged and keep working.
+
+Setup, callback discovery, verification, and rollback: [Gemini Spark custom app](gemini-spark.md).
 
 ## ChatGPT connector values
 
@@ -157,6 +175,7 @@ Static bearer authentication remains compatible with OAuth access tokens. Never 
 Hermes GPT fails closed when:
 
 - OAuth is enabled but required configuration is missing;
+- an enabled additional client profile (for example the Gemini Spark profile) is missing required configuration;
 - the client secret is absent, malformed, or incorrect;
 - the redirect URI, resource, grant type, or scope is unsupported;
 - PKCE is supplied with a method other than S256 or the verifier does not match;

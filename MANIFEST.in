@@ -22,6 +22,7 @@ include docs/updating.md
 include docs/windows-chatgpt-codex.md
 include docs/ui-security-boundary.md
 include docs/flight-deck-coverage.md
+include docs/gemini-spark.md
 recursive-include examples *.ps1
 prune docs/design
 prune docs/releases
