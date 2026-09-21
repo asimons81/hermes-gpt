@@ -18,6 +18,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  private-leak:
+    uses: codeo1io/.github/.github/workflows/private-leak-sentinel.yaml@main
+
   test:
     strategy:
       fail-fast: false
