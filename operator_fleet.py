@@ -300,7 +300,7 @@ def _send_message(agent: str, peer: dict[str, Any], text: str, timeout: int) -> 
     card: dict[str, Any] | None = None
     try:
         card = _fetch_card(base_url, headers, min(cap, 30))
-    except Exception as exc:
+    except Exception:
         # Non-fatal: fall back to configured base URL / legacy path if card is unreachable.
         pass
 

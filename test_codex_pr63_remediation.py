@@ -730,7 +730,6 @@ def test_revocation_closes_legacy_migration(tmp_path: Path):
 
 def test_corrupt_legacy_ledger_fails_closed(tmp_path: Path):
     """An unparseable legacy retirement ledger aborts the import."""
-    import json as _json
 
     root = tmp_path / "hermes"
     config = _oauth_config()
@@ -1019,7 +1018,7 @@ def test_retirement_tombstones_survive_expiry_and_block_reissue(tmp_path: Path):
 
     oauth_auth.set_persist_hook(lambda s, k: s.persist_tokens(root))
     try:
-        resp = seeder.exchange_refresh_token(
+        seeder.exchange_refresh_token(
             refresh_token=refresh, client_id=config.client_id, requested_scope=""
         )
     finally:
@@ -1323,7 +1322,6 @@ def test_rotation_and_issuance_are_serialized(tmp_path: Path):
 def test_negative_legacy_ledger_epoch_fails_closed(tmp_path: Path, monkeypatch):
     """A negative revocation_epoch in the legacy ledger is out-of-range
     history: it must import as epoch >= 1, never 0."""
-    import time as _time
 
     root = tmp_path / "hermes2"
     (root / "secrets").mkdir(parents=True, exist_ok=True)
@@ -1404,8 +1402,6 @@ def test_revoke_rotation_failure_reported_as_failure(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         token_store, "_store_key_in_keyring", lambda key: False, raising=False
     )
-    real_unlink = token_store.key_file_path
-
     def _boom(path):
         raise OSError("injected failure")
 

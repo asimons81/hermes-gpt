@@ -1,5 +1,4 @@
 import json
-import subprocess
 from pathlib import Path
 
 import operator_session as session

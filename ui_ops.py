@@ -41,7 +41,6 @@ import operator_events as op_events
 import operator_swarm as op_swarm
 import operator_codex as op_codex
 import operator_cron as op_cron
-import operator_fleet as op_fleet
 import operator_review as op_review
 import operator_diagnostics as op_diagnostics
 import operator_recovery as op_recovery

@@ -2,6 +2,10 @@
 
 ## 0.11.0 - 2026-09-21
 
+- Drove the repository-wide `ruff` error count from 61 to zero and replaced the CI lint job's hand-maintained file list with a repo-wide `ruff check .` gate.
+- Removed the dead unreachable status-body block in `token_store.py` that carried five undefined-name errors.
+- Bounded the previously unbounded `uvicorn` runtime dependency (`>=0.30,<1`) and pinned the dev `ruff` extra (`>=0.15,<0.16`).
+- Preserved corrupt cron `jobs.json` payloads (invalid JSON or non-UTF-8 bytes) as `jobs.json.corrupt-<timestamp>` sidecars before the next atomic write replaces them, instead of silently destroying the only copy; documented under "Diagnostics and recovery" in `docs/operator-mode.md`.
 - Support MCP Python SDK 2.x alongside 1.28.1+, preserving local stdio, HTTP/SSE transport settings, authentication and Operator gates.
 - Correct the Codex Operator aliases' return signatures to describe normalized results, avoiding SDK 2 output-validation failures.
 - Test both SDK families and minimum versions in CI, with wire-level negotiation and result assertions.

@@ -470,6 +470,10 @@ Conservative recovery planner. Dry-run is the default. Use `apply=false` first.
 
 Actual recovery mutation requires `apply=true` plus the normal direct/workspace policy gates.
 
+### Corrupt `jobs.json` recovery
+
+If a profile's cron `jobs.json` is unparseable (invalid JSON or non-UTF-8 bytes), cron reads treat the schedule as empty instead of crashing, and before the next write replaces the file the corrupt payload is preserved as `jobs.json.corrupt-<timestamp>` next to it (distinct payloads backed up within the same second get a `-N` suffix — glob `jobs.json.corrupt-*` to enumerate them). The sidecar's presence is the operator-visible signal: restore jobs from the sidecar (or delete it once inspected) with the normal profile file tools. Backups are best-effort and deduplicated — unchanged corrupt payloads are not backed up twice.
+
 ### `hermes_release_doctor`
 
 Use before preparing a release. It checks repository state, secret-file hygiene, package version/docs consistency, import/compile health, and that the server is not left in direct mode. `full_tests=true` also runs the test suite.

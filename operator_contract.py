@@ -47,7 +47,6 @@ import hashlib
 import json
 import os
 import re
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -1092,7 +1091,6 @@ def _check_forbidden(
 
     identities = _attributable_identities(contract)
     task_id = contract["task_id"]
-    labels = [fa["action"].lower() for fa in forbidden]
     signals: list[dict[str, Any]] = []
 
     # Audit trail scan (D5): scope strictly to this contract's task identity.

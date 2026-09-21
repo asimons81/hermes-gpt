@@ -9,7 +9,6 @@ persistence are all exercised end-to-end without any LLM call.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import threading
 import time

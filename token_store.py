@@ -769,7 +769,6 @@ def commit_tokens(
     """
     issue = issue or {}
     retire = retire or {}
-    now = time.time()
     with _StoreLock(hermes_root):
         return _commit_tokens_locked(
             hermes_root, source_epoch=source_epoch, issue=issue, retire=retire
@@ -1094,50 +1093,6 @@ def _legacy_flat_records(bundle: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(item, dict) and "expires_at" in item and item not in flat:
             flat.append(item)
     return flat
-    envelope = load_envelope(hermes_root)
-    if envelope is None:
-        return {
-            "available": False,
-            "presence": "absent",
-            "expires_at": None,
-            "revocation_epoch": read_revocation_epoch(hermes_root),
-            "kid": "",
-        }
-    try:
-        bundle = load_tokens(hermes_root)
-    except TokenStoreError:
-        return {
-            "available": True,
-            "presence": "corrupt",
-            "expires_at": None,
-            "revocation_epoch": read_revocation_epoch(hermes_root),
-            "kid": envelope.get("kid", ""),
-        }
-    flat: list[dict[str, Any]] = []
-    if isinstance(bundle, dict):
-        # Sectioned shape (current writer) and flat legacy shape both count.
-        # Expiry reflects ALL entries (an expired max is how the UI derives
-        # the 'expired' state); liveness only gates the count.
-        sections = [v for v in bundle.values() if isinstance(v, dict)]
-        for section in sections:
-            for item in section.values():
-                if isinstance(item, dict):
-                    flat.append(item)
-        for item in bundle.values():
-            if isinstance(item, dict) and "expires_at" in item and item not in flat:
-                flat.append(item)
-    now = time.time()
-    live = [i for i in flat if i.get("expires_at", 0) > now]
-    expiries = [v.get("expires_at") for v in flat if v.get("expires_at")]
-    expires_at = max(expiries) if expiries else None  # type: ignore[type-var]
-    return {
-        "available": True,
-        "presence": "present",
-        "expires_at": expires_at,
-        "revocation_epoch": read_revocation_epoch(hermes_root),
-        "kid": envelope.get("kid", ""),
-        "client_count": len(live),
-    }
 
 
 def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, Any]:
@@ -1153,7 +1108,6 @@ def revoke_tokens(hermes_root: Path, *, rotate_key: bool = True) -> dict[str, An
     and uses the new key — never a silent bypass. Also removes legacy
     artifacts. Returns a bounded summary; never exposes token material.
     """
-    now = time.time()
     envelope_existed = _legacy_envelope_path(hermes_root).exists()
     with _StoreLock(hermes_root):
         return _revoke_tokens_locked(

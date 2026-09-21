@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -734,3 +733,40 @@ def test_cron_create_model_only_scheduler_contract(hermes_root, clean_env, audit
     assert "provider" not in written
     assert not isinstance(written["model"], dict)
 
+
+
+def test_corrupt_jobs_json_backed_up_before_overwrite(hermes_root, clean_env):
+    """rm-021: an unparseable jobs.json is preserved as a .corrupt-* sidecar
+    instead of being silently destroyed by the next atomic write."""
+    jobs_file = oc._jobs_file(hermes_root)
+    jobs_file.parent.mkdir(parents=True, exist_ok=True)
+    corrupt = b'{"jobs": [truncated'
+    jobs_file.write_bytes(corrupt)
+
+    assert oc._read_jobs(hermes_root) == []
+
+    backups = sorted(jobs_file.parent.glob("jobs.json.corrupt-*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == corrupt
+
+    # Repeated reads of the same corrupt payload do not stack duplicates.
+    assert oc._read_jobs(hermes_root) == []
+    assert sorted(jobs_file.parent.glob("jobs.json.corrupt-*")) == backups
+
+    # Binary / non-UTF-8 corruption (UnicodeDecodeError, not JSONDecodeError)
+    # takes the same recovery path: no crash, payload backed up once.
+    binary = b"\x80\x81\x82 not utf8"
+    jobs_file.write_bytes(binary)
+    assert oc._read_jobs(hermes_root) == []
+    binary_backups = sorted(jobs_file.parent.glob("jobs.json.corrupt-*"))
+    assert len(binary_backups) == 2
+    assert binary_backups[-1].read_bytes() == binary
+    assert oc._read_jobs(hermes_root) == []
+    assert sorted(jobs_file.parent.glob("jobs.json.corrupt-*")) == binary_backups
+
+    # The next atomic write replaces jobs.json; the corrupt payload survives.
+    oc._write_jobs(hermes_root, [{"id": "j1", "name": "fresh"}])
+    persisted = json.loads(jobs_file.read_text(encoding="utf-8"))
+    assert persisted["jobs"][0]["id"] == "j1"
+    assert sorted(jobs_file.parent.glob("jobs.json.corrupt-*")) == binary_backups
+    assert oc._read_jobs(hermes_root)[0]["id"] == "j1"

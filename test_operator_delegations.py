@@ -283,11 +283,14 @@ def test_mission_completion_rejects_concurrent_reconcile_authority_change(
     monkeypatch.setattr(missions, "_completion_guard", paused_guard)
     result: list[dict] = []
     if completion_path == "approve":
-        call = lambda: missions.hermes_mission_approve(mission_id, "approval:stale", confirm=True, dry_run=False, hermes_root=root)
+        def call():
+            return missions.hermes_mission_approve(mission_id, "approval:stale", confirm=True, dry_run=False, hermes_root=root)
     elif completion_path == "transition":
-        call = lambda: missions.hermes_mission_transition(mission_id, "completed", confirm=True, dry_run=False, hermes_root=root)
+        def call():
+            return missions.hermes_mission_transition(mission_id, "completed", confirm=True, dry_run=False, hermes_root=root)
     else:
-        call = lambda: missions.hermes_mission_reconcile(mission_id, confirm=True, dry_run=False, hermes_root=root)
+        def call():
+            return missions.hermes_mission_reconcile(mission_id, confirm=True, dry_run=False, hermes_root=root)
     thread = threading.Thread(target=lambda: result.append(json.loads(call())))
     thread.start()
     assert observed.wait(5)
@@ -1747,7 +1750,9 @@ def test_reserved_cancel_cas_loss_does_not_forge_cancellation(tmp_path: Path, mo
 
     class RacingConnection:
         def __init__(self, db): self.db = db
-        def __enter__(self): self.db.__enter__(); return self
+        def __enter__(self):
+            self.db.__enter__()
+            return self
         def __exit__(self, *args): return self.db.__exit__(*args)
         def __getattr__(self, name): return getattr(self.db, name)
         def execute(self, sql, parameters=()):

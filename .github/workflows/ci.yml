@@ -123,21 +123,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e ".[dev]"
-      - run: >-
-          python -m ruff check
-          mcp_compat.py codex_mcp.py test_mcp_sdk_migration.py test_mcp_compat.py
-          test_mcp_transport_mode.py test_codex_mcp.py test_hermetic_environment.py test_operator_codex.py
-          fabric_artifacts.py fabric_write_guard.py
-          operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py
-          test_operator_fabric.py test_operator_fabric_adversarial.py test_operator_fabric_control.py
-          test_operator_fabric_router.py test_operator_fabric_g4c.py test_operator_fabric_view.py test_operator_fabric_integration.py test_ui_fabric.py
-          operator_runners.py test_operator_runners.py operator_delegations.py test_operator_delegations.py
-          runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
-          operator_export.py test_operator_export.py test_server_export.py
-          operator_mission_runtime.py test_operator_mission_runtime.py
-          operator_live_events.py test_operator_live_events.py test_v09_system_invariants.py
-          tools/check_package_hygiene.py test_package_hygiene.py
-          ui_api.py ui_fabric.py ui_missions.py test_ui_missions.py
+      # Repo-wide gate (rm-017): previously a hand-maintained file list that
+      # silently missed new modules; the whole tree is lint-clean now.
+      - run: python -m ruff check .
 
   web:
     runs-on: self-hosted

@@ -7,6 +7,7 @@ real ``~/.hermes/config.yaml`` (including its ``a2a_agents``). The sandbox
 provides an empty config so injected runners stay authoritative.
 """
 
+import mimetypes as _mimetypes
 import os
 import tempfile
 from pathlib import Path
@@ -94,8 +95,6 @@ else:
 # module fell back to application/octet-stream). CI images ship the full DB.
 # Seed the standard office types so the local suite behaves like a standard
 # desktop/CI host; this only ADDS mappings and never weakens an assertion.
-import mimetypes as _mimetypes
-
 _OFFICE_MIME = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",

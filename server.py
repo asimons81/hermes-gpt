@@ -14,6 +14,8 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, List
 
+from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import CallToolResult, ToolAnnotations
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -51,6 +53,7 @@ import operator_oauth as op_oauth
 import operator_swarm as op_swarm
 import operator_recovery as op_recovery
 import operator_finance as op_finance
+from mcp_compat import HermesMCP as FastMCP
 from versioning import VERSION
 
 
@@ -729,10 +732,6 @@ def clean_error(tool_name: str, exc: Exception) -> RuntimeError:
     return RuntimeError(f"{tool_name} failed: {exc}")
 
 
-from mcp_compat import HermesMCP as FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolResult, ToolAnnotations
-
 import_hermes()
 
 
@@ -1171,7 +1170,7 @@ def hermes_session_read(
         safe_include_inactive = _validate_bool(include_inactive, "include_inactive")
         safe_include_system = _validate_bool(include_system_messages, "include_system_messages")
         safe_include_tool = _validate_bool(include_tool_messages, "include_tool_messages")
-        allowed_roles = _allowed_message_roles(
+        _allowed_message_roles(
             include_system_messages=safe_include_system,
             include_tool_messages=safe_include_tool,
         )

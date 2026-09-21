@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from pathlib import Path
 
@@ -416,7 +415,7 @@ def test_skill_patch_refuses_ambiguous_match(hermes_root, clean_env, audit_overr
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "skills")
     monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
     content = _VALID_FRONTMATTER + "duplicate\nduplicate\n"
-    skill_dir = _make_skill(hermes_root, "my-skill", content=content)
+    _make_skill(hermes_root, "my-skill", content=content)
 
     out = osk.hermes_skill_patch(
         profile="default", name="my-skill",
@@ -433,7 +432,7 @@ def test_skill_patch_replace_all(hermes_root, clean_env, audit_override, monkeyp
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "skills")
     monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
     content = _VALID_FRONTMATTER + "duplicate\nduplicate\n"
-    skill_dir = _make_skill(hermes_root, "my-skill", content=content)
+    _make_skill(hermes_root, "my-skill", content=content)
     calls = []
 
     class FakeSkillManager:

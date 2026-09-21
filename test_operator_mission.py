@@ -44,7 +44,6 @@ def _make_state_db(path: Path, *, sessions: int = 2, delegations: list[dict] | N
             " id INTEGER PRIMARY KEY, session_id TEXT, input_tokens INTEGER,"
             " output_tokens INTEGER, estimated_cost_usd REAL, cost_status TEXT)"
         )
-        now = datetime.now(timezone.utc).isoformat()
         for i in range(sessions):
             conn.execute(
                 "INSERT OR IGNORE INTO sessions VALUES (?,?,?,?,?,?,?)",

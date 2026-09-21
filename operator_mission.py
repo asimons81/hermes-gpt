@@ -1418,7 +1418,6 @@ def hermes_mission_usage(hermes_root: Path | None = None, trace_id: str | None =
             conn = _open_ro(_state_db(_profile_home(profile, root)))
             try:
                 cols = {r[1] for r in conn.execute("PRAGMA table_info(session_model_usage)")}
-                count_col = "cost_status"
                 has_cost = "estimated_cost_usd" in cols and "cost_status" in cols
 
                 # Sessions in last 24h.

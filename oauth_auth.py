@@ -1214,7 +1214,7 @@ async def token(request: Request, state: OAuthState) -> JSONResponse:
         return _error_response(OAuthError("invalid_request", "Token request is malformed."))
     except OAuthError as exc:
         return _error_response(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         # Strict durable persistence failures (and anything else unexpected)
         # surface as a bounded OAuth error, never an unhandled 500 after the
         # authorization code was consumed.

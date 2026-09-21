@@ -285,7 +285,6 @@ def test_web_extract_proxies_to_web_tool_when_enabled(monkeypatch):
     clear_gate_envs(monkeypatch)
     monkeypatch.setenv(server.ENABLE_WEB_ENV, "1")
     captured = {}
-    import asyncio
 
     async def fake_web_extract(**kwargs):
         captured.update(kwargs)
@@ -305,7 +304,6 @@ def test_vision_analyze_proxies_to_vision_tool_when_enabled(monkeypatch):
     clear_gate_envs(monkeypatch)
     monkeypatch.setenv(server.ENABLE_VISION_ENV, "1")
     captured = {}
-    import asyncio
 
     async def fake_vision(**kwargs):
         captured.update(kwargs)
@@ -329,7 +327,6 @@ def test_vision_analyze_defaults_prompt_when_question_empty(monkeypatch):
     clear_gate_envs(monkeypatch)
     monkeypatch.setenv(server.ENABLE_VISION_ENV, "1")
     captured = {}
-    import asyncio
 
     async def fake_vision(**kwargs):
         captured.update(kwargs)
