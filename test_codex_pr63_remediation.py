@@ -1282,11 +1282,40 @@ def test_rotation_and_issuance_are_serialized(tmp_path: Path):
     rev.join()
 
     assert outcomes["errors"] == 0, outcomes
-    # Every credential that committed must still be readable (correct key),
-    # and the revoked seed must be dead.
+    # The race must actually be exercised: with three issuers x five grants
+    # each, at least one grant must land (a vacuous run proves nothing).
+    assert outcomes["issued"] >= 1, outcomes
+    # Every granted credential is in exactly one of two legal states:
+    #   (a) committed AFTER the revocation — readable under the rotated key, or
+    #   (b) committed BEFORE it — killed by revoke's retire-all, leaving a
+    #       durable tombstone.
+    # The guarded defect ("live but encrypted under the key rotation just
+    # discarded") makes lookup_token RAISE TokenStoreError on the live,
+    # undecryptable row — it never silently returns None — so any raise here
+    # is a hard failure. A None that is not backed by a retired tombstone
+    # row is also a failure (the grant vanished).
+    import sqlite3
+
     for value in grant_values:
-        assert token_store.lookup_token(root, "access", value) is not None, (
-            "issued token unreadable after concurrent rotation"
+        try:
+            record = token_store.lookup_token(root, "access", value)
+        except token_store.TokenStoreError as exc:
+            raise AssertionError(
+                f"live token undecryptable after concurrent rotation: {exc}"
+            ) from exc
+        if record is not None:
+            continue
+        conn = sqlite3.connect(token_store._db_path(root))
+        try:
+            row = conn.execute(
+                "SELECT retired FROM tokens WHERE token_key=?",
+                (token_store.issue_key("access", value),),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None and row[0] == 1, (
+            "issued token neither readable nor durably retired by the "
+            "concurrent revocation"
         )
     assert token_store.lookup_token(root, "access", seed) is None
 
