@@ -15,8 +15,14 @@ running as-is). This slice ships the controller in **shadow/observe mode**:
 - **Writes ONLY** the controller's own surfaces: ``controller_plan`` (the recorded
   decision), ``controller_pass_lease`` (per-mission concurrency safety), and
   ``controller_telemetry`` (per-pass telemetry) — plus a heartbeat file. It never
-  mutates mission/plan/delegation/budget/attachment state, never dispatches work,
-  never completes or approves a Mission (D5/P3/§7.7 hard walls).
+  mutates mission/plan/delegation/attachment state, never dispatches work,
+  never completes or approves a Mission (D5/P3/§7.7 hard walls). One v0.12
+  exception, gated six ways: a crossing budget envelope whose full D3 gate set
+  passes (machine gate + Operator enabled/direct + per-mission policy flags +
+  per-call confirm) may pause the Mission + raise the ``budget_breaker``
+  signal via ``operator_mission_budget.enforce_budget_breaker`` (design
+  ``docs/design/v0.12-budget-enforcement.md`` §2.2). With any gate off — the
+  default — the pass output is byte-identical to the pre-v0.12 shadow pass.
 
 Loop mechanics (§7.1–§7.6):
 1. Trigger model T1–T5 (§7.2) enqueues a work request per mission.
@@ -72,6 +78,7 @@ from typing import Any, Protocol
 
 import operator_delegations as deleg
 import operator_failure_semantics as fs
+import operator_mission_budget as op_mission_budget
 import operator_mission_plan as plan
 import operator_mission_runtime as mission
 import operator_policy as op
@@ -1185,6 +1192,33 @@ def _record_telemetry(db: sqlite3.Connection, entry: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _budget_would_pause(db: sqlite3.Connection, mission_id: str) -> bool:
+    """Read-only: would the mission's budget envelope trip the D3 breaker?
+
+    v0.12 Pack A (design §2.2): the reconcile pass calls this to decide
+    whether the mission in scope is on a crossing edge with the per-mission
+    hard-block policy armed. Pure evaluation on the pass's own connection —
+    no writes. Missions without a budget account (or stores without the
+    budget tables) simply evaluate False.
+    """
+    try:
+        if not op_mission_budget._account_table_exists(db):
+            return False
+        account = op_mission_budget._get_account_row(db, mission_id)
+    except (LookupError, ValueError, sqlite3.Error):
+        return False
+    try:
+        policy_obj = json.loads(account["policy_json"])
+        env = op_mission_budget._envelope_status(
+            float(account["spend"]), float(account["quota"]), str(account["unit"])
+        )
+        return bool(
+            op_mission_budget._would_block(env, policy_obj)["would_pause"]
+        )
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+
+
 def reconcile_pass(
     mission_id: str,
     trigger_kind: str,
@@ -1307,6 +1341,28 @@ def reconcile_pass(
         )
         uncertainty = str(decision.get("classification_uncertainty", ""))
 
+        # v0.12 Pack A (design §2.2): budget D3 enforcement seam. When the
+        # mission's evaluated would_pause is true AND every enforcement gate
+        # passes (machine gate + Operator enabled/direct + per-mission policy
+        # + confirm), execute the breaker action set (D3: pause + signal +
+        # break row) and record the outcome under budget_enforcement. When
+        # enforcement is disabled — the default — budget_enforcement stays
+        # null so L0/L1 outputs remain byte-identical. No controller write
+        # transaction is open here (acquire_lease commits internally), so the
+        # executor's own write connections cannot deadlock the pass.
+        budget_enforcement: dict[str, Any] | None = None
+        if (
+            op.env_truthy(op_mission_budget.BUDGET_HARD_BLOCK_ENV)
+            and op.OperatorPolicy().enabled
+            and _budget_would_pause(db, mission_id)
+        ):
+            enforcement_raw = op_mission_budget.enforce_budget_breaker(
+                mission_id,
+                hermes_root=hermes_root,
+                confirm=True,
+            )
+            budget_enforcement = json.loads(enforcement_raw)
+
         # Build the durable decision envelope (decision output only).
         pass_env.update(
             {
@@ -1340,6 +1396,19 @@ def reconcile_pass(
                 },
             }
         )
+        if budget_enforcement is not None:
+            # §2.2: record the enforcement outcome in the pass envelope (and
+            # via actions_taken, in telemetry). Key is ABSENT when enforcement
+            # is disabled so L0/L1 outputs stay byte-identical to pre-v0.12.
+            pass_env["budget_enforcement"] = budget_enforcement
+            pass_env["actions_taken"].append(
+                {
+                    "action": "budget_enforce",
+                    "detail": str(budget_enforcement.get("reason", ""))[:128],
+                    "enforced": bool(budget_enforcement.get("enforced")),
+                    "need_attention": bool(budget_enforcement.get("need_attention")),
+                }
+            )
 
         # --- the ONLY durable writes: controller_plan + controller_telemetry ---
         record = {

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added the budget D3 hard-block ENFORCEMENT path (v0.12 slice-2, design `docs/design/v0.12-budget-enforcement.md`): `operator_mission_budget.enforce_budget_breaker` executes the on-crossing action set — pause the Mission via the existing transition (reason `budget_breaker`), one fleet-attention INTERRUPT envelope through the existing controller attention spool, one `budget_events` `break` row — behind a fail-closed gate set that is DEFAULT OFF: per-call `confirm`, machine gate `HERMES_GPT_BUDGET_HARD_BLOCK=1`, Operator enabled + `direct` apply mode, and per-mission `hard_block_enabled` + `pause_on_cross` policy flags. INV-11 anti-TOCTOU re-snapshot, idempotent repeat (`already_enforced`, one spool entry max), not-pausable fail-closed `need_attention`, INV-9 bounded fields, and INV-10 loud spool failures are tested. `hermes_budget_check` gains keyword-only `enforce`/`confirm` (default `enforce=False` is byte-identical to the previous dry-run surface; the MCP tool signature is unchanged), and the controller reconcile pass records a `budget_enforcement` outcome only when the machine gate is armed — otherwise pass output is byte-identical and nothing is written. Connector surface stays at 137 tools.
+
 ## 0.11.0 - 2026-09-21
 
 - Support MCP Python SDK 2.x alongside 1.28.1+, preserving local stdio, HTTP/SSE transport settings, authentication and Operator gates.
