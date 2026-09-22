@@ -615,6 +615,25 @@ def test_auto_stage_contract_delegates_agent_choice_without_losing_owner_profile
     assert normalized["assigned_profile"] == stage["owner"]
 
 
+def test_stage_contract_carries_profile_skill_requirements_to_dispatch(hermes_root):
+    ws = hermes_root.parent / "ws"
+    wf = _canonical_flow(ws)
+    _, workflow, _ = swarm._parse_workflow(json.dumps(wf))
+    stage = next(item for item in workflow["stages"] if item["id"] == "implementation")
+    stage["capability_req"] = {
+        "profile": stage["owner"],
+        "skills": ["profile-only"],
+    }
+
+    contract = swarm._stage_contract(workflow, stage)
+    _, normalized, _ = contract_mod._parse_contract(json.dumps(contract))
+
+    assert normalized["capability_req"] == {
+        "profile": stage["owner"],
+        "skills": ["profile-only"],
+    }
+
+
 def test_worktree_plan_native_ng5_shape(hermes_root):
     """D-SW2/NG5: implementation stages plan upstream worktrees, not git."""
     ws = hermes_root.parent / "ws"
@@ -1115,6 +1134,43 @@ def test_dispatch_requires_confirm_and_direct(hermes_root, monkeypatch):
     out = _dispatch("sw-gate-004", "research", hermes_root, monkeypatch, confirm=False, dry_run=False)
     assert out["success"] is False
     assert "CONFIRMATION_REQUIRED" in json.dumps(out)
+
+
+def test_dispatch_skill_rejection_does_not_mutate_stage_state(hermes_root, monkeypatch):
+    ws = hermes_root.parent / "ws"
+    skill_dir = hermes_root / "profiles" / "hermes-dev" / "skills" / "swarm-only"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: swarm-only\ndescription: swarm skill\n---\n",
+        encoding="utf-8",
+    )
+    wf = _workflow_ready_for_dispatch(ws, workflow_id="sw-gate-skill-001")
+    wf["stages"][0]["capability_req"] = {
+        "profile": "hermes-dev",
+        "skills": ["swarm-only"],
+    }
+    assert _create(wf, hermes_root, monkeypatch)["success"] is True
+
+    skill_dir.joinpath("SKILL.md").unlink()
+    skill_dir.rmdir()
+    calls: list[list[str]] = []
+    out = _dispatch(
+        "sw-gate-skill-001",
+        "research",
+        hermes_root,
+        monkeypatch,
+        runner=_fleet_runner_default(calls),
+    )
+
+    assert out["success"] is False
+    assert out["code"] == "SKILL_REQUIREMENTS_REJECTED"
+    assert calls == []
+    status = _status("sw-gate-skill-001", hermes_root, monkeypatch)
+    research = next(stage for stage in status["stages"] if stage["id"] == "research")
+    assert research["status"] == "todo"
+    assert research["task_id"] == ""
+    assert research["contract_sha256"] == ""
+    assert research["worktree"] is None
 
 
 def test_advance_requires_confirm_and_direct(hermes_root, monkeypatch):

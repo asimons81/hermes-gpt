@@ -57,6 +57,7 @@ import operator_fleet as op_fleet
 import operator_mission as mission
 import operator_workspace as op_workspace
 import operator_runners as op_runners
+import operator_skill_resolution as skill_resolution
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -80,6 +81,8 @@ _MAX_FORBIDDEN_ACTIONS = 32
 _MAX_SCOPE_WORKSPACES = 8
 _MAX_SCOPE_PROFILES = 16
 _MAX_REVIEW_EVIDENCE_SCAN = 500
+_MAX_CAPABILITY_SKILLS = 32
+_MAX_SKILL_NAME = 128
 
 _VERDICT_SATISFIED = "SATISFIED"
 _VERDICT_NOT_SATISFIED = "NOT_SATISFIED"
@@ -234,6 +237,29 @@ def _profile_list(value: Any) -> list[str]:
     return out
 
 
+def _capability_requirement(value: Any) -> dict[str, Any] | None:
+    """Normalize the optional logical profile capability carried to dispatch."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("capability_req must be an object")
+    profile = op.validate_profile_name(
+        _clean_text(value.get("profile"), field="capability_req.profile", maximum=64)
+    )
+    skills = value.get("skills") or []
+    if not isinstance(skills, list) or len(skills) > _MAX_CAPABILITY_SKILLS:
+        raise ValueError(
+            f"capability_req.skills must be a list (<= {_MAX_CAPABILITY_SKILLS})"
+        )
+    normalized: list[str] = []
+    for item in skills:
+        name = _clean_text(item, field="capability skill", maximum=_MAX_SKILL_NAME)
+        if name in normalized:
+            raise ValueError(f"duplicate capability skill {name!r}")
+        normalized.append(name)
+    return {"profile": profile, "skills": normalized}
+
+
 def _forbidden_list(value: Any) -> list[dict[str, Any]]:
     """Normalize forbidden_actions to ``{action, reason, class}`` (LOW/MED/HIGH)."""
     if not isinstance(value, list) or len(value) > _MAX_FORBIDDEN_ACTIONS:
@@ -367,6 +393,9 @@ def _canonical_contract(raw: Any) -> tuple[str, dict[str, Any]]:
     assigned_profile = _clean_text(raw.get("assigned_profile"), field="assigned_profile", maximum=64)
     if not _PROFILE_RE.fullmatch(assigned_profile):
         raise ValueError("assigned_profile is invalid")
+    capability_req = _capability_requirement(raw.get("capability_req"))
+    if capability_req is not None and capability_req["profile"] != assigned_profile:
+        raise ValueError("capability_req.profile must match assigned_profile")
     objective = _clean_text(raw.get("objective"), field="objective", maximum=_MAX_OBJECTIVE_BYTES)
 
     scope = raw.get("allowed_scope")
@@ -407,6 +436,8 @@ def _canonical_contract(raw: Any) -> tuple[str, dict[str, Any]]:
         "constraints": _string_list(raw.get("constraints") or [], field="constraints"),
         "authorization": authorization,
     }
+    if capability_req is not None:
+        contract["capability_req"] = capability_req
     # Backward compatibility: omit the default fleet selector from canonical
     # contracts unless the caller explicitly supplied an execution block. This
     # preserves hashes for pre-runner work contracts.
@@ -1277,6 +1308,35 @@ def hermes_contract_dispatch(
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     task_id = contract["task_id"]
+    capability_req = contract.get("capability_req")
+    if isinstance(capability_req, dict):
+        try:
+            skill_resolution.require_required_skills(
+                capability_req["profile"],
+                capability_req.get("skills", []),
+                root,
+            )
+        except skill_resolution.SkillRequirementsError as exc:
+            payload = _contract_error(
+                code="SKILL_REQUIREMENTS_REJECTED",
+                safe_message=str(exc),
+                suggested_action=(
+                    "Install the required skills in the assigned Hermes profile "
+                    "before dispatching the contract."
+                ),
+                trace_id=tid,
+                extra={"skill_validation": exc.rejection},
+            )
+            _audit_call(
+                tool=tool,
+                dry_run=dry_run,
+                success=False,
+                changed=False,
+                summary="skill requirements rejected",
+                task_id=task_id,
+            )
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+
     # Uniqueness invariant (design §6.3): task_id must be unique for the dispatch.
     if _observed_runs(task_id, root):
         payload = _contract_error(

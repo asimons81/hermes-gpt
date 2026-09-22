@@ -312,8 +312,25 @@ def test_filter_forbidden_action_public():
 
 
 # ---------------------------------------------------------------------------
-# Soft scores + ordering
+# Skill ownership boundary + soft scores
 # ---------------------------------------------------------------------------
+
+
+def test_required_profile_skill_does_not_hard_filter_fabric_target():
+    req = _req(skills=["code-review"])
+    fabric = _target(
+        "fabric:node-a",
+        kind="fabric_node",
+        name="node-a",
+        allowed_profiles=["dev"],
+        skills=[],
+    )
+
+    verdict = pl.score_targets(req, [fabric])
+
+    assert verdict["classification"] == pl.CLASS_ASSIGNED
+    assert "fabric:node-a" in {item["entity_id"] for item in verdict["candidate_set"]}
+    assert "required_skills_missing" not in verdict["filter_optouts"]
 
 
 def test_authorization_match_prefers_just_enough():
@@ -695,8 +712,40 @@ def test_placement_candidates_read_only_and_valid(seeded_root: Path, monkeypatch
     assert out["count_total"] >= 1
     # The dev profile and node-a fabric node should survive the profile-scope filter.
     names = {c["name"] for c in out["candidate_set"]}
-    assert "dev" in names or "node-a" in names
+    assert "node-a" in names
     # No placement decision was recorded.
+    assert _placement_rows(seeded_root) == []
+
+
+def test_placement_score_rejects_unresolvable_skill_before_decision(
+    seeded_root: Path, monkeypatch
+):
+    _enable(monkeypatch, "workspace")
+    (seeded_root / "skills" / "default-only").mkdir(parents=True)
+    (seeded_root / "skills" / "default-only" / "SKILL.md").write_text(
+        "---\nname: default-only\ndescription: default skill\n---\n",
+        encoding="utf-8",
+    )
+    requirement = {
+        "profile": "dev",
+        "skills": ["default-only"],
+        "authorization_class": "reversible_write",
+    }
+    with plan._connect(mission._db_path(seeded_root), write=True) as db:
+        plan._begin_write(db)
+        db.execute(
+            "UPDATE plan_nodes SET capability_req=? WHERE mission_id=? AND node_id=?",
+            (json.dumps(requirement), "msn-xyz1", "node-a"),
+        )
+        db.commit()
+
+    out = json.loads(
+        pl.hermes_placement_score("msn-xyz1", "node-a", hermes_root=seeded_root)
+    )
+
+    assert out["success"] is False
+    assert out["code"] == "PLACEMENT_SKILL_REQUIREMENTS_REJECTED"
+    assert out["skill_validation"]["error"] == "skill_not_resolvable_for_profile"
     assert _placement_rows(seeded_root) == []
 
 
