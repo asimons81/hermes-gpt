@@ -1329,3 +1329,32 @@ def validate_requirement(requirement: dict[str, Any]) -> bool:
         return True
     except (ValueError, TypeError, PermissionError):
         return False
+
+
+def dispatch_view(
+    decision: dict[str, Any],
+    *,
+    dispatched: bool,
+    idempotency_key: str = "",
+    refused_reason: str = "",
+) -> dict[str, Any]:
+    """Bounded placement summary for the controller's L2-rung execution envelope.
+
+    Thin wiring only (v0.12 slice-2 Pack B): the scoring math, filters, and
+    the ``no_capable_target`` classification logic are untouched. This view
+    derives ``would_assign`` truthfully — ``True`` only when an assignment
+    was actually dispatched under the full L2 gate set — and carries only
+    INV-9-bounded fields (ids, classification, counts, bounded strings).
+    """
+    top = decision.get("top_candidate") or {}
+    return {
+        "classification": decision.get("classification", ""),
+        "would_assign": bool(dispatched),
+        "top_candidate": _sanitize(top.get("entity_id", ""), MAX_STRING),
+        "top_kind": _sanitize(top.get("kind", ""), 32),
+        "candidate_count": len(decision.get("candidate_set") or []),
+        "optout_count": len(decision.get("filter_optouts") or {}),
+        "decision_sha256": _sanitize(decision.get("decision_sha256", ""), 64),
+        "idempotency_key": _sanitize(idempotency_key, 64),
+        "refused_reason": _sanitize(refused_reason, 64),
+    }
