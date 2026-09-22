@@ -43,6 +43,7 @@ from typing import Any
 
 import operator_mission_runtime as mission
 import operator_policy as op
+import operator_skill_resolution as skill_resolution
 from operator_swarm_workflows import CANONICAL_STAGE_SPECS, DEFAULT_OWNERS
 
 SCHEMA_VERSION = "0.9-plan.1"
@@ -197,9 +198,21 @@ def _audit(
         return
 
 
-def _error(exc: Exception, code: str, action: str) -> str:
+def _error(
+    exc: Exception,
+    code: str,
+    action: str,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> str:
     return json.dumps(
-        op.error_from_exception(exc, layer="operator", code=code, suggested_action=action)
+        op.error_from_exception(
+            exc,
+            layer="operator",
+            code=code,
+            suggested_action=action,
+            extra=extra,
+        )
     )
 
 
@@ -478,6 +491,23 @@ def _canonical_plan(raw: Any) -> tuple[str, dict[str, Any]]:
     return enc, canonical
 
 
+def _validate_plan_skill_requirements(
+    plan: dict[str, Any], hermes_root: Path | None
+) -> None:
+    """Reject required skills that a node's logical profile cannot load."""
+    for node in plan.get("nodes", []):
+        capability = node.get("capability_req") or {}
+        rejection = skill_resolution.validate_required_skills(
+            capability.get("profile", ""),
+            capability.get("skills", []),
+            hermes_root,
+        )
+        if rejection is not None:
+            rejection = dict(rejection)
+            rejection["node_id"] = node.get("node_id", "")
+            raise skill_resolution.SkillRequirementsError(rejection)
+
+
 def _plan_sha256(canonical_json: str) -> str:
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
@@ -675,6 +705,10 @@ def hermes_plan_create(
             )
             _canonical, plan, plan_sha = _parse_plan(json.dumps(plan))
 
+        # Capability requirements are validated against the target profile
+        # before any plan row or node row can be created/replaced.
+        _validate_plan_skill_requirements(plan, hermes_root)
+
         effective_dry = policy.effective_dry_run(dry_run)
         if not effective_dry and not confirm:
             raise PermissionError("direct plan creation requires confirm=true")
@@ -734,6 +768,21 @@ def hermes_plan_create(
             "mission_id": mission_id, "version": new_version, "plan_sha256": plan_sha,
             "node_count": len(plan["nodes"]), "status": status, "changed": True, "dry_run": False,
         })
+    except skill_resolution.SkillRequirementsError as exc:
+        _audit(
+            "hermes_plan_create",
+            policy,
+            dry_run=dry_run,
+            success=False,
+            changed=False,
+            mission_id=mission_id,
+        )
+        return _error(
+            exc,
+            "PLAN_SKILL_REQUIREMENTS_REJECTED",
+            "Install the required skills in the requested Hermes profile before creating the plan.",
+            extra={"skill_validation": exc.rejection},
+        )
     except (ValueError, TypeError, PermissionError, LookupError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
         _audit("hermes_plan_create", policy, dry_run=dry_run, success=False, changed=False, mission_id=mission_id)
         return _error(exc, "PLAN_CREATE_REJECTED", "Check mission id, plan schema, and Operator workspace/direct policy.")
@@ -790,12 +839,15 @@ def hermes_plan_list(status: str = "", limit: int = 50, hermes_root: Path | None
         return _error(exc, "PLAN_LIST_FAILED", "Check status/limit and Operator read access.")
 
 
-def hermes_plan_validate(plan_json: str) -> str:
+def hermes_plan_validate(
+    plan_json: str, *, hermes_root: Path | None = None
+) -> str:
     """Pure read-only validation of a MissionPlan. Never writes."""
     policy = op.OperatorPolicy()
     try:
         policy.require_level("read_only")
         _canonical, plan, plan_sha = _parse_plan(plan_json)
+        _validate_plan_skill_requirements(plan, hermes_root)
         return json.dumps({
             "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_plan_validate",
             "valid": True, "plan_sha256": plan_sha, "mission_id": plan["mission_id"],
@@ -803,6 +855,21 @@ def hermes_plan_validate(plan_json: str) -> str:
             "node_count": len(plan["nodes"]),
             "nodes": [{"node_id": n["node_id"], "kind": n["kind"], "state": "pending"} for n in plan["nodes"]],
         })
+    except skill_resolution.SkillRequirementsError as exc:
+        payload = json.loads(
+            _error(
+                exc,
+                "PLAN_SKILL_REQUIREMENTS_REJECTED",
+                "Install the required skills in the requested Hermes profile before validating the plan.",
+                extra={"skill_validation": exc.rejection},
+            )
+        )
+        payload.update({
+            "schema_version": SCHEMA_VERSION,
+            "tool": "hermes_plan_validate",
+            "valid": False,
+        })
+        return json.dumps(payload)
     except (ValueError, PermissionError, json.JSONDecodeError) as exc:
         return json.dumps({
             "success": False, "schema_version": SCHEMA_VERSION, "tool": "hermes_plan_validate",
