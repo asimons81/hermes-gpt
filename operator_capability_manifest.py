@@ -43,6 +43,7 @@ import operator_diagnostics as op_diag
 import operator_fabric as op_fabric
 import operator_fleet as op_fleet
 import operator_policy as op
+import operator_skill_resolution as skill_resolution
 
 SCHEMA_VERSION = "0.1-cm.1"
 MANIFEST_SCHEMA = "hermes.capability-manifest/v1"
@@ -215,18 +216,11 @@ def _read_fleet_entities(root: Path) -> list[dict[str, Any]]:
     return entities
 
 
-def _list_profile_skills(profile_home: Path) -> list[str]:
-    skills: list[str] = []
-    root = profile_home / "skills"
-    if not root.is_dir():
-        return skills
-    try:
-        for d in sorted(root.iterdir()):
-            if d.is_dir() and (d / "SKILL.md").is_file():
-                skills.append(_sanitize(d.name, _MAX_STRING))
-    except OSError:
-        return skills
-    return skills
+def _list_profile_skills(profile_home: Path, profile: str) -> list[str]:
+    return [
+        _sanitize(name, _MAX_STRING)
+        for name in skill_resolution.skill_names_for_home(profile_home, profile)
+    ]
 
 
 def _read_profile_entities(root: Path) -> list[dict[str, Any]]:
@@ -249,7 +243,7 @@ def _read_profile_entities(root: Path) -> list[dict[str, Any]]:
                 )
         except Exception:  # noqa: BLE001, S110 - unreadable config is a state
             pass
-        skills = _list_profile_skills(home)
+        skills = _list_profile_skills(home, profile)
         canon = {
             "entity_kind": "profile",
             "name": _sanitize(profile, _MAX_STRING),

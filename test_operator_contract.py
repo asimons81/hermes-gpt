@@ -1292,6 +1292,49 @@ def test_dispatch_requires_confirm_for_real_dispatch(hermes_root, monkeypatch, t
     assert not any("a2a" in a and "send" in a for a in calls)
 
 
+def test_dispatch_rechecks_profile_skill_capability_before_runner(
+    hermes_root, monkeypatch, tmp_path
+):
+    _enable_workspace_direct(monkeypatch)
+    ws = hermes_root.parent / "ws"
+    (hermes_root / "skills" / "default-only").mkdir(parents=True)
+    (hermes_root / "skills" / "default-only" / "SKILL.md").write_text(
+        "---\nname: default-only\ndescription: default skill\n---\n",
+        encoding="utf-8",
+    )
+    (hermes_root / "profiles" / "hermes-dev" / "skills").mkdir(parents=True)
+    c = _contract_for_ws(
+        ws,
+        task_id="wc-dispatch-skill-001",
+        assigned_agent="rza",
+        assigned_profile="hermes-dev",
+        capability_req={"profile": "hermes-dev", "skills": ["default-only"]},
+        authorization={
+            "class": "reversible_write",
+            "approved": True,
+            "approved_by": "Tony",
+            "approval_reference": "t_x",
+        },
+    )
+    calls: list[list[str]] = []
+    out = json.loads(
+        contract_mod.hermes_contract_dispatch(
+            json.dumps(c),
+            dry_run=True,
+            runner=_fleet_runner({}, calls),
+            hermes_bin=HERMES,
+            authority_manifest=_authority_manifest(tmp_path),
+            hermes_root=hermes_root,
+        )
+    )
+
+    assert out["success"] is False
+    assert out["code"] == "SKILL_REQUIREMENTS_REJECTED"
+    assert out["skill_validation"]["error"] == "skill_not_resolvable_for_profile"
+    assert out["skill_validation"]["skills"][0]["available_profiles"] == ["default"]
+    assert calls == []
+
+
 def test_dispatch_rejects_duplicate_task_id(hermes_root, monkeypatch, tmp_path):
     _enable_workspace_direct(monkeypatch)
     ws = hermes_root.parent / "ws"

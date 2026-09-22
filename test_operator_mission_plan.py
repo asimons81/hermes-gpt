@@ -184,10 +184,104 @@ def test_operator_provided_plan_accepted(hermes_root):
     assert node_ids == {"a", "b", "c"}
 
 
+def test_plan_create_rejects_cross_profile_skill_without_persisting(hermes_root):
+    _make_mission(hermes_root)
+    (hermes_root / "skills" / "default-only").mkdir(parents=True)
+    (hermes_root / "skills" / "default-only" / "SKILL.md").write_text(
+        "---\nname: default-only\ndescription: default skill\n---\n",
+        encoding="utf-8",
+    )
+    (hermes_root / "profiles" / "hermes-researcher" / "skills").mkdir(parents=True)
+
+    document = json.loads(_operator_plan_dag())
+    document["nodes"][0]["capability_req"]["skills"] = ["default-only"]
+    out = _j(
+        plan.hermes_plan_create(
+            "msn-plan",
+            json.dumps(document),
+            confirm=True,
+            dry_run=False,
+            hermes_root=hermes_root,
+        )
+    )
+
+    assert out["success"] is False
+    assert out["code"] == "PLAN_SKILL_REQUIREMENTS_REJECTED"
+    assert out["skill_validation"]["error"] == "skill_not_resolvable_for_profile"
+    assert out["skill_validation"]["skills"][0]["available_profiles"] == ["default"]
+    with sqlite3.connect(mission._db_path(hermes_root)) as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='mission_plans'"
+        ).fetchone() is None
+
+
+def test_plan_replacement_rejects_removed_profile_skill_without_mutating_existing_plan(hermes_root):
+    _make_mission(hermes_root)
+    document = json.loads(_operator_plan_dag())
+    skill_dir = hermes_root / "profiles" / "hermes-researcher" / "skills" / "profile-only"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: profile-only\ndescription: researcher skill\n---\n",
+        encoding="utf-8",
+    )
+    document["nodes"][0]["capability_req"]["skills"] = ["profile-only"]
+    created = _j(
+        plan.hermes_plan_create(
+            "msn-plan",
+            json.dumps(document),
+            confirm=True,
+            dry_run=False,
+            hermes_root=hermes_root,
+        )
+    )
+    assert created["success"] is True
+
+    (skill_dir / "SKILL.md").unlink()
+    skill_dir.rmdir()
+    rejected = _j(
+        plan.hermes_plan_create(
+            "msn-plan",
+            json.dumps(document),
+            confirm=True,
+            dry_run=False,
+            hermes_root=hermes_root,
+        )
+    )
+
+    assert rejected["success"] is False
+    assert rejected["code"] == "PLAN_SKILL_REQUIREMENTS_REJECTED"
+    current = _j(plan.hermes_plan_get("msn-plan", hermes_root=hermes_root))
+    assert current["version"] == 1
+    assert current["nodes"][0]["capability_req"]["skills"] == ["profile-only"]
+
+
 def test_validate_accepts_bounded_plan(hermes_root):
     out = _j(plan.hermes_plan_validate(_operator_plan_dag()))
     assert out["valid"] is True
     assert out["node_count"] == 3
+
+
+def test_validate_rejects_cross_profile_skill_before_any_write(hermes_root):
+    (hermes_root / "skills" / "default-only").mkdir(parents=True)
+    (hermes_root / "skills" / "default-only" / "SKILL.md").write_text(
+        "---\nname: default-only\ndescription: default skill\n---\n",
+        encoding="utf-8",
+    )
+    (hermes_root / "profiles" / "hermes-researcher" / "skills").mkdir(parents=True)
+    document = json.loads(_operator_plan_dag())
+    document["nodes"][0]["capability_req"]["skills"] = ["default-only"]
+
+    out = _j(
+        plan.hermes_plan_validate(
+            json.dumps(document), hermes_root=hermes_root
+        )
+    )
+
+    assert out["success"] is False
+    assert out["valid"] is False
+    assert out["code"] == "PLAN_SKILL_REQUIREMENTS_REJECTED"
+    assert out["skill_validation"]["error"] == "skill_not_resolvable_for_profile"
+    assert out["skill_validation"]["skills"][0]["available_profiles"] == ["default"]
 
 
 def test_validate_rejects_cyclic_dag(hermes_root):

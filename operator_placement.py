@@ -52,6 +52,7 @@ import operator_capability_manifest as cm
 import operator_mission_budget as budget
 import operator_mission_runtime as mission
 import operator_policy as op
+import operator_skill_resolution as skill_resolution
 
 SCHEMA_VERSION = "0.9-placement.1"
 PLACEMENT_SCHEMA = "hermes.placement/v1"
@@ -213,10 +214,20 @@ def _audit(
         return
 
 
-def _error(exc: Exception, code: str, action: str) -> str:
+def _error(
+    exc: Exception,
+    code: str,
+    action: str,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> str:
     return json.dumps(
         op.error_from_exception(
-            exc, layer="operator", code=code, suggested_action=action
+            exc,
+            layer="operator",
+            code=code,
+            suggested_action=action,
+            extra=extra,
         )
     )
 
@@ -1001,6 +1012,14 @@ def hermes_placement_score(
         requirement["kind"] = node_def["kind"]
         requirement["owner"] = node_def["owner"]
 
+        # Profile capability is a precondition for placement.  Fabric remains
+        # a separate physical target question and is not filtered by skills.
+        skill_resolution.require_required_skills(
+            requirement["profile"],
+            requirement.get("skills", []),
+            cm._resolve_root(hermes_root),
+        )
+
         ctx = {"priority": priority}
         if budget_ctx:
             ctx["budget"] = budget_ctx
@@ -1053,6 +1072,22 @@ def hermes_placement_score(
         decision["dry_run"] = False
         decision["persisted"] = persisted
         return json.dumps(decision, ensure_ascii=False, indent=2)
+    except skill_resolution.SkillRequirementsError as exc:
+        _audit(
+            "hermes_placement_score",
+            op.OperatorPolicy(),
+            dry_run=dry_run,
+            success=False,
+            changed=False,
+            mission_id=mission_id,
+            node_id=node_id,
+        )
+        return _error(
+            exc,
+            "PLACEMENT_SKILL_REQUIREMENTS_REJECTED",
+            "Install the required skills in the requested Hermes profile before placement.",
+            extra={"skill_validation": exc.rejection},
+        )
     except (
         ValueError,
         TypeError,
@@ -1153,6 +1188,11 @@ def hermes_placement_candidates(
                 maximum_items=64,
                 item_max=64,
             )
+        skill_resolution.require_required_skills(
+            requirement["profile"],
+            requirement.get("skills", []),
+            cm._resolve_root(hermes_root),
+        )
         targets = load_manifest_targets(hermes_root, source=source)
         verdict = score_targets(_stance(requirement), targets, {})
         envelope = {
@@ -1184,6 +1224,13 @@ def hermes_placement_candidates(
             },
         )
         return json.dumps(envelope, ensure_ascii=False, indent=2)
+    except skill_resolution.SkillRequirementsError as exc:
+        return _error(
+            exc,
+            "PLACEMENT_SKILL_REQUIREMENTS_REJECTED",
+            "Install the required skills in the requested Hermes profile before placement.",
+            extra={"skill_validation": exc.rejection},
+        )
     except (
         ValueError,
         TypeError,
