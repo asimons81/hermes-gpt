@@ -25,7 +25,13 @@ MAX_RESULT_CHARS = 24_000
 MIN_JOB_RUNTIME_SECONDS = 10
 MAX_JOB_RUNTIME_SECONDS = 7_200
 MAX_JOB_WAIT_SECONDS = 120
+SESSION_CREATE_SOURCE = "hermes-gpt"
+MAX_SESSION_TITLE_CHARS = 200
 _SESSION_TERMINAL_STATES = frozenset({"completed", "failed", "timed_out", "orphaned"})
+
+# Injected by the server (require_imports) so this module stays unit-testable.
+# Overridable in tests via monkeypatch.setattr(session, "SessionDB", fake).
+SessionDB: Any = None
 
 # -- Enveloppe MCP : budget en octets de la reponse complete (correction troncature) --
 # La serilisation JSON Python (défaut ensure_ascii=True) echappe les accents (\uXXXX,
@@ -103,11 +109,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _root(hermes_root: Path | None = None) -> Path:
+def _hermes_data_root(hermes_root: Path | None = None) -> Path:
+    """Return the normalized Hermes data root (not the agent source root)."""
     base = op.normalize_hermes_data_root(
         hermes_root or Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
     )
-    return Path(base or Path.home() / ".hermes") / "session-jobs"
+    return Path(base) if base else Path.home() / ".hermes"
+
+
+def _root(hermes_root: Path | None = None) -> Path:
+    return _hermes_data_root(hermes_root) / "session-jobs"
 
 
 def _paths(job_id: str, hermes_root: Path | None = None) -> tuple[Path, Path]:
@@ -202,6 +213,23 @@ def hermes_session_continue(
     if isinstance(checked, dict):
         return checked
     safe_id, safe_prompt, safe_timeout, safe_profile = checked
+    return _start_job(safe_id, safe_prompt, safe_timeout, safe_profile, hermes_root, agent_root)
+
+
+def _start_job(
+    safe_id: str,
+    safe_prompt: str,
+    safe_timeout: int,
+    safe_profile: str,
+    hermes_root: Path | None,
+    agent_root: Path | None,
+) -> dict[str, Any]:
+    """Register and launch one bounded non-interactive Hermes turn as a job.
+
+    Shared by :func:`hermes_session_continue` (existing session) and
+    :func:`hermes_session_create` (newly created session). The caller has
+    already validated inputs and, for create, persisted the session.
+    """
     argv = [_hermes_executable(agent_root), "--resume", safe_id, "--oneshot", safe_prompt]
     active_key = f"{safe_profile}:{safe_id}"
     job_id = uuid4().hex
@@ -281,6 +309,117 @@ def hermes_session_continue(
         "profile": safe_profile,
         "status": "running",
     })
+
+
+def _validate_create(
+    prompt: str, max_job_runtime_seconds: int, profile: str, title: str | None = None
+) -> tuple[str, int, str, str | None] | dict[str, Any]:
+    """Validate inputs for :func:`hermes_session_create` (no existing session id).
+
+    Mirrors the session-continue validation for the shared fields (prompt,
+    runtime, profile) and adds an optional bounded title. ``profile`` is
+    restricted through :func:`operator_policy.validate_profile_name` exactly
+    as the existing session tools — no arbitrary profile name is accepted.
+    """
+    if not op.env_truthy(ENABLE_SESSION_CONTROL_ENV):
+        return _error(
+            "SESSION_CONTROL_DISABLED",
+            "Hermes session control is disabled.",
+            f"Set {ENABLE_SESSION_CONTROL_ENV}=1 on the trusted local MCP server.",
+        )
+    if not isinstance(prompt, str) or not prompt.strip():
+        return _error("INVALID_PROMPT", "prompt must not be empty.", "Provide the first instruction for the new Hermes session.")
+    if len(prompt) > MAX_PROMPT_CHARS:
+        return _error("PROMPT_TOO_LARGE", f"prompt exceeds the {MAX_PROMPT_CHARS}-character limit.", "Send a shorter prompt.")
+    if isinstance(max_job_runtime_seconds, bool) or not isinstance(max_job_runtime_seconds, int):
+        return _error(
+            "INVALID_MAX_JOB_RUNTIME_SECONDS",
+            "max_job_runtime_seconds must be an integer number of seconds.",
+            f"Choose {MIN_JOB_RUNTIME_SECONDS} to {MAX_JOB_RUNTIME_SECONDS} seconds.",
+        )
+    try:
+        safe_profile = op.validate_profile_name(profile)
+    except Exception:
+        return _error("INVALID_PROFILE", "profile is not a valid Hermes profile name.", "Use an authorized profile name.")
+    safe_title = None
+    if title is not None:
+        if not isinstance(title, str) or not title.strip():
+            return _error("INVALID_TITLE", "title must be a non-empty string when provided.", "Omit title or provide a non-empty value.")
+        if len(title) > MAX_SESSION_TITLE_CHARS:
+            return _error("INVALID_TITLE", f"title exceeds the {MAX_SESSION_TITLE_CHARS}-character limit.", "Send a shorter title.")
+        safe_title = title.strip()
+    return (
+        prompt.strip(),
+        max(MIN_JOB_RUNTIME_SECONDS, min(max_job_runtime_seconds, MAX_JOB_RUNTIME_SECONDS)),
+        safe_profile,
+        safe_title,
+    )
+
+
+def _new_session_id() -> str:
+    """Return a fresh session id in the CLI's ``{YYYYmmdd_HHMMSS}_{uuid6}`` shape."""
+    return f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:6]}"
+
+
+def _create_session_in_db(
+    session_id: str, profile: str, title: str | None, hermes_root: Path | None = None
+) -> bool:
+    """Create a fresh Hermes session row (and optional title) in the profile store.
+
+    Uses the real ``hermes_state.SessionDB`` write surface (the same one the
+    CLI uses for ``chat -c <title> --create-if-missing``). ``SessionDB`` is
+    injected at module level by the server; tests override it.
+    """
+    if SessionDB is None:
+        raise RuntimeError("Hermes session database is unavailable: SessionDB is not injected.")
+    profile_home = op.resolve_profile_home(profile, _hermes_data_root(hermes_root))
+    db = SessionDB(db_path=str(profile_home / "state.db"), read_only=False)
+    try:
+        db.create_session(session_id, source=SESSION_CREATE_SOURCE)
+        if title:
+            db.set_session_title(session_id, title)
+    finally:
+        db.close()
+    return True
+
+
+def hermes_session_create(
+    prompt: str,
+    max_job_runtime_seconds: int = MAX_JOB_RUNTIME_SECONDS,
+    *,
+    hermes_root: Path | None = None,
+    agent_root: Path | None = None,
+    profile: str = "default",
+    title: str | None = None,
+) -> dict[str, Any]:
+    """Create a new Hermes session and start its first work asynchronously.
+
+    Creates a genuinely new, distinct Hermes session in the target profile,
+    then reuses the exact session-control job machinery (:func:`_start_job`)
+    to run the first prompt. Returns immediately with ``success``,
+    ``job_id``, ``session_id``, ``profile`` and ``status``; the first work is
+    followed with :func:`hermes_session_job_wait` then
+    :func:`hermes_session_job_result`.
+    """
+    checked = _validate_create(prompt, max_job_runtime_seconds, profile, title)
+    if isinstance(checked, dict):
+        return checked
+    safe_prompt, safe_timeout, safe_profile, safe_title = checked
+    new_session_id = _new_session_id()
+    try:
+        if not _create_session_in_db(new_session_id, safe_profile, safe_title, hermes_root):
+            return _error(
+                "SESSION_CREATE_FAILED",
+                "The new Hermes session could not be persisted.",
+                "Check the Hermes session database and profile.",
+            )
+    except Exception as exc:
+        return _error(
+            "SESSION_CREATE_FAILED",
+            op.redact_output(str(exc)),
+            "Check the Hermes session database and profile.",
+        )
+    return _start_job(new_session_id, safe_prompt, safe_timeout, safe_profile, hermes_root, agent_root)
 
 
 def _watch(job_id: str, proc: subprocess.Popen[str], output: Any, timeout: int, hermes_root: Path | None) -> None:

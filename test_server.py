@@ -973,6 +973,41 @@ def test_session_continue_resolves_id_in_requested_profile(monkeypatch, tmp_path
         connection.execute("select 1")
 
 
+def test_session_create_dispatches_to_runner_with_new_session(monkeypatch, tmp_path):
+    monkeypatch.setenv(server.ENABLE_SESSION_CONTROL_ENV, "1")
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    monkeypatch.setattr(server, "_default_hermes_root", lambda: tmp_path)
+    dispatched = {}
+
+    def fake_create(prompt, max_job_runtime_seconds, **kwargs):
+        dispatched.update(prompt=prompt, max_job_runtime_seconds=max_job_runtime_seconds, **kwargs)
+        return {
+            "success": True,
+            "job_id": "d" * 32,
+            "session_id": "20260923_120000_abcdef",
+            "profile": "default",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(server.op_session, "hermes_session_create", fake_create)
+    result = server.hermes_session_create(
+        "first work", max_job_runtime_seconds=300, title="A fresh session"
+    )
+    assert result["success"] is True
+    assert dispatched["prompt"] == "first work"
+    assert dispatched["max_job_runtime_seconds"] == 300
+    assert dispatched["hermes_root"] == tmp_path
+    assert dispatched["profile"] == "default"
+    assert dispatched["title"] == "A fresh session"
+
+
+def test_session_create_disabled_without_env_gate(monkeypatch):
+    monkeypatch.delenv(server.ENABLE_SESSION_CONTROL_ENV, raising=False)
+    monkeypatch.setattr(server, "require_imports", lambda: None)
+    result = server.hermes_session_create("first work")
+    assert result["code"] == "SESSION_CONTROL_DISABLED"
+
+
 def test_bot_chat_send_targets_current_tip_in_requested_profile(monkeypatch):
     monkeypatch.setenv(server.ENABLE_SESSION_SEARCH_ENV, "1")
     monkeypatch.setattr(server, "require_imports", lambda: None)

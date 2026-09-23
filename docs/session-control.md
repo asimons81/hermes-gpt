@@ -29,6 +29,30 @@ hermes --resume <resolved-session-id> --oneshot <prompt>
 
 No shell is used. Hermes restores the resumed session's recorded working directory using its normal CLI behavior.
 
+## Creating a new session
+
+`hermes_session_create(prompt, max_job_runtime_seconds=7200, profile="default", title=...)`
+creates a genuinely new, distinct Hermes session in the target profile and runs its
+first prompt through the same asynchronous job machinery:
+
+1. A new session row is created in the profile's Hermes session store (id shape
+   `{YYYYmmdd_HHMMSS}_{6-hex}`, explicit source `hermes-gpt`), before any CLI call.
+   An optional `title` is recorded when provided.
+2. The first work runs in that new session via the fixed CLI argument array:
+
+   ```text
+   hermes --resume <new-session-id> --oneshot <prompt>
+   ```
+
+3. The call returns immediately with `success`, `session_id`, `job_id`, `profile`
+   and `status`.
+4. Follow with `hermes_session_job_wait(job_id)` then `hermes_session_job_result(job_id)`.
+
+The new session id is generated before the CLI starts, so the returned `session_id`
+is always the id of the freshly created session. Profile is restricted through the
+same policy as `hermes_session_continue` (no arbitrary profile names); a failed
+session-store write returns `SESSION_CREATE_FAILED` without launching anything.
+
 ## Bounds and persistence
 
 - Prompt: maximum 65,536 characters.

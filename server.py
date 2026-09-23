@@ -251,6 +251,7 @@ def import_hermes() -> None:
 
             SessionDB = SDB
             get_hermes_home = ghh
+            op_session.SessionDB = SDB
         except Exception as exc:
             eprint(f"hermes-gpt: session search unavailable: {exc}")
     except Exception as exc:
@@ -1370,6 +1371,56 @@ def hermes_session_send(
         max_job_runtime_seconds=max_job_runtime_seconds,
         profile=profile,
     )
+
+
+def hermes_session_create(
+    prompt: str,
+    max_job_runtime_seconds: Annotated[
+        int,
+        Field(
+            description=(
+                "Durée maximale du travail Hermes en secondes : à expiration, Hermes"
+                " et ses enfants sont arrêtés. Borne de 10 à 7200 inclus."
+            ),
+            ge=op_session.MIN_JOB_RUNTIME_SECONDS,
+            le=DEFAULT_SESSION_MAX_RUNTIME_SECONDS,
+        ),
+    ] = DEFAULT_SESSION_MAX_RUNTIME_SECONDS,
+    profile: str = "default",
+    title: str | None = None,
+) -> dict[str, Any]:
+    """Create a new Hermes session and start its first work asynchronously.
+
+    Creates a genuinely new, distinct session in the target profile and runs
+    its first prompt through the same job machinery as
+    ``hermes_session_continue``. Follow with ``hermes_session_job_wait`` then
+    ``hermes_session_job_result``.
+    """
+    safe_profile = _validate_session_profile(profile)
+    try:
+        require_imports()
+        if not env_enabled(ENABLE_SESSION_CONTROL_ENV):
+            return op_policy.make_error_envelope(
+                layer="session_control",
+                code="SESSION_CONTROL_DISABLED",
+                safe_message="Hermes session control is disabled.",
+                suggested_action=f"Set {ENABLE_SESSION_CONTROL_ENV}=1 on the trusted local MCP server.",
+            )
+        return op_session.hermes_session_create(
+            prompt,
+            max_job_runtime_seconds=max_job_runtime_seconds,
+            hermes_root=_default_hermes_root(),
+            agent_root=HERMES_ROOT,
+            profile=safe_profile,
+            title=title,
+        )
+    except Exception as exc:
+        return op_policy.make_error_envelope(
+            layer="session_control",
+            code="SESSION_CREATE_FAILED",
+            safe_message=_redact_error(exc),
+            suggested_action="Check the Hermes session database, profile, and local CLI installation.",
+        )
 
 
 def hermes_session_job_status(job_id: str) -> dict[str, Any]:
@@ -3238,6 +3289,7 @@ def register_tools(server: FastMCP) -> None:
     if env_enabled(ENABLE_SESSION_CONTROL_ENV):
         server.add_tool(hermes_session_continue, meta=tool_meta())
         server.add_tool(hermes_session_send, meta=tool_meta())
+        server.add_tool(hermes_session_create, meta=tool_meta())
         if env_enabled(ENABLE_SESSION_SEARCH_ENV):
             server.add_tool(hermes_bot_chat_send, meta=tool_meta())
         server.add_tool(hermes_session_job_status, meta=tool_meta())
