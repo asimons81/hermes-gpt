@@ -280,7 +280,9 @@ Default caps, unless explicitly overridden by the supported environment variable
 A Swarm stage may carry an optional `capability_req` with the logical profile and
 required skills. The generated Work Contract preserves that requirement, and
 dispatch revalidates it against the live Hermes Agent loader before invoking a
-runner. Removing a required skill after workflow creation therefore rejects the
+runner. The probe uses `skill_view(..., preprocess=False)`, matching Hermes
+preload, so validating a required skill does not execute `skills.inline_shell`
+snippets. Removing a required skill after workflow creation therefore rejects the
 dispatch without starting work; Fabric remains a separate physical placement
 question.
 

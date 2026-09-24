@@ -8,9 +8,11 @@ provenance around its result.
 
 Authority model (review follow-up):
 
-- The dispatch hard gate probes the *explicit-load* path (``skill_view``,
-  the same loader ``--skills``/``build_preloaded_skills_prompt`` uses),
-  fresh on every call with no discovery-cache TTL.
+- The dispatch hard gate probes the *explicit-load* path
+  (``skill_view(..., preprocess=False)``, the same loader ``--skills`` /
+  ``build_preloaded_skills_prompt`` uses), fresh on every call with no
+  discovery-cache TTL. Preprocessing is disabled so a validation probe
+  cannot execute ``skills.inline_shell`` snippets.
 - The cross-profile catalog (``_find_all_skills`` + plugin skill metadata)
   is provenance/diagnostics only: it classifies a rejection as
   ``skill_not_found`` vs ``skill_not_resolvable_for_profile`` and reports
@@ -299,6 +301,11 @@ def _explicit_load_ok(
     right now, ``(False, detail)`` when it cannot. Raises _LoaderUnavailable
     when the loader itself cannot be reached. No discovery cache is consulted,
     so a skill removed between planning and dispatch fails immediately.
+
+    The probe calls ``skill_view(..., preprocess=False)``. Hermes preload
+    also disables preprocessing at load time and renders later; the default
+    ``preprocess=True`` would execute ``!`cmd``` snippets when
+    ``skills.inline_shell`` is enabled.
     """
     requested = str(name).strip()
     if not requested:
@@ -324,7 +331,7 @@ def _explicit_load_ok(
         return False, f"invalid profile: {exc}"
     try:
         with _profile_scope(profile_home, constants):
-            raw = skills_tool.skill_view(requested)
+            raw = skills_tool.skill_view(requested, preprocess=False)
     except Exception as exc:
         raise _LoaderUnavailable(
             f"Hermes Agent loader failed for profile '{profile}': {exc}"
