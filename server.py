@@ -2593,25 +2593,37 @@ def hermes_controller_plan_list(mission_id: str, limit: int = 50) -> str:
 def hermes_controller_reconcile(
     mission_id: str,
     trigger_kind: str = "T5_manual",
+    confirm: bool = False,
     dry_run: bool = True,
 ) -> str:
-    """Run one shadow pass over a mission (observe → classify → smallest action).
+    """Run one controller reconciler pass (observe → classify → smallest action).
 
-    Decision output only (§17 item 6 / §7): the controller observes authoritative
+    L0/L1 (default): the controller observes authoritative
     mission/plan/delegation/runner state, classifies it via the Ops 8-class
-    taxonomy, and emits the smallest recovery action as a *proposal* —
-    ``would_execute`` is always False and the returned envelope carries the
-    ``would_be_commands`` a higher-autonomy rung would run (D10: not this slice).
+    taxonomy, and emits the smallest recovery action — nothing is dispatched.
 
     ``dry_run=True`` (default) is a truthful preview: no durable writes to any
     mission/plan/delegation/controller state (only the repo-wide Operator
     audit trail every tool call produces).
     ``dry_run=False`` records the pass (controller_plan + controller_telemetry
     + pass lease + heartbeat) and requires workspace level with direct apply
-    mode. Nothing is dispatched, completed, or approved in either mode.
+    mode.
+
+    L2 rung (opt-in, v0.12 slice-2): when the machine gate
+    ``HERMES_GPT_CONTROLLER_EXECUTE=1`` is set AND ``confirm=True`` here AND the
+    live policy is enabled with direct apply mode at workspace level, the pass
+    EXECUTES its single smallest action (a dispatch) through the existing
+    work-contract/delegation authority surface, keyed idempotently. Every other
+    combination stays decision-only with ``would_execute`` False and an additive
+    ``execution`` block naming the stable refusal reason. The rung never
+    completes, approves, weakens evidence, replans, or retries unboundedly.
     """
     return op_controller.hermes_controller_reconcile(
-        mission_id, trigger_kind, dry_run=dry_run, hermes_root=_default_hermes_root()
+        mission_id,
+        trigger_kind,
+        confirm=confirm,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
     )
 
 

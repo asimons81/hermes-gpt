@@ -3,14 +3,14 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.11.0 - Gemini Spark custom-app support, profile-aware Bot Chat and session delivery, MCP Python SDK 2 support, and the post-v0.10 security remediation](assets/hermes-gpt-v0.11.0-readme-hero.jpg)
+![Hermes GPT v0.12.0 - vNext slice 2: gated budget hard-block enforcement and the gated controller L2 rung, both default-off, with the connector surface unchanged at 137 tools](assets/hermes-gpt-v0.12.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
 ## Current status
 
-- **Repository version:** 0.11.0
-- **GitHub release target:** v0.11.0
+- **Repository version:** 0.12.0
+- **GitHub release target:** v0.12.0
 - **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
@@ -18,9 +18,20 @@
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 
 > [!IMPORTANT]
-> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.11 features unless the badge reports 0.11.0 or newer.
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.12 features unless the badge reports 0.12.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.12.0 adds
+
+v0.12.0 is the vNext slice-2 release: the two designed-but-deferred mutation paths gain a gated execution rung — budget D3 hard-block enforcement and the controller L2 rung — and both are DEFAULT OFF, so every existing read-only, dry-run, and shadow surface stays byte-identical until an operator arms the gates.
+
+1. **Budget D3 hard-block enforcement (gated, default off)** - `operator_mission_budget.enforce_budget_breaker` executes the on-crossing action set: pause the Mission through the existing transition (reason `budget_breaker`), emit one fleet-attention `INTERRUPT` envelope through the existing controller attention spool (the delivery broker delivers it — the server never self-sends), and append one `budget_events` `break` row. It acts only when the per-call `confirm`, the `HERMES_GPT_BUDGET_HARD_BLOCK=1` machine gate, live Operator policy (enabled plus `direct` apply mode), and the per-mission `hard_block_enabled` plus `pause_on_cross` flags all hold. An anti-TOCTOU policy re-snapshot before acting, idempotent repeat (`already_enforced`, at most one spool entry), fail-closed `need_attention` when the Mission is not pausable, bounded record fields, and loud spool failures are covered by tests. `hermes_budget_check` gains keyword-only `enforce` / `confirm`; the default `enforce=False` result is byte-identical to the previous read-only evaluation.
+2. **Controller L2 rung and placement-informed dispatch (gated, default off)** - `hermes_controller_reconcile` can execute at most one action per pass: the pass's smallest computed recovery action, dispatched through the existing Work Contract and delegation authority surfaces rather than a new dispatch mechanism. Execution requires the per-call `confirm`, the `HERMES_GPT_CONTROLLER_EXECUTE=1` machine gate, live Operator policy (enabled, `direct` apply mode, and `workspace` level), and `dry_run=false`. The action is idempotency-keyed and a pre-dispatch intent row is written first, so a crash reconciles fail-closed instead of re-dispatching. Any other combination stays decision-only and names a stable refusal reason; `hermes_controller_status` reports `execution_enabled` plus an executions rollup.
+3. **The §7.7 prohibitions still bind at L2** - the rung never completes work, approves anything, weakens evidence, auto-redispatchs `reconciling` work, rewrites a plan, retries without bound, places without authority, or touches secrets. `no_capable_target` still escalates through the attention spool, and high-impact authorization classes keep their human gate.
+4. **No new tools, and no change while disabled** - the connector surface stays pinned at 137 tools with no duplicate registration, the new `confirm` parameter on `hermes_controller_reconcile` defaults to `False`, and with the machine gates unset the reconcile envelope is byte-identical to v0.11.0 (`would_execute` false, no `execution` member).
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.12.0 change list.
 
 ## What v0.11.0 adds
 
@@ -133,7 +144,7 @@ python -m pip install .
 hermes-gpt
 ```
 
-The final v0.11.0 wheel and sdist are also attached to the [GitHub v0.11.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.11.0). The v0.10.0 release notes cover the vNext slice-1 surfaces (MissionPlan DAG, derived capability-manifest and mission-ledger views, budget envelope, placement scoring, failure semantics, and the shadow controller); the v0.8.0 release notes cover the Fabric surfaces (`hermes-gpt-fabric-peer`, capability-aware routing, remote evidence admission, reconciliation); the v0.9 surfaces (Missions `hermes_mission_*`, delegations `hermes_delegation_*`, live events `hermes_live_events_*`, `hermes_job_status/wait`) are documented in [docs/missions.md](docs/missions.md), [docs/delegations.md](docs/delegations.md), and [docs/live-events.md](docs/live-events.md). Operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
+The final v0.12.0 wheel and sdist are also attached to the [GitHub v0.12.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.12.0). The v0.11.0 release notes cover the opt-in Gemini Spark client profile, MCP Python SDK 2.x support, and profile-aware Bot Chat; the v0.10.0 release notes cover the vNext slice-1 surfaces (MissionPlan DAG, derived capability-manifest and mission-ledger views, budget envelope, placement scoring, failure semantics, and the shadow controller); the v0.8.0 release notes cover the Fabric surfaces (`hermes-gpt-fabric-peer`, capability-aware routing, remote evidence admission, reconciliation); the v0.9 surfaces (Missions `hermes_mission_*`, delegations `hermes_delegation_*`, live events `hermes_live_events_*`, `hermes_job_status/wait`) are documented in [docs/missions.md](docs/missions.md), [docs/delegations.md](docs/delegations.md), and [docs/live-events.md](docs/live-events.md). Operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
 
 ## Default local MCP surface
 
