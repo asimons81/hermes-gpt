@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -16,10 +17,14 @@ def _use_real_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     The repo suite isolates tests from any Hermes Agent checkout via
     ``_skill_loader_override``. Tests below that prove equivalence against the
     real loader must null that fixture and need a real checkout; upstream CI
-    without one skips instead of failing.
+    without one skips instead of failing. The ``agent-loader`` CI lane sets
+    ``HERMES_GPT_REQUIRE_AGENT_LOADER=1`` so a missing checkout fails the gate
+    instead of skipping.
     """
     monkeypatch.setattr(resolution, "_skill_loader_override", None)
     if resolution._agent_modules() is None:
+        if os.environ.get("HERMES_GPT_REQUIRE_AGENT_LOADER") == "1":
+            pytest.fail("Hermes Agent checkout is required in this CI lane")
         pytest.skip("Hermes Agent checkout not available")
 
 
@@ -102,7 +107,7 @@ class _StubSkillsTool:
     def _find_all_skills(self):
         return []
 
-    def skill_view(self, name):
+    def skill_view(self, name, file_path=None, task_id=None, preprocess=True):
         requested = str(name).strip()
         if requested in self._loadable:
             return json.dumps(
@@ -123,6 +128,36 @@ class _StubSkillsTool:
 
     def _is_skill_disabled(self, name):
         return False
+
+
+def test_validation_probe_does_not_execute_inline_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Validation must call skill_view(..., preprocess=False).
+
+    Hermes' default ``preprocess=True`` runs ``!`cmd``` snippets when
+    ``skills.inline_shell`` is enabled. The stub treats preprocess as that
+    execution gate: True writes a sentinel, False does not.
+    """
+    sentinel = tmp_path / "inline-shell-executed"
+    root = tmp_path / "hermes"
+    (root / "profiles" / "dev").mkdir(parents=True)
+    seen: list[bool] = []
+
+    class _InlineShellSkillsTool(_StubSkillsTool):
+        def skill_view(self, name, file_path=None, task_id=None, preprocess=True):
+            seen.append(bool(preprocess))
+            if preprocess:
+                sentinel.write_text("executed", encoding="utf-8")
+            return super().skill_view(name, file_path=file_path, task_id=task_id, preprocess=preprocess)
+
+    monkeypatch.setattr(resolution, "_skill_loader_override", None)
+    stub = _InlineShellSkillsTool({"payload": "has !`cmd`"})
+    monkeypatch.setattr(resolution, "_require_agent_modules", lambda: (stub, object()))
+
+    assert resolution.validate_required_skills("dev", ["payload"], root) is None
+    assert seen == [False]
+    assert not sentinel.exists()
 
 
 def test_plugin_qualified_skill_resolves_via_explicit_load(
