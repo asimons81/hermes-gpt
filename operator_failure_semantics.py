@@ -540,7 +540,7 @@ def _record_decision(db: sqlite3.Connection, decision: dict[str, Any]) -> None:
             decision.get("failure_class", ""),
             decision.get("row_key", ""),
             _sanitize(decision.get("proposed_action", ""), 200),
-            0,
+            1 if decision.get("would_execute") else 0,
             1 if decision.get("need_attention") else 0,
             decision["decision_sha256"],
             decision.get("generated_at") or _now(),

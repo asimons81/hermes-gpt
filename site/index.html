@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hermes GPT v0.11.0 | Gemini Spark + MCP SDK 2 + Bot Chat for Hermes Agent</title>
-  <meta name="description" content="Hermes GPT v0.11.0 adds a verified Gemini Spark custom-app client profile, MCP Python SDK 2 support, profile-aware Bot Chat and session delivery, and the post-v0.10 security remediation — local-first, read-only by default, 137 tools behind the connector acceptance gate.">
+  <title>Hermes GPT v0.12.0 | Gated Budget Hard-Block + Controller L2 for Hermes Agent</title>
+  <meta name="description" content="Hermes GPT v0.12.0 ships vNext slice 2: gated budget D3 hard-block enforcement and the gated controller L2 rung — both DEFAULT OFF behind per-call confirmation, a machine gate, and direct-mode Operator policy — local-first, read-only by default, 137 tools behind the connector acceptance gate.">
   <meta name="theme-color" content="#030303">
-  <meta property="og:title" content="Hermes GPT v0.11.0 | Gemini Spark + MCP SDK 2">
-  <meta property="og:description" content="Decision-only mission autonomy for Hermes Agent: MissionPlan DAGs, capability manifest + mission ledger, budget envelope, placement scoring, failure taxonomy, and a shadow controller that proposes but never acts.">
-  <meta property="og:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.11.0-readme-hero.jpg">
+  <meta property="og:title" content="Hermes GPT v0.12.0 | Gated Budget Hard-Block + Controller L2">
+  <meta property="og:description" content="Gated mission autonomy for Hermes Agent: budget D3 hard-block enforcement and the controller L2 rung, both default-off, dispatching only through the existing authority surfaces — and byte-identical to v0.11.0 while unarmed.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.12.0-readme-hero.jpg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Hermes GPT v0.11.0 | Gemini Spark + MCP SDK 2">
-  <meta name="twitter:description" content="Supervised, decision-only mission autonomy for Hermes Agent.">
-  <meta name="twitter:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.11.0-readme-hero.jpg">
+  <meta name="twitter:title" content="Hermes GPT v0.12.0 | Gated Budget Hard-Block + Controller L2">
+  <meta name="twitter:description" content="Gated, default-off mission autonomy for Hermes Agent: budget hard-block enforcement and the controller L2 rung. No new tools.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.12.0-readme-hero.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -24,7 +24,7 @@
     <header class="topbar reveal">
       <a class="brand" href="#top" aria-label="Hermes GPT Home">
         <span class="brand-mark" aria-hidden="true">HG</span>
-        <span class="brand-copy"><strong>Hermes GPT</strong><small>v0.11.0</small></span>
+        <span class="brand-copy"><strong>Hermes GPT</strong><small>v0.12.0</small></span>
       </a>
       <nav class="topnav" aria-label="Primary navigation">
         <a href="#vnext">vNext</a><a href="#how-it-works">How it works</a><a href="#simulator">Simulator</a><a href="#features">Features</a><a href="#install">Install</a>
@@ -34,45 +34,45 @@
 
     <section class="hero section-pad reveal">
       <div class="hero-copy">
-        <p class="eyebrow">v0.11.0 &bull; Local-first &bull; Multi-client MCP control plane</p>
-        <h1>Hermes Agent now answers to <span>ChatGPT, Codex, and Gemini Spark</span>.</h1>
-        <p class="lede">Hermes GPT v0.11.0 adds a verified Google Gemini Spark custom-app client profile, MCP Python SDK 2.x support, profile-aware Bot Chat and session delivery, and the post-v0.10 security remediation — all on the same local-first, read-only-default authority ladder. No new mutating surface is enabled by default.</p>
+        <p class="eyebrow">v0.12.0 &bull; Local-first &bull; Gated mission autonomy</p>
+        <h1>Hermes Agent can now <span>pause, signal, and dispatch</span> — only when you arm it.</h1>
+        <p class="lede">Hermes GPT v0.12.0 ships vNext slice 2: budget D3 hard-block enforcement and the controller L2 rung. Both are DEFAULT OFF behind a per-call confirm, a machine gate, live direct-mode Operator policy, and per-mission flags — every existing read-only, dry-run, and shadow surface stays byte-identical until you arm them.</p>
         <div class="cta-row">
-          <a class="button button-primary" href="#install"><span>Install v0.11.0</span><span class="btn-arrow" aria-hidden="true">→</span></a>
-          <a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/releases/tag/v0.11.0" rel="noreferrer noopener" target="_blank">Read release notes</a>
+          <a class="button button-primary" href="#install"><span>Install v0.12.0</span><span class="btn-arrow" aria-hidden="true">→</span></a>
+          <a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/releases/tag/v0.12.0" rel="noreferrer noopener" target="_blank">Read release notes</a>
         </div>
         <div class="hero-metrics">
-          <div class="metric-card"><span>Planning</span><strong>MissionPlan DAGs</strong><small>Deterministic, bounded decomposition over a <code>MissionSpec</code> with a validated state machine — dry-run-first, and read-only toward the Mission lifecycle.</small></div>
-          <div class="metric-card"><span>Visibility</span><strong>Manifest + Ledger</strong><small>A queryable derived capability index and a replayable, cursor-paginated per-mission event timeline. Both read-only, source-allowlisted, and audited.</small></div>
-          <div class="metric-card"><span>Autonomy</span><strong>Shadow Controller</strong><small>A shadow/observe reconciler that classifies authoritative state and proposes the smallest recovery action. <code>would_execute</code> is always false.</small></div>
+          <div class="metric-card"><span>Enforcement</span><strong>Budget Hard-Block</strong><small>A crossing envelope can pause the Mission through the existing transition, spool one fleet-attention interrupt for the delivery broker, and record one <code>budget_events</code> break row — behind per-call confirm, a machine gate, direct-mode policy, and per-mission flags.</small></div>
+          <div class="metric-card"><span>Execution</span><strong>Controller L2</strong><small>One reconcile pass can execute its single smallest recovery action through the existing contract and delegation authority surfaces — idempotency-keyed, with a pre-dispatch intent row so a crash reconciles fail-closed instead of re-dispatching.</small></div>
+          <div class="metric-card"><span>Posture</span><strong>Default Off</strong><small>Both rungs stay inert until the machine gates are armed: the reconcile envelope is byte-identical to v0.11.0, <code>would_execute</code> stays false, and the connector surface still pins 137 tools.</small></div>
         </div>
       </div>
       <div class="hero-visual reveal">
         <div class="double-bezel-outer"><div class="double-bezel-inner"><figure class="brand-image-wrapper">
-          <img src="./assets/hermes-gpt-v0.11.0-readme-hero.jpg" alt="Hermes GPT v0.11.0: the Hermes operator with a Gemini spark connected to an MCP hub, a bot chat glyph, and a v0.11.0 badge">
+          <img src="./assets/hermes-gpt-v0.12.0-readme-hero.jpg" alt="Hermes GPT v0.12.0: the Hermes operator with a golden caduceus, HUD panels for Budget Hard-Block, Controller L2 and Gated Default Off, and a v0.12.0 badge">
         </figure></div></div>
       </div>
     </section>
 
     <section class="section reveal" id="vnext">
-      <div class="section-head"><p class="eyebrow">vNext slice 1</p><h2>Decision-only autonomy. Nothing ships without you.</h2><p>Every new surface preserves the read-only / dry-run / shadow authority ladder. Derived views inform; the controller proposes; existing authority surfaces decide.</p></div>
+      <div class="section-head"><p class="eyebrow">vNext slices 1 + 2</p><h2>Gated autonomy. Nothing runs without you.</h2><p>Every slice-1 surface stays decision-only, and slice 2 adds exactly two execution rungs — both default-off, and both refusing without per-call confirm, a machine gate, direct-mode Operator policy, and (for a pause) per-mission flags.</p></div>
       <div class="bento-grid">
         <article class="bento-card col-span-2"><span class="card-num">01</span><h3>MissionPlan Decomposition</h3><p><code>hermes_plan_create/get/list/validate/decompose/review/node_transition/set_status</code>: a deterministic, bounded decomposition DAG over a MissionSpec. Plan mutations touch only the isolated plan store and are read-only with respect to the Mission lifecycle.</p></article>
         <article class="bento-card"><span class="card-num">02</span><h3>Capability Manifest + Mission Ledger</h3><p><code>hermes_capability_manifest</code> folds the Fabric node registry, Fleet authority manifest, profile toolsets/skills, and provider manifests into one queryable index. <code>hermes_mission_ledger</code> is a merged, replayable, cursor-paginated event timeline. No mutation path exists.</p></article>
-        <article class="bento-card"><span class="card-num">03</span><h3>Budget Envelope (dry-run)</h3><p><code>hermes_budget_set/get/check/record</code>: a per-mission spend envelope with a read-only <code>budget_check</code> evaluation surface. The hard-block path is designed but flag-default-off in this slice.</p></article>
-        <article class="bento-card col-span-2"><span class="card-num">04</span><h3>Placement Scoring (dry-run)</h3><p><code>hermes_placement_score/candidates/get/list</code>: deterministic hard filters then soft scores over the derived capability index. Decision output only — <code>would_assign</code> is always <code>False</code>; actual dispatch stays on the existing contract, fleet, and delegation authority surfaces.</p></article>
-        <article class="bento-card col-span-3"><span class="card-num">05</span><h3>Failure Semantics + Recovery Matrix</h3><p>An 8-class taxonomy classifies an authoritative observation envelope and proposes the deterministic smallest-first recovery action. <code>would_execute</code> is always <code>False</code>; the sole durable write is a <code>controller_plan</code> row.</p></article>
-        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Shadow Controller + Telemetry</h3><p><code>hermes_controller_reconcile/status/lease_list/trigger</code>: a T1–T5 trigger model, per-mission pass leases (TTL, heartbeat-renewed, crash-reclaimed), and a single shadow reconcile pass that emits proposals only. Telemetry tiers GREEN / YELLOW / RED; RED spools a fleet-attention interrupt to the delivery-broker lane.</p></article>
+        <article class="bento-card"><span class="card-num">03</span><h3>Budget Envelope + Gated Hard-Block</h3><p><code>hermes_budget_set/get/check/record</code>: a per-mission spend envelope with a read-only <code>budget_check</code> evaluation surface. v0.12 adds the gated D3 enforcement rung: when the flags are armed, a crossing pauses the Mission through the existing transition, spools one fleet-attention interrupt, and records one <code>budget_events</code> break row.</p></article>
+        <article class="bento-card col-span-2"><span class="card-num">04</span><h3>Placement Scoring</h3><p><code>hermes_placement_score/candidates/get/list</code>: deterministic hard filters then soft scores over the derived capability index. Scoring is unchanged and still decision-only; <code>would_assign</code> is true only for a dispatch that actually happened under the v0.12 L2 gates, and real dispatch stays on the existing contract, fleet, and delegation authority surfaces.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">05</span><h3>Failure Semantics + Recovery Matrix</h3><p>An 8-class taxonomy classifies an authoritative observation envelope and proposes the deterministic smallest-first recovery action, recorded on a <code>controller_plan</code> row. That classification surface stays decision-only; executing the proposed action is the separate, default-off v0.12 L2 rung.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Shadow Controller + Telemetry</h3><p><code>hermes_controller_reconcile/status/lease_list/trigger</code>: a T1–T5 trigger model, per-mission pass leases (TTL, heartbeat-renewed, crash-reclaimed), and a single reconcile pass that proposes the smallest recovery action — and, only with the v0.12 L2 gates armed, executes that one action through the existing authority surfaces. Telemetry tiers GREEN / YELLOW / RED; RED spools a fleet-attention interrupt to the delivery-broker lane.</p></article>
       </div>
     </section>
 
     <section class="section reveal" id="how-it-works">
-      <div class="section-head"><p class="eyebrow">System Architecture</p><h2>Observe, classify, propose. Humans decide.</h2><p>The controller watches authoritative state through derived views and proposes the smallest recovery action. It never dispatches, completes, or approves.</p></div>
+      <div class="section-head"><p class="eyebrow">System Architecture</p><h2>Observe, classify, propose. Execute only when armed.</h2><p>The controller watches authoritative state through derived views and proposes the smallest recovery action. v0.12 adds a gated L2 rung that can execute that single action — it never completes, approves, or rewrites a plan.</p></div>
       <div class="timeline-container">
         <div class="timeline-step"><span class="step-num">01</span><strong>Client Request</strong><p>ChatGPT, Codex, Cursor, Claude Desktop, or another trusted MCP client submits a bounded request to Hermes GPT.</p></div>
         <div class="timeline-step"><span class="step-num">02</span><strong>Observe</strong><p>The controller observes authoritative mission, plan, delegation, and runner state through the derived capability manifest and mission ledger.</p></div>
-        <div class="timeline-step"><span class="step-num">03</span><strong>Classify + Propose</strong><p>The 8-class failure taxonomy classifies observed state and the recovery matrix emits the smallest recovery action as a proposal — <code>would_execute</code> always false.</p></div>
-        <div class="timeline-step"><span class="step-num">04</span><strong>Human Decision</strong><p>Dispatch, completion, and approval remain on the existing authority surfaces: Work Contracts, Fabric, delegations, and Owner-gated final approval.</p></div>
+        <div class="timeline-step"><span class="step-num">03</span><strong>Classify + Propose</strong><p>The 8-class failure taxonomy classifies observed state and the recovery matrix emits the smallest recovery action as a proposal. <code>would_execute</code> stays false unless the v0.12 L2 gates are armed — and is truthful when they are.</p></div>
+        <div class="timeline-step"><span class="step-num">04</span><strong>Human Decision</strong><p>Dispatch, completion, and approval remain on the existing authority surfaces: Work Contracts, Fabric, delegations, and Owner-gated final approval. The gated L2 rung dispatches through these same surfaces rather than around them.</p></div>
       </div>
     </section>
 
@@ -99,7 +99,7 @@
         <article class="bento-card"><span class="card-num">03</span><h3>Missions, Delegations + Live Events</h3><p>v0.9 adds the first-class durable Mission runtime with Owner-gated final approval, unified delegation lineage, a durable event bus with a WebSocket stream, and runner-neutral job supervision.</p></article>
         <article class="bento-card col-span-2"><span class="card-num">04</span><h3>Fabric Cross-Machine Execution</h3><p>v0.8 Fabric: authenticated peers, capability-aware <code>auto</code> routing, hash-verified remote evidence and artifacts, and same-attempt reconciliation — with the coordinator authoritative.</p></article>
         <article class="bento-card col-span-3"><span class="card-num">05</span><h3>OpenAI Secure MCP Tunnel + Bounded Export</h3><p>Supported OpenAI products reach loopback Hermes GPT through an outbound-only private tunnel path, and <code>hermes_export_file</code> provides workspace-authorized binary transfer with denied-path enforcement and size caps.</p></article>
-        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Flight Deck + Connector Gate</h3><p>Mission Control, event history, review evidence, diagnostics, recovery tools, and Fabric routing views keep long-running autonomy inspectable. The connector acceptance gate pins the merged v0.11.0 surface at 137 tools with no duplicate registration.</p></article>
+        <article class="bento-card col-span-3"><span class="card-num">06</span><h3>Flight Deck + Connector Gate</h3><p>Mission Control, event history, review evidence, diagnostics, recovery tools, and Fabric routing views keep long-running autonomy inspectable. The connector acceptance gate pins the merged v0.12.0 surface at 137 tools with no duplicate registration; the v0.12 execution rungs add no tools and stay invisible while their machine gates are unset.</p></article>
       </div>
     </section>
 
@@ -119,8 +119,9 @@ hermes-gpt</code></pre></div>
     </section>
 
     <section class="section reveal" id="changelog">
-      <div class="section-head"><p class="eyebrow">Changelog</p><h2>Release history.</h2><p>The current release is v0.11.0.</p></div>
+      <div class="section-head"><p class="eyebrow">Changelog</p><h2>Release history.</h2><p>The current release is v0.12.0.</p></div>
       <div class="timeline-container">
+        <div class="timeline-step"><span class="step-num">v0.12.0</span><strong>Gated Budget Hard-Block + Controller L2</strong><p>vNext slice 2: budget D3 hard-block enforcement (pause through the existing transition, one fleet-attention interrupt for the delivery broker, one <code>budget_events</code> break row) and the controller L2 rung (at most one smallest recovery action per pass, dispatched through the existing authority surfaces, intent recorded before dispatch). Both are default-off behind per-call confirm plus a machine gate, direct-mode Operator policy, and per-mission flags — and byte-identical to v0.11.0 while unarmed. 137 tools; no new mutating surface by default.</p></div>
         <div class="timeline-step"><span class="step-num">v0.11.0</span><strong>Gemini Spark + MCP SDK 2 + Bot Chat</strong><p>Opt-in Gemini Spark custom-app client profile (verified end-to-end), MCP Python SDK 2.x support with SDK 1 retained, profile-aware Bot Chat and session delivery, fleet loopback Agent Cards, and the post-v0.10 security remediation. 137 tools; no new mutating surface by default.</p></div>
         <div class="timeline-step"><span class="step-num">v0.10.0</span><strong>vNext — Supervised Mission Controller</strong><p>MissionPlan decomposition DAGs, read-only capability-manifest and mission-ledger views, a dry-run budget envelope, placement scoring, an 8-class failure taxonomy with recovery matrix, and a shadow/observe controller with GREEN/YELLOW/RED telemetry. 27 new tools (137 total); none can mutate a Mission, dispatch, or approve.</p></div>
         <div class="timeline-step"><span class="step-num">v0.9.0</span><strong>Missions + Delegations + Live Events</strong><p>First-class durable Missions with Owner-gated final approval, unified delegation lineage across runners, a durable live-event bus with WebSocket stream, runner-neutral job supervision, and the bounded Finance bridge.</p></div>

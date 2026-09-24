@@ -16,9 +16,9 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.11.0**. The GitHub release target is `v0.11.0`; verify the public GitHub Releases and PyPI channels independently.
+Repository version: **0.12.0**. The GitHub release target is `v0.12.0`; verify the public GitHub Releases and PyPI channels independently.
 
-PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.11 Gemini Spark / Bot Chat / SDK 2 behavior requires a published PyPI version of 0.11.0 or newer; v0.10 vNext derived views / controller surfaces and v0.9 Mission/delegation/live-event behavior require 0.10.0 (or 0.9.0) or newer, respectively.
+PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.12 gated budget-enforcement and controller-L2 behavior requires a published PyPI version of 0.12.0 or newer *and* the corresponding machine gates armed; v0.11 Gemini Spark / Bot Chat / SDK 2 behavior requires a published PyPI version of 0.11.0 or newer; v0.10 vNext derived views / controller surfaces and v0.9 Mission/delegation/live-event behavior require 0.10.0 (or 0.9.0) or newer, respectively.
 
 ## Current operational docs
 

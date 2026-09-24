@@ -749,3 +749,49 @@ def test_validate_requirement_flag():
     assert (
         pl.validate_requirement({"skills": [], "authorization_class": "bogus"}) is False
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.12 slice-2 (Pack B): L2 dispatch view (thin wiring only — the scoring math,
+# filters, and no_capable_target classification are untouched).
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_view_would_assign_truth_table():
+    decision = pl.build_decision(
+        "msn-1",
+        "node-a",
+        _req(profile="dev"),
+        [_target("profile:dev", name="dev", allowed_profiles=["dev"])],
+        {"priority": 0},
+    )
+    assert decision["would_assign"] is False, "the placement decision stays dry-run"
+
+    assigned = pl.dispatch_view(decision, dispatched=True)
+    assert assigned["would_assign"] is True
+    assert assigned["classification"] == decision["classification"]
+    assert assigned["top_candidate"] == "profile:dev"
+    assert assigned["candidate_count"] == len(decision["candidate_set"])
+    assert assigned["decision_sha256"] == decision["decision_sha256"]
+
+    refused = pl.dispatch_view(
+        decision, dispatched=False, idempotency_key="k" * 64, refused_reason="dry_run"
+    )
+    assert refused["would_assign"] is False
+    assert refused["refused_reason"] == "dry_run"
+    assert refused["idempotency_key"] == "k" * 64
+
+
+def test_dispatch_view_empty_candidate_set_and_inv9_bounds():
+    decision = pl.build_decision("msn-1", "node-a", _req(profile="dev"), [], {})
+    assert decision["classification"] == pl.CLASS_NO_TARGET
+    view = pl.dispatch_view(decision, dispatched=False, refused_reason="no_capable_target")
+    assert view["would_assign"] is False
+    assert view["top_candidate"] == ""
+    assert view["candidate_count"] == 0
+    assert view["optout_count"] == 0
+    # INV-9: only bounded fields cross the surface.
+    assert all(
+        isinstance(value, (str, int, bool)) and len(str(value)) <= 128
+        for value in view.values()
+    )

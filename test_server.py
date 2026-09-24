@@ -1603,7 +1603,7 @@ def test_v09_connector_surface_acceptance(monkeypatch):
     assert len(set(names)) == len(names), "duplicate tool registration"
 
     # serverInfo.version must track the checkout version, not the SDK version.
-    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.11.0"
+    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.12.0"
 
 
 def test_history_enabled_connector_surface_acceptance(monkeypatch):
@@ -1636,4 +1636,4 @@ def test_history_enabled_connector_surface_acceptance(monkeypatch):
         schema = enabled_by_name[name].model_dump(by_alias=True)["inputSchema"]
         assert schema["properties"]["profile"]["default"] == "default"
 
-    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.11.0"
+    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.12.0"
