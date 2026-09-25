@@ -216,6 +216,12 @@ Work Contracts add a structured, verifiable work-order layer through `hermes_con
 | `hermes_contract_validate(contract_json)` | read-only by default | Validate completion from observed evidence. |
 | `hermes_contract_status(contract_json)` | read-only | Link the contract to bounded observed run/delegation state. |
 
+For contracts that carry `capability_req`, dispatch revalidates the requested
+skills against the assigned profile's effective Hermes Agent loader immediately
+before invoking the runner. This is a live guard against profile changes after
+planning; rejection is non-mutating. Fabric eligibility remains separate from
+logical profile skill ownership.
+
 ### Validation model
 
 A worker's claim that work is complete is never proof by itself. Validation inspects observed state such as runs, artifacts, tests, audit evidence, and required review evidence.
@@ -270,6 +276,15 @@ Default caps, unless explicitly overridden by the supported environment variable
 - 3 concurrent stages per workflow;
 - 4 concurrent stages per board;
 - 12 stages per workflow.
+
+A Swarm stage may carry an optional `capability_req` with the logical profile and
+required skills. The generated Work Contract preserves that requirement, and
+dispatch revalidates it against the live Hermes Agent loader before invoking a
+runner. The probe uses `skill_view(..., preprocess=False)`, matching Hermes
+preload, so validating a required skill does not execute `skills.inline_shell`
+snippets. Removing a required skill after workflow creation therefore rejects the
+dispatch without starting work; Fabric remains a separate physical placement
+question.
 
 Failed validation can return a stage for one bounded rework retry. A second failure blocks the stage for human attention.
 

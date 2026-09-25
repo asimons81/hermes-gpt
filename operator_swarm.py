@@ -740,6 +740,15 @@ def _stage_contract(workflow: dict[str, Any], stage: dict[str, Any], *, task_id:
         "constraints": _string_list(stage.get("constraints") or [], field="constraints"),
         "authorization": auth,
     }
+    # Carry the logical profile capability requirement into the Work Contract.
+    # The contract dispatch boundary then revalidates it against the live Agent
+    # loader immediately before invoking a runner, including after planning
+    # when a profile skill may have been removed.
+    capability_req = stage.get("capability_req")
+    if capability_req is not None:
+        if not isinstance(capability_req, dict):
+            raise TypeError("stage capability_req must be an object")
+        contract["capability_req"] = dict(capability_req)
     if execution is not None:
         contract["execution"] = execution
     return contract
@@ -1296,11 +1305,11 @@ def hermes_swarm_stage_dispatch(
 
     # Record the stage state transition on a real dispatch.
     st = _stage_state(record, stage_id)
-    if st is not None and (not effective or changed):
+    if st is not None and changed:
         st["task_id"] = task_id
         st["contract_sha256"] = sha
         st["worktree_plan"] = plan
-        if changed and not effective:
+        if not effective:
             st["status"] = STAGE_STATUS_RUNNING
             st["started_at"] = datetime.now(timezone.utc).isoformat()
         record["updated_at"] = datetime.now(timezone.utc).isoformat()

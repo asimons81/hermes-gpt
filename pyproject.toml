@@ -43,6 +43,7 @@ py-modules = [
   "operator_policy",
   "operator_cron",
   "operator_skills",
+  "operator_skill_resolution",
   "operator_config",
   "operator_workspace",
   "operator_export",

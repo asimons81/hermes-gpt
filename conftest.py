@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+import operator_skill_resolution as _skill_resolution
+
 _ISOLATED_ENV_VARS = (
     "HERMES_GPT_OPERATOR_ENABLED",
     "HERMES_GPT_OPERATOR_LEVEL",
@@ -45,6 +47,45 @@ _ISOLATED_ENV_VARS = (
 
 # Session-scoped hermetic Hermes data root. Lives for the pytest process only.
 _HERMES_SANDBOX: Path | None = None
+
+
+def _test_skill_loader(profile: str, root: Path):
+    """Small Agent-loader-shaped fixture provider for hermetic unit tests.
+
+    The production adapter delegates to ``tools.skills_tool``. The repository
+    tests intentionally do not require a separate Hermes Agent checkout, so
+    they inject equivalent fixture data at the adapter boundary.
+    """
+    home = root if profile == "default" else root / "profiles" / profile
+    skills_root = home / "skills"
+    if not skills_root.is_dir():
+        return []
+    entries = []
+    for skill_md in sorted(skills_root.rglob("SKILL.md")):
+        try:
+            text = skill_md.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        frontmatter = {}
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            if len(parts) == 3:
+                try:
+                    import yaml
+
+                    value = yaml.safe_load(parts[1])
+                    if isinstance(value, dict):
+                        frontmatter = value
+                except Exception:  # noqa: BLE001, S110 - test fixture parser
+                    pass
+        entries.append(
+            {
+                "name": str(frontmatter.get("name") or skill_md.parent.name),
+                "category": frontmatter.get("category"),
+                "description": frontmatter.get("description"),
+            }
+        )
+    return entries
 
 
 def _hermes_sandbox() -> Path:
@@ -121,3 +162,6 @@ def isolate_operator_environment(monkeypatch):
     for name in _ISOLATED_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HERMES_HOME", str(_hermes_sandbox()))
+    monkeypatch.setattr(
+        _skill_resolution, "_skill_loader_override", _test_skill_loader
+    )

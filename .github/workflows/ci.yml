@@ -81,6 +81,32 @@ jobs:
       - name: Check whitespace
         run: git diff --check
 
+  agent-loader:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          path: hermes-agent-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]" httpx
+      - name: Prove the real Agent loader is importable
+        env:
+          HERMES_AGENT_ROOT: ${{ github.workspace }}/hermes-agent-src
+        run: >-
+          python -c "import operator_skill_resolution as r;
+          assert r._agent_modules() is not None, 'Hermes Agent loader missing'"
+      - name: Run skill-resolution tests against the real Agent loader
+        env:
+          HERMES_HTTP_TEST: "1"
+          HERMES_AGENT_ROOT: ${{ github.workspace }}/hermes-agent-src
+          HERMES_GPT_REQUIRE_AGENT_LOADER: "1"
+        run: python -m pytest -q test_operator_skill_resolution.py
+
   compatibility:
     runs-on: ubuntu-latest
     steps:
@@ -162,7 +188,7 @@ jobs:
           }
 
   build:
-    needs: [test, compatibility, lint, web, windows-docs]
+    needs: [test, agent-loader, compatibility, lint, web, windows-docs]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
