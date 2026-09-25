@@ -1,5 +1,0 @@
-mcp[cli]>=1.28.1,<3
-uvicorn
-packaging>=23
-cryptography>=42
-pyyaml

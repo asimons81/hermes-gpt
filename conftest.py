@@ -7,6 +7,7 @@ real ``~/.hermes/config.yaml`` (including its ``a2a_agents``). The sandbox
 provides an empty config so injected runners stay authoritative.
 """
 
+import mimetypes as _mimetypes
 import os
 import tempfile
 from pathlib import Path
@@ -21,6 +22,10 @@ _ISOLATED_ENV_VARS = (
     "HERMES_GPT_OPERATOR_ALLOWED_PROFILES",
     "HERMES_GPT_OWNER_ACK",
     "HERMES_GPT_OWNER_ACTIVE",
+    # Runner confinement is a host deployment posture (this host exports it
+    # with bwrap installed); tests that exercise confinement set it
+    # explicitly, so the suite must not inherit the invoking shell's flag.
+    "HERMES_GPT_ENABLE_RUNNER_CONFINEMENT",
     "HERMES_GPT_ENABLE_CODEX_RUNNER",
     "HERMES_GPT_ALLOW_CODEX_WRITE",
     "HERMES_GPT_CODEX_TOOLSET",
@@ -90,8 +95,6 @@ else:
 # module fell back to application/octet-stream). CI images ship the full DB.
 # Seed the standard office types so the local suite behaves like a standard
 # desktop/CI host; this only ADDS mappings and never weakens an assertion.
-import mimetypes as _mimetypes
-
 _OFFICE_MIME = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",

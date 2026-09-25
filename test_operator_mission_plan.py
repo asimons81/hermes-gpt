@@ -168,7 +168,7 @@ def test_plan_create_replaces_version_on_update(hermes_root):
 
 
 def test_plan_requires_existing_mission(hermes_root):
-    d = _j(plan.hermes_plan_decompose("msn-plan", hermes_root=hermes_root))  # fails; build a manual plan instead
+    _j(plan.hermes_plan_decompose("msn-plan", hermes_root=hermes_root))  # fails; build a manual plan instead
     out = _j(plan.hermes_plan_create("msn-nope", _operator_plan_dag().replace("msn-plan", "msn-nope"), confirm=True, dry_run=False, hermes_root=hermes_root))
     assert out["success"] is False
 

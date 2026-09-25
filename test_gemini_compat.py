@@ -421,6 +421,7 @@ def test_gemini_discovery_contract(gemini_client: TestClient) -> None:
     assert body["token_endpoint_auth_methods_supported"] == [
         "client_secret_post",
         "client_secret_basic",
+        "none",
     ]
     assert body["code_challenge_methods_supported"] == ["S256"]
     assert set(body["scopes_supported"]) == SUPPORTED_SCOPES
@@ -1026,13 +1027,13 @@ def test_unregistered_client_token_is_rejected(tmp_path: Path) -> None:
         redirect_uri=PRIMARY_REDIRECT_URI,
         scope=SCOPE,
         resource=config.resource,
-        code_challenge="",
+        code_challenge=s256(PKCE_VERIFIER),
     )
     registered_token = standalone.exchange_authorization_code(
         code=registered_code,
         client_id=PRIMARY_CLIENT_ID,
         redirect_uri=PRIMARY_REDIRECT_URI,
-        code_verifier="",
+        code_verifier=PKCE_VERIFIER,
     )["access_token"]
     # Bind each verdict to a bool first: a failure message must never carry the
     # token value that pytest's introspection would otherwise echo.

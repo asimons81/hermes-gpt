@@ -47,7 +47,6 @@ import hashlib
 import json
 import os
 import re
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -416,6 +415,11 @@ def _canonical_contract(raw: Any) -> tuple[str, dict[str, Any]]:
     return canonical, contract
 
 
+def _json_sha256(value: Any) -> str:
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _contract_sha256(canonical_json: str) -> str:
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
@@ -643,7 +647,11 @@ def _observed_audit(
     hermes_root: Path,
     limit: int = _MAX_REVIEW_EVIDENCE_SCAN,
 ) -> list[dict[str, Any]]:
-    """Read audit evidence only from the selected Hermes root."""
+    """Read audit evidence only from the selected Hermes root.
+
+    ``limit=0`` streams every record with no tail eviction so a flood of
+    benign same-task records cannot hide an earlier forbidden action.
+    """
     log_path = _resolve_root(hermes_root) / "logs" / "hermes_gpt_operator_audit.jsonl"
     records: list[dict[str, Any]] = []
     try:
@@ -657,7 +665,9 @@ def _observed_audit(
                     records.append(record)
     except OSError:
         return []
-    return records[-limit:] if limit > 0 else records
+    if limit <= 0:
+        return records
+    return records[-limit:]
 
 
 # ---------------------------------------------------------------------------
@@ -992,6 +1002,38 @@ def _attributable_identities(contract: dict[str, Any]) -> set[str]:
     return identities
 
 
+def _remote_forbidden_evidence(
+    task_id: str, hermes_root: Path
+) -> tuple[list[dict[str, Any]], bool]:
+    """Return admitted Fabric forbidden checks plus observer availability."""
+    try:
+        backend = op_runners.get_backend("fabric")
+    except LookupError:
+        return [], False
+    observer = getattr(backend, "observed_forbidden_checks", None)
+    if not callable(observer):
+        return [], False
+    try:
+        value = observer(task_id, hermes_root=hermes_root)
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return [], False
+    if not isinstance(value, list):
+        return [], False
+    return [item for item in value if isinstance(item, dict)], True
+
+
+def _has_remote_fabric_run(task_id: str, hermes_root: Path) -> bool | None:
+    """Return remote-run presence, or None when Fabric observation is unavailable."""
+    try:
+        runs = op_runners.observed_runs(task_id, hermes_root=hermes_root)
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return None
+    return any(
+        isinstance(run, dict) and str(run.get("scope") or "").startswith("fabric:")
+        for run in runs
+    )
+
+
 def _auto_fabric_lineage(
     contract: dict[str, Any],
     contract_sha256: str,
@@ -1049,13 +1091,14 @@ def _check_forbidden(
 
     identities = _attributable_identities(contract)
     task_id = contract["task_id"]
-    labels = [fa["action"].lower() for fa in forbidden]
     signals: list[dict[str, Any]] = []
 
     # Audit trail scan (D5): scope strictly to this contract's task identity.
     # Profile-only matching allowed an unrelated concurrent contract to fail this
     # one; records without a matching task_id are intentionally ignored.
-    for rec in _observed_audit(hermes_root):
+    # No tail limit (limit=0): a flood of benign same-task records must not
+    # evict an earlier forbidden action (11b43bb tail-evasion guard).
+    for rec in _observed_audit(hermes_root, limit=0):
         if str(rec.get("task_id") or "") != task_id:
             continue
         profile = str(rec.get("profile") or "")
@@ -1096,15 +1139,41 @@ def _check_forbidden(
             except OSError:
                 continue
 
+    expected_policy_sha = _json_sha256(forbidden)
+    remote_checks, remote_evidence_available = _remote_forbidden_evidence(task_id, hermes_root)
+    mismatched_remote = [
+        check for check in remote_checks if str(check.get("policy_sha256") or "") != expected_policy_sha
+    ]
+    matching_remote = [
+        check for check in remote_checks if str(check.get("policy_sha256") or "") == expected_policy_sha
+    ]
+    for remote in matching_remote:
+        if remote.get("status") == "FAIL":
+            for item in remote.get("signals") or []:
+                if isinstance(item, dict):
+                    signals.append(dict(item))
     if signals:
         detail = "; ".join(f"{s['action']} ({s['class']}) via {s['tool']}" for s in signals[:5])
         return {"kind": "forbidden", "status": "FAIL", "detail": f"forbidden action detected: {detail}", "evidence": signals[:10]}
+    if mismatched_remote:
+        return {
+            "kind": "forbidden",
+            "status": "UNVERIFIED",
+            "detail": "remote Fabric forbidden-action evidence policy does not match this contract",
+        }
+    if matching_remote:
+        if any(check.get("status") != "PASS" for check in matching_remote):
+            return {
+                "kind": "forbidden",
+                "status": "UNVERIFIED",
+                "detail": "remote Fabric forbidden-action evidence is not definitive",
+            }
+        return {
+            "kind": "forbidden",
+            "status": "PASS",
+            "detail": "no forbidden actions detected in coordinator and admitted peer audit evidence",
+        }
 
-    # Fabric v1 admits bounded remote run-state evidence but does not admit a
-    # coordinator-verifiable forbidden-action audit trail. New dispatches with
-    # non-empty forbidden_actions are rejected at the Fabric boundary. Historical
-    # explicit-Fabric contracts therefore remain unverified regardless of whether
-    # the observer is currently healthy: absence of remote evidence is not proof.
     execution = contract.get("execution")
     execution_backend = (
         str(execution.get("backend") or "").strip().lower()
@@ -1112,11 +1181,19 @@ def _check_forbidden(
         else ""
     )
     if execution_backend == "fabric":
-        return {
-            "kind": "forbidden",
-            "status": "UNVERIFIED",
-            "detail": "remote Fabric execution has no coordinator-verifiable forbidden-action evidence",
-        }
+        if not remote_evidence_available:
+            detail = (
+                "remote Fabric execution has no coordinator-verifiable "
+                "forbidden-action evidence: remote Fabric forbidden-action "
+                "evidence is unavailable"
+            )
+        else:
+            detail = (
+                "remote Fabric execution has no coordinator-verifiable "
+                "forbidden-action evidence: remote Fabric run lacks admitted "
+                "forbidden-action evidence"
+            )
+        return {"kind": "forbidden", "status": "UNVERIFIED", "detail": detail}
 
     # Auto contracts need durable placement lineage before absence can be trusted.
     # A missing/unreadable journal is itself unverified; a competing local runner

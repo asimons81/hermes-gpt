@@ -8,7 +8,7 @@ persistence are all exercised end-to-end without any LLM call.
 
 from __future__ import annotations
 
-import os
+import json
 import sys
 import threading
 import time
@@ -204,7 +204,9 @@ def test_tool_rows_are_truncated_and_redacted(client, monkeypatch):
     db = ui_chat._session_db()
     sid = "tool-session-1"
     db.create_session(sid, "webui")
-    long_result = "sk-abcdef0123456789 " + "x" * 500
+    # Key material ≥20 payload chars: the threshold the canonical redactor
+    # (operator_policy.redact_output via ui_security) is pinned to.
+    long_result = "sk-abcdef0123456789abcdef01 " + "x" * 500
     db.append_message(sid, "assistant", content="using tools", tool_calls='[{"id": "c1", "function": {"name": "read_file", "arguments": "{}"}}]')
     db.append_message(sid, "tool", content=long_result, tool_call_id="c1", tool_name="read_file")
 
@@ -212,11 +214,84 @@ def test_tool_rows_are_truncated_and_redacted(client, monkeypatch):
     messages = resp.json()["data"]["messages"]
     tool_msg = next(m for m in messages if m["role"] == "tool")
     assert "sk-" not in tool_msg["tool_result"]
-    assert "[REDACTED]" in tool_msg["tool_result"]
+    assert "[REDACTED_OPENAI_KEY]" in tool_msg["tool_result"]
     assert len(tool_msg["tool_result"]) <= 64 + len("\n…[truncated]")
 
 
 # ── Chat streaming ────────────────────────────────────────────────────────
+
+# ── A2: redaction boundary on the SSE path ───────────────────────────
+
+def _turn_with_callbacks():
+    turn = ui_chat.Turn(session_id="redact-s", turn_id="t-redact", holder="h")
+    return turn, ui_chat._make_stream_callbacks(turn)
+
+
+def _token_text(turn):
+    return "".join(e[2].get("delta", "") for e in turn.events if e[1] == "token")
+
+
+def test_sse_token_secret_redacted():
+    turn, (on_token, _on_reasoning, _ts, _tc) = _turn_with_callbacks()
+    on_token("key sk-abcdef0123456789abcdef01 now")
+    turn.flush_deltas()
+    assert "sk-abcdef" not in _token_text(turn)
+    assert "[REDACTED_OPENAI_KEY]" in _token_text(turn)
+
+
+def test_sse_secret_split_across_deltas_does_not_reassemble():
+    """D9: a secret split across consecutive token deltas must never
+    reassemble in the browser (redaction regexes need the whole run in one
+    string, so the bridge holds back a straddle-safe tail)."""
+    secret = "AKIA" + "BCDEFGHIJKLMNOP"  # 20-char AWS-style key
+    turn, (on_token, _on_reasoning, _ts, _tc) = _turn_with_callbacks()
+    # Fill the buffer past the hold-back window, then stream the secret one
+    # character per delta, then keep streaming past it so the hold-back
+    # window advances across the secret boundary.
+    on_token("a" * 300)
+    for ch in secret:
+        on_token(ch)
+    on_token("b" * 300)
+    turn.flush_deltas()
+    text = _token_text(turn)
+    assert "AKIA" not in text
+    assert "AKIA" not in json.dumps([e[2] for e in turn.events])
+    assert "[REDACTED_AWS_KEY]" in text
+
+
+def test_sse_reasoning_channel_redacts_too():
+    turn, (_on_token, on_reasoning, _ts, _tc) = _turn_with_callbacks()
+    on_reasoning("thinking about Bearer abcdefghijklmnopqrstuvwxyz123456 done")
+    turn.flush_deltas()
+    text = "".join(e[2].get("delta", "") for e in turn.events if e[1] == "reasoning")
+    assert "abcdefghijklmnopqrstuvwxyz123456" not in text
+    assert "Bearer [REDACTED]" in text
+
+
+def test_sse_content_mode_preserves_conversation_text():
+    """token/reasoning deltas are the user's own conversation: PII and paths
+    survive (content mode); only secret shapes are removed."""
+    turn, (on_token, _on_reasoning, _ts, _tc) = _turn_with_callbacks()
+    on_token("read /home/tony/.hermes/notes.md — mail tony@example.com — ok")
+    turn.flush_deltas()
+    text = _token_text(turn)
+    assert "/home/tony/.hermes/notes.md" in text
+    assert "tony@example.com" in text
+
+
+def test_publish_chokepoint_redacts_tool_and_error_events():
+    """Every SSE data line goes through ui_security at Turn.publish — tool
+    summaries, error messages, and secret-keyed values cannot skip it."""
+    turn, _ = _turn_with_callbacks()
+    turn.publish("tool_end", {"call_id": "c1", "name": "t", "status": "ok",
+                              "summary": "AKIA" + "BCDEFGHIJKLMNOP"})
+    turn.publish("error", {"code": "INTERNAL", "message": "auth failed Bearer abcdefghijklmnopqrstuvwxyz123456"})
+    turn.publish("meta", {"session_id": "s", "password": "hunter2hunter2"})
+    blob = json.dumps([e[2] for e in turn.events])
+    assert "AKIA" not in blob
+    assert "abcdefghijklmnopqrstuvwxyz123456" not in blob
+    assert "hunter2hunter2" not in blob
+
 
 def test_chat_stream_full_sequence(client, monkeypatch):
     install_stub_agent(monkeypatch)
@@ -377,9 +452,12 @@ def test_tool_brief_masks_prompt_content():
 
 
 def test_redact_text_masks_credentials():
-    assert "sk-abcdef0123456789" not in ui_chat._redact_text("key sk-abcdef0123456789 here")
-    assert "[REDACTED]" in ui_chat._redact_text("key sk-abcdef0123456789 here")
-    assert ui_chat._redact_text("Bearer abcdefghijklmnopqrstuvwxyz123456") == "[REDACTED]"
+    # Secret shapes and thresholds come from operator_policy.redact_output
+    # (single source) via ui_security.redact_browser — not a local list.
+    key = "sk-abcdef0123456789abcdef01"  # ≥20 payload chars: canonical threshold
+    assert key not in ui_chat._redact_text(f"key {key} here")
+    assert "[REDACTED_OPENAI_KEY]" in ui_chat._redact_text(f"key {key} here")
+    assert ui_chat._redact_text("Bearer abcdefghijklmnopqrstuvwxyz123456") == "Bearer [REDACTED]"
     assert "/home/u/.hermes/secrets/token.json" not in ui_chat._redact_text("path /home/u/.hermes/secrets/token.json")
 
 
@@ -390,3 +468,57 @@ def test_error_envelope_shape():
     assert resp.status_code == 409
     body = _json.loads(resp.body)
     assert body == {"ok": False, "error": {"code": "TURN_IN_PROGRESS", "message": "busy"}}
+
+
+
+# ── B1/B7: canonical shapes on the streaming path; exactly-once redaction ──
+
+def test_sse_canonical_secret_shapes_never_reassemble():
+    """B1: every canonical shape is redacted on the token channel, whole AND
+    when split one character per delta (the markers ghp_/xoxb-/AIza used to
+    slip through both the hold-back buffer and the shape table)."""
+    families = [
+        ("ghp_" + "A" * 40, "[REDACTED_GITHUB_TOKEN]"),
+        ("xoxb-" + "1234567890-ABCDEF", "[REDACTED_SLACK_TOKEN]"),
+        ("AIza" + "a" * 35, "[REDACTED_GOOGLE_KEY]"),
+        ("sk-ant-" + "b" * 30, "[REDACTED_ANTHROPIC_KEY]"),
+        ("ASIA" + "D" * 16, "[REDACTED_AWS_KEY]"),
+        (
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXkAAA\n-----END OPENSSH PRIVATE KEY-----",
+            "[REDACTED_PRIVATE_KEY]",
+        ),
+    ]
+    for secret, marker in families:
+        # Whole in one delta.
+        turn, (on_token, _on_reasoning, _ts, _tc) = _turn_with_callbacks()
+        on_token(f"prefix {secret} suffix")
+        turn.flush_deltas()
+        assert secret not in json.dumps([e[2] for e in turn.events])
+        assert marker in _token_text(turn), secret
+        # Split one character per delta across the hold-back window.
+        turn, (on_token, _on_reasoning, _ts, _tc) = _turn_with_callbacks()
+        on_token("a" * 300)
+        for ch in secret:
+            on_token(ch)
+        on_token("b" * 300)
+        turn.flush_deltas()
+        blob = json.dumps([e[2] for e in turn.events])
+        assert secret not in blob, secret
+        assert marker in blob, secret
+
+
+def test_sse_delta_redacted_exactly_once():
+    """B7: Turn.publish is the single redaction chokepoint — a streamed
+    secret becomes its placeholder exactly once and the placeholder itself
+    is never re-mangled by a second pass."""
+    turn, (on_token, _on_reasoning, _ts, _tc) = _turn_with_callbacks()
+    on_token("key sk-" + "e" * 30 + " done")
+    on_token("more sk-" + "f" * 30 + " done")
+    turn.flush_deltas()
+    text = _token_text(turn)
+    assert text.count("[REDACTED_OPENAI_KEY]") == 2
+    assert "[REDACTED_[REDACTED" not in text
+    # A pre-redacted placeholder passes through the chokepoint untouched.
+    turn2 = ui_chat.Turn(session_id="p", turn_id="p-once", holder="h")
+    turn2.publish("token", {"delta": "already [REDACTED_GITHUB_TOKEN] here"})
+    assert json.dumps([e[2] for e in turn2.events]).count("[REDACTED_GITHUB_TOKEN]") == 1

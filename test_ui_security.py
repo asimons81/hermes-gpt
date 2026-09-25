@@ -461,3 +461,78 @@ def test_error_envelope_preserves_gate_codes(ui_root):
     assert body["error"]["code"] == "CONFIRM_REQUIRED"
     assert body["error"]["message"] == "requires dry-run confirm"
     assert_no_forbidden(bytes(response.body).decode("utf-8"))
+
+
+
+# ── B1/B2/B3: shape union, bounded cost, safe cap, model strings ─────────
+
+def test_redact_browser_canonical_secret_shapes(ui_root):
+    payload = {
+        "error": "ghp_" + "A" * 40 + " and " + "xoxb-" + "1234567890-ABCDEF",
+        "summary": "AIza" + "a" * 35 + " sk-ant-" + "b" * 30 + " ASIA" + "C" * 16,
+        "key_block": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXkAAA\n-----END OPENSSH PRIVATE KEY-----",
+    }
+    out = ui_security.redact_browser(payload)
+    assert "ghp_" not in out["error"] and "[REDACTED_GITHUB_TOKEN]" in out["error"]
+    assert "xoxb-" not in out["error"] and "[REDACTED_SLACK_TOKEN]" in out["error"]
+    assert "AIza" not in out["summary"] and "[REDACTED_GOOGLE_KEY]" in out["summary"]
+    assert "sk-ant-" not in out["summary"] and "[REDACTED_ANTHROPIC_KEY]" in out["summary"]
+    assert "ASIA" not in out["summary"] and "[REDACTED_AWS_KEY]" in out["summary"]
+    assert "PRIVATE KEY" not in out["key_block"] and "[REDACTED_PRIVATE_KEY]" in out["key_block"]
+
+
+def test_redact_browser_adversarial_input_is_bounded(ui_root, monkeypatch):
+    """B2: cap-before-redact. A 64 KiB dot-heavy payload with no '@' used to
+    take >120 s (quadratic email-pattern backtracking on the uncapped text);
+    the redaction passes only ever see <= cap bytes now."""
+    import time
+
+    monkeypatch.setenv(ui_security.UI_TOOL_PREVIEW_BYTES_ENV, "8192")
+    text = "a." * 32000 + "com"
+    start = time.monotonic()
+    out = ui_security.redact_browser({"tool_result": text})
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0, f"{elapsed:.2f}s"
+    assert ui_security.TRUNCATED_MARKER in out["tool_result"]
+
+
+def test_cap_does_not_expose_partial_secret_prefix(ui_root, monkeypatch):
+    """B2: the cap itself must be secret-safe — backing the cut up past a
+    straddling secret never leaves a partial token or PEM body visible."""
+    monkeypatch.setenv(ui_security.UI_TOOL_PREVIEW_BYTES_ENV, "64")
+    token = "ghp_" + "B" * 40
+    out = ui_security.redact_browser({"tool_result": "x" * 40 + " " + token})
+    assert "ghp_" not in out["tool_result"]
+    assert "B" * 10 not in out["tool_result"]
+    assert ui_security.TRUNCATED_MARKER in out["tool_result"]
+
+    pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n" + "MII" + "z" * 200
+    out = ui_security.redact_browser({"tool_result": "y" * 20 + pem})
+    assert "PRIVATE KEY" not in out["tool_result"]
+    assert "MII" not in out["tool_result"]
+
+    # A marker split exactly at the cut backs the cut up to the marker start.
+    out = ui_security.redact_browser({"tool_result": "c" * 60 + "ghp_AB"})
+    assert "ghp_" not in out["tool_result"]
+
+
+def test_name_pair_heuristic_preserves_model_strings(ui_root):
+    """B3: Titlecase model/product phrases are not personal names — they used
+    to become '[redacted-name] 4.5' on every operator payload naming a model."""
+    for phrase in [
+        "Claude Sonnet 4.5",
+        "running Claude Opus",
+        "Gemini Flash fallback",
+        "deployed on Google Cloud",
+    ]:
+        assert ui_security.redact_browser({"model": phrase})["model"] == phrase
+    # Real names are still redacted, standalone and via a label.
+    out = ui_security.redact_browser({"note": "tell Claude Smith the plan"})
+    assert "Claude Smith" not in out["note"]
+    assert "[redacted-name]" in out["note"]
+    out = ui_security.redact_browser({"note": "name: Claude Sonnet"})
+    assert "[redacted-name]" in out["note"]
+    # Bounded email pattern still redacts (and no longer backtracks).
+    out = ui_security.redact_browser({"note": "mail tony.stark@example.com now"})
+    assert "tony.stark@example.com" not in out["note"]
+    assert "[redacted-email]" in out["note"]

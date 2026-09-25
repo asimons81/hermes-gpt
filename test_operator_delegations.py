@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import threading
@@ -284,11 +283,14 @@ def test_mission_completion_rejects_concurrent_reconcile_authority_change(
     monkeypatch.setattr(missions, "_completion_guard", paused_guard)
     result: list[dict] = []
     if completion_path == "approve":
-        call = lambda: missions.hermes_mission_approve(mission_id, "approval:stale", confirm=True, dry_run=False, hermes_root=root)
+        def call():
+            return missions.hermes_mission_approve(mission_id, "approval:stale", confirm=True, dry_run=False, hermes_root=root)
     elif completion_path == "transition":
-        call = lambda: missions.hermes_mission_transition(mission_id, "completed", confirm=True, dry_run=False, hermes_root=root)
+        def call():
+            return missions.hermes_mission_transition(mission_id, "completed", confirm=True, dry_run=False, hermes_root=root)
     else:
-        call = lambda: missions.hermes_mission_reconcile(mission_id, confirm=True, dry_run=False, hermes_root=root)
+        def call():
+            return missions.hermes_mission_reconcile(mission_id, confirm=True, dry_run=False, hermes_root=root)
     thread = threading.Thread(target=lambda: result.append(json.loads(call())))
     thread.start()
     assert observed.wait(5)
@@ -1069,9 +1071,7 @@ def test_reconcile_ambiguous_cancel_retains_latch_without_terminal_authority(
     with delegations._connect(delegations._db_path(root), write=True) as db:
         delegations._init(db)
         db.execute(
-            "UPDATE delegations SET state='reconciling',cancel_requested=1,cancellation_in_progress=1,"
-            "cancellation_claimed_at='2026-08-22T00:00:01+00:00',cancellation_observation_sha256='',"
-            "cancellation_watermark_ready=1 "
+            "UPDATE delegations SET state='reconciling',cancel_requested=1,cancellation_in_progress=1 "
             "WHERE delegation_id=?", (delegation_id,),
         )
         db.commit()
@@ -1089,145 +1089,6 @@ def test_reconcile_ambiguous_cancel_retains_latch_without_terminal_authority(
     assert out["delegation"]["state"] == "reconciling"
     assert out["delegation"]["cancel_requested"] is True
     assert out["delegation"]["cancellation_in_progress"] is True
-
-
-def test_reconcile_ambiguous_cancel_rejects_stale_precancellation_terminal_observation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    root = tmp_path / "hermes"
-    _enable_workspace(monkeypatch, workspace)
-    task_id = "cancel-stale-terminal-task"
-    delegation_id = "dlg-cancel-stale-terminal"
-    monkeypatch.setattr(
-        delegations.contract_mod,
-        "hermes_contract_dispatch",
-        lambda *args, **kwargs: json.dumps({"success": True, "changed": True, "state": "running"}),
-    )
-    assert json.loads(delegations.hermes_delegation_dispatch(
-        json.dumps(_contract(workspace, task_id=task_id)), delegation_id=delegation_id,
-        confirm=True, dry_run=False, hermes_root=root,
-    ))["success"]
-    monkeypatch.setattr(
-        delegations.runners,
-        "hermes_runner_cancel",
-        lambda *args, **kwargs: json.dumps({"success": True, "changed": True}),
-    )
-    cancelled = json.loads(delegations.hermes_delegation_cancel(
-        delegation_id, confirm=True, dry_run=False, hermes_root=root,
-    ))
-    assert cancelled["delegation"]["cancellation_in_progress"] is True
-    with delegations._connect(delegations._db_path(root), write=True) as db:
-        db.execute(
-            "UPDATE delegations SET cancellation_claimed_at='2026-08-22T00:00:01+00:00' "
-            "WHERE delegation_id=?", (delegation_id,),
-        )
-        db.commit()
-    # This terminal record was absent at watermark capture and changes the
-    # observation hash, but its terminal authority predates the cancel claim.
-    meta_path, _, _ = runners._job_paths(task_id, root)
-    runners._atomic_json(meta_path, {
-        "schema_version": runners.SCHEMA_VERSION, "task_id": task_id, "backend": "pi_rpc",
-        "state": "completed", "outcome": "completed",
-        "created_at": "2026-08-21T23:59:58+00:00", "started_at": "2026-08-21T23:59:59+00:00",
-        "ended_at": "2026-08-22T00:00:00+00:00", "error": "",
-    })
-
-    reconciled = json.loads(delegations.hermes_delegation_reconcile(
-        delegation_id, apply=True, hermes_root=root,
-    ))
-    row = reconciled["delegation"]
-    assert row["state"] == "reconciling"
-    assert row["cancel_requested"] is True
-    assert row["cancellation_in_progress"] is True
-    assert row["terminal_at"] is None
-
-
-@pytest.mark.parametrize("terminal_at", ["", "not-a-time", "2026-08-22T00:00:01+00:00"])
-def test_reconcile_ambiguous_cancel_requires_strict_parseable_terminal_ordering(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    terminal_at: str,
-):
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    root = tmp_path / "hermes"
-    _enable_workspace(monkeypatch, workspace)
-    task_id = f"cancel-ordering-{hashlib.sha256(terminal_at.encode()).hexdigest()[:8]}"
-    delegation_id = f"dlg-{task_id}"
-    monkeypatch.setattr(
-        delegations.contract_mod,
-        "hermes_contract_dispatch",
-        lambda *args, **kwargs: json.dumps({"success": True, "changed": True, "state": "running"}),
-    )
-    assert json.loads(delegations.hermes_delegation_dispatch(
-        json.dumps(_contract(workspace, task_id=task_id)), delegation_id=delegation_id,
-        confirm=True, dry_run=False, hermes_root=root,
-    ))["success"]
-    with delegations._connect(delegations._db_path(root), write=True) as db:
-        delegations._init(db)
-        db.execute(
-            "UPDATE delegations SET state='reconciling',cancel_requested=1,cancellation_in_progress=1,"
-            "cancellation_claimed_at='2026-08-22T00:00:01+00:00',"
-            "cancellation_observation_sha256='different-old-payload',cancellation_watermark_ready=1 "
-            "WHERE delegation_id=?", (delegation_id,),
-        )
-        db.commit()
-    meta_path, _, _ = runners._job_paths(task_id, root)
-    runners._atomic_json(meta_path, {
-        "schema_version": runners.SCHEMA_VERSION, "task_id": task_id, "backend": "pi_rpc",
-        "state": "failed", "outcome": "failed", "created_at": "2026-08-22T00:00:00+00:00",
-        "started_at": "2026-08-22T00:00:00+00:00", "ended_at": terminal_at, "error": "failure",
-    })
-    row = json.loads(delegations.hermes_delegation_reconcile(
-        delegation_id, apply=True, hermes_root=root,
-    ))["delegation"]
-    assert row["state"] == "reconciling"
-    assert row["cancel_requested"] is True
-    assert row["cancellation_in_progress"] is True
-
-
-def test_reconcile_migrated_cancel_row_without_claim_ordering_fails_closed(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    root = tmp_path / "hermes"
-    _enable_workspace(monkeypatch, workspace)
-    task_id = "cancel-migrated-no-ordering"
-    delegation_id = "dlg-cancel-migrated-no-ordering"
-    monkeypatch.setattr(
-        delegations.contract_mod,
-        "hermes_contract_dispatch",
-        lambda *args, **kwargs: json.dumps({"success": True, "changed": True, "state": "running"}),
-    )
-    assert json.loads(delegations.hermes_delegation_dispatch(
-        json.dumps(_contract(workspace, task_id=task_id)), delegation_id=delegation_id,
-        confirm=True, dry_run=False, hermes_root=root,
-    ))["success"]
-    with delegations._connect(delegations._db_path(root), write=True) as db:
-        db.execute(
-            "UPDATE delegations SET state='reconciling',cancel_requested=1,cancellation_in_progress=1,"
-            "cancellation_claimed_at='',cancellation_observation_sha256='',cancellation_watermark_ready=1 "
-            "WHERE delegation_id=?", (delegation_id,),
-        )
-        db.commit()
-    meta_path, _, _ = runners._job_paths(task_id, root)
-    runners._atomic_json(meta_path, {
-        "schema_version": runners.SCHEMA_VERSION, "task_id": task_id, "backend": "pi_rpc",
-        "state": "cancelled", "outcome": "cancelled", "created_at": "2026-08-22T00:00:00+00:00",
-        "started_at": "2026-08-22T00:00:01+00:00", "ended_at": "2026-08-22T00:00:02+00:00",
-        "error": "",
-    })
-    row = json.loads(delegations.hermes_delegation_reconcile(
-        delegation_id, apply=True, hermes_root=root,
-    ))["delegation"]
-    assert row["state"] == "reconciling"
-    assert row["cancel_requested"] is True
-    assert row["cancellation_in_progress"] is True
 
 
 @pytest.mark.parametrize("with_mission", [False, True])
@@ -1277,11 +1138,7 @@ def test_successful_cancel_without_explicit_cancelled_state_stays_reconciling(
         calls += 1
         return json.dumps({"success": True, "changed": True, **backend_payload})
 
-    monkeypatch.setattr(
-        delegations.runners,
-        "hermes_runner_cancel",
-        cancel,
-    )
+    monkeypatch.setattr(delegations.runners, "hermes_runner_cancel", cancel)
 
     out = json.loads(delegations.hermes_delegation_cancel(
         delegation_id, confirm=True, dry_run=False, hermes_root=root,
@@ -1893,7 +1750,9 @@ def test_reserved_cancel_cas_loss_does_not_forge_cancellation(tmp_path: Path, mo
 
     class RacingConnection:
         def __init__(self, db): self.db = db
-        def __enter__(self): self.db.__enter__(); return self
+        def __enter__(self):
+            self.db.__enter__()
+            return self
         def __exit__(self, *args): return self.db.__exit__(*args)
         def __getattr__(self, name): return getattr(self.db, name)
         def execute(self, sql, parameters=()):
@@ -2028,7 +1887,4 @@ def test_in_place_database_migration_adds_dispatch_phase_and_manifest_table(tmp_
         columns = {row[1] for row in migrated.execute("PRAGMA table_info(delegations)")}
         tables = {row[0] for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "dispatch_phase" in columns
-    assert "cancellation_claimed_at" in columns
-    assert "cancellation_observation_sha256" in columns
-    assert "cancellation_watermark_ready" in columns
     assert "delegation_validation_manifests" in tables

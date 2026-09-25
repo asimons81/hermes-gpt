@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import hashlib
 import json
 import os
 import sqlite3
@@ -283,7 +285,6 @@ def test_web_extract_proxies_to_web_tool_when_enabled(monkeypatch):
     clear_gate_envs(monkeypatch)
     monkeypatch.setenv(server.ENABLE_WEB_ENV, "1")
     captured = {}
-    import asyncio
 
     async def fake_web_extract(**kwargs):
         captured.update(kwargs)
@@ -303,7 +304,6 @@ def test_vision_analyze_proxies_to_vision_tool_when_enabled(monkeypatch):
     clear_gate_envs(monkeypatch)
     monkeypatch.setenv(server.ENABLE_VISION_ENV, "1")
     captured = {}
-    import asyncio
 
     async def fake_vision(**kwargs):
         captured.update(kwargs)
@@ -327,7 +327,6 @@ def test_vision_analyze_defaults_prompt_when_question_empty(monkeypatch):
     clear_gate_envs(monkeypatch)
     monkeypatch.setenv(server.ENABLE_VISION_ENV, "1")
     captured = {}
-    import asyncio
 
     async def fake_vision(**kwargs):
         captured.update(kwargs)
@@ -389,6 +388,11 @@ def test_http_asgi_app_exposes_confidential_oauth_and_protects_mcp(monkeypatch):
                 "redirect_uri": "https://chatgpt.com/connector/oauth/callback",
                 "scope": "openid hermes offline_access",
                 "resource": "https://mcp.example.com/mcp",
+                # PKCE (RFC 7636) is mandatory at the authorize endpoint.
+                "code_challenge": base64.urlsafe_b64encode(
+                    hashlib.sha256(b"a" * 64).digest()
+                ).rstrip(b"=").decode(),
+                "code_challenge_method": "S256",
             },
             follow_redirects=False,
         )
@@ -403,6 +407,7 @@ def test_http_asgi_app_exposes_confidential_oauth_and_protects_mcp(monkeypatch):
                 "client_secret": "test-client-secret-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
                 "code": code,
                 "redirect_uri": "https://chatgpt.com/connector/oauth/callback",
+                "code_verifier": "a" * 64,
             },
         ).json()
         authenticated = client.post(
@@ -1465,7 +1470,11 @@ def test_http_initialize_smoke(monkeypatch):
         errors="replace",
     )
     try:
-        deadline = time.time() + 10
+        # Do not assume a quiet runner: on a loaded shared self-hosted runner,
+        # spawning the server (uvicorn + full module import) can take well over
+        # 10s. Healthy startup still breaks on the first successful response;
+        # the generous deadline only tolerates slow process spawn under load.
+        deadline = time.time() + 60
         last_error = None
         response_text = None
         payload = {
@@ -1497,7 +1506,13 @@ def test_http_initialize_smoke(monkeypatch):
                 last_error = exc
                 time.sleep(0.25)
         if response_text is None:
-            raise AssertionError(f"HTTP MCP server did not respond: {last_error}")
+            stdout_tail = proc.stdout.read() if proc.stdout else ""
+            stderr_tail = proc.stderr.read() if proc.stderr else ""
+            raise AssertionError(
+                f"HTTP MCP server did not respond: {last_error}\n"
+                f"server stdout tail:\n{stdout_tail[-2000:]}\n"
+                f"server stderr tail:\n{stderr_tail[-2000:]}"
+            )
 
         parsed = json.loads(response_text)
         assert parsed["result"]["serverInfo"]["name"] == "hermes-gpt"

@@ -861,10 +861,17 @@ def _profile_summary(profile: str, root: Path | None, warnings: list[str]) -> di
     try:
         cfg = op_diag._read_config_safe(home)
         if isinstance(cfg, dict):
-            model = cfg.get("model")
-            provider = cfg.get("provider")
-            model = str(model) if isinstance(model, str) and model else None
-            provider = str(provider) if isinstance(provider, str) and provider else None
+            raw_model = cfg.get("model")
+            if isinstance(raw_model, dict):
+                model_value = raw_model.get("default")
+                provider_value = raw_model.get("provider") or cfg.get("provider")
+            else:
+                # Backward compatibility for older Hermes configs that stored
+                # model/provider as top-level scalar values.
+                model_value = raw_model
+                provider_value = cfg.get("provider")
+            model = str(model_value) if isinstance(model_value, str) and model_value else None
+            provider = str(provider_value) if isinstance(provider_value, str) and provider_value else None
     except Exception:
         pass
 
@@ -1411,7 +1418,6 @@ def hermes_mission_usage(hermes_root: Path | None = None, trace_id: str | None =
             conn = _open_ro(_state_db(_profile_home(profile, root)))
             try:
                 cols = {r[1] for r in conn.execute("PRAGMA table_info(session_model_usage)")}
-                count_col = "cost_status"
                 has_cost = "estimated_cost_usd" in cols and "cost_status" in cols
 
                 # Sessions in last 24h.

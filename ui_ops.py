@@ -35,12 +35,12 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 import operator_policy as op
+import ui_security
 import operator_mission as op_mission
 import operator_events as op_events
 import operator_swarm as op_swarm
 import operator_codex as op_codex
 import operator_cron as op_cron
-import operator_fleet as op_fleet
 import operator_review as op_review
 import operator_diagnostics as op_diagnostics
 import operator_recovery as op_recovery
@@ -78,7 +78,12 @@ _CONTRACT_WORKFLOW_LIMIT = 50
 
 
 def _ok(data: Any) -> dict[str, Any]:
-    return {"ok": True, "data": data}
+    """Success envelope via the ui_security boundary (strict redaction).
+
+    ``ui_security.ok`` applies ``redact_browser`` to ``data`` so no Flight
+    Deck adapter can leak a secret-bearing payload to the browser
+    (docs/ui-security-boundary.md §1)."""
+    return ui_security.ok(data)
 
 
 def _err(code: str, message: str, status: int = 400, extra: dict[str, Any] | None = None) -> dict[str, Any]:

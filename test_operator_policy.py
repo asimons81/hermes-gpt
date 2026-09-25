@@ -292,7 +292,16 @@ def test_normalize_hermes_data_root_variants(tmp_path):
         "~/.env",
         "~/.env.local",
         "~/.env.production",
+        "app.env",
+        "production.env",
+        "settings.env",
+        "~/server.pem",
+        "certs/bundle.p12",
+        "certs/bundle.pfx",
+        "backups/database.kdbx",
         "~/.ssh/id_rsa",
+        "~/.ssh/id_ecdsa",
+        "~/.ssh/id_dsa",
         "~/.ssh/config",
         "~/.aws/credentials",
         "~/.gnupg/secring.gpg",
@@ -564,3 +573,69 @@ def test_run_argv_timeout_kills_descendant_process_group(tmp_path):
         time.sleep(0.05)
 
     assert not Path(f"/proc/{child_pid}").exists()
+
+
+
+# ── B1: canonical secret-shape table (single source for every surface) ──
+
+def test_redact_output_canonical_shape_union():
+    """Every canonical shape redacts with its own marker (B1): the PEM block
+    lost vs HEAD is restored and ghp_/xoxb-/AIza/sk-ant-/ASIA are added."""
+    cases = [
+        ("ghp_" + "A" * 40, "[REDACTED_GITHUB_TOKEN]"),
+        ("gho_" + "B" * 40, "[REDACTED_GITHUB_TOKEN]"),
+        ("xoxb-" + "1234567890-ABCDEF", "[REDACTED_SLACK_TOKEN]"),
+        ("xoxp-" + "1234567890-ABCDEF", "[REDACTED_SLACK_TOKEN]"),
+        ("AIza" + "a" * 35, "[REDACTED_GOOGLE_KEY]"),
+        ("sk-ant-" + "b" * 30, "[REDACTED_ANTHROPIC_KEY]"),
+        ("sk-proj-" + "c" * 30, "[REDACTED_OPENAI_KEY]"),
+        ("sk-" + "d" * 30, "[REDACTED_OPENAI_KEY]"),
+        ("ASIA" + "E" * 16, "[REDACTED_AWS_KEY]"),
+        ("AKIA" + "BCDEFGHIJKLMNOP", "[REDACTED_AWS_KEY]"),
+    ]
+    for secret, marker in cases:
+        out = op.redact_output(f"leak {secret} end")
+        assert secret not in out, secret
+        assert marker in out, (secret, marker)
+
+
+def test_redact_output_canonical_shape_union_glued():
+    """A token glued to a surrounding run (no whitespace) still redacts —
+    a leaked credential rarely arrives nicely delimited."""
+    token = "ghp_" + "A" * 40
+    assert token not in op.redact_output("x" * 40 + token)
+    assert token not in op.redact_output(token + "y" * 300)
+    assert "risk-management" in op.redact_output("risk-management task-force")  # sk- keeps its boundary
+
+
+def test_redact_output_pem_blocks():
+    pem = (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        "b3BlbnNzaC1rZXktdjEAAAAABAAAAAEAAAEEAAAA\n"
+        "-----END OPENSSH PRIVATE KEY-----\n"
+    )
+    out = op.redact_output(f"leak {pem} end")
+    assert "PRIVATE KEY" not in out
+    assert "b3BlbnNza" not in out
+    assert "[REDACTED_PRIVATE_KEY]" in out
+    # Unterminated BEGIN redacts to end-of-input (fail closed: a cut-off key
+    # body must not survive just because the END line is missing).
+    out = op.redact_output("-----BEGIN RSA PRIVATE KEY-----\nMIIabc")
+    assert "MIIabc" not in out
+    assert "[REDACTED_PRIVATE_KEY]" in out
+
+
+def test_secret_start_re_covers_every_canonical_marker():
+    """SECRET_START_RE (the hold-back/cap marker table) must know every
+    prefix SECRET_SHAPES can grow into, or a split secret reassembles."""
+    prefixes = [
+        "sk-", "sk-proj-", "sk-ant-", "AIza", "AKIA", "ASIA",
+        "ghp_", "gho_", "ghu_", "xoxb-", "xoxp-", "xoxa-",
+        "-----BEGIN OPENSSH PRIVATE KEY-----",
+        "Bearer abcdefghijklmnop",
+        "password=", 'secret: "', "api_key=",
+    ]
+    for prefix in prefixes:
+        assert op.SECRET_START_RE.search(f"prefix {prefix} tail"), prefix
+    assert op.SECRET_START_RE.search("x" * 300 + "ghp_" + "y" * 10)
+    assert not op.SECRET_START_RE.search("plain prose without markers")

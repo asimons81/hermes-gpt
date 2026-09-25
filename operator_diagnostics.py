@@ -21,12 +21,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import operator_policy as op
 import operator_config as op_config
-import operator_cron as op_cron
-import operator_skills as op_skills
 import operator_workspace as op_workspace
 from versioning import VERSION
 
@@ -257,15 +255,34 @@ def _check_gateway_status(profile_home: Path) -> dict[str, Any]:
     pid_path = _gateway_pid_path(profile_home)
     heartbeat_path = _ticker_heartbeat_path(profile_home)
 
-    # Fix 2026-09-08 (see MEMORY.md / HANDOFF.md, hermes-gpt v0.8.0 @ fc1f68c):
-    # gateway.pid can hold JSON (newer gateway versions) instead of a plain
-    # int. Reuse the already-battle-tested fallback from operator_workspace
-    # (pid file -> gateway_state.json) instead of failing outright on
-    # ValueError, which previously caused false-negative GATEWAY_PID_MISSING.
-    pid: int | None = op_workspace._read_gateway_pid_from_pid_file(pid_path)
+    pid: int | None = None
+    pid_source: str | None = None
+    if pid_path.exists():
+        try:
+            pid = int(pid_path.read_text(encoding="utf-8").strip())
+            pid_source = "gateway.pid"
+        except (OSError, ValueError):
+            pid = None
+            pid_source = None
+
+    # Current Hermes gateways persist their authoritative runtime PID in
+    # gateway_state.json. Keep the legacy gateway.pid path for compatibility,
+    # but fall back to the state file when the legacy PID file is absent.
+    # The PID is still verified below with _is_process_alive(), so a stale state
+    # file can never produce GATEWAY_OK by itself.
     if pid is None:
-        _state = op_workspace._read_gateway_state(_gateway_state_path(profile_home))
-        pid = op_workspace._read_gateway_pid_from_state(_state)
+        state_path = _gateway_state_path(profile_home)
+        if state_path.exists():
+            try:
+                with open(state_path, "r", encoding="utf-8") as fh:
+                    gateway_state = json.load(fh)
+                state_pid = gateway_state.get("pid")
+                if isinstance(state_pid, int) and state_pid > 0:
+                    pid = state_pid
+                    pid_source = "gateway_state.json"
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pid = None
+                pid_source = None
 
     running = _is_process_alive(pid) if pid is not None else False
 
@@ -294,7 +311,7 @@ def _check_gateway_status(profile_home: Path) -> dict[str, Any]:
             code="GATEWAY_DEAD_PID",
             message=f"Gateway PID file exists ({pid}) but the process is not alive.",
             suggested_action="Run hermes_operator_recover with apply=true to restart the gateway.",
-            extra={"pid": pid, "running": False},
+            extra={"pid": pid, "running": False, "pid_source": pid_source},
         )
 
     # A heartbeat alone is not proof that the gateway is alive. Stale state files
@@ -320,7 +337,7 @@ def _check_gateway_status(profile_home: Path) -> dict[str, Any]:
             extra={"heartbeat_mtime": heartbeat_mtime, "stale_seconds": _STALE_HEARTBEAT_SECONDS},
         )
 
-    extra = {"pid": pid, "running": running}
+    extra = {"pid": pid, "running": running, "pid_source": pid_source}
     if heartbeat_mtime is not None:
         extra["heartbeat_mtime"] = heartbeat_mtime
     extra.update(_gateway_state_summary(profile_home))

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -58,6 +57,31 @@ def _enable_owner(monkeypatch, *, ack=True, direct=True):
 def test_workspace_read_refuses_denied_path(workspace_tree, clean_env, audit_override):
     secret = workspace_tree / ".env"
     secret.write_text("SECRET=abc", encoding="utf-8")
+    out = ows.hermes_workspace_read(path=str(secret))
+    parsed = json.loads(out)
+    assert parsed["success"] is False
+    assert "denied" in parsed["error"].lower()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "server.pem",
+        "bundle.p12",
+        "bundle.pfx",
+        "database.kdbx",
+        "id_ecdsa",
+        "id_dsa",
+        "app.env",
+        "production.env",
+        "settings.env",
+    ],
+)
+def test_workspace_read_refuses_secret_key_material(workspace_tree, clean_env, audit_override, name):
+    """A1: private-key/certificate containers and *.env basenames stay denied
+    end-to-end (through the operator read surface), not only at policy level."""
+    secret = workspace_tree / name
+    secret.write_text("material", encoding="utf-8")
     out = ows.hermes_workspace_read(path=str(secret))
     parsed = json.loads(out)
     assert parsed["success"] is False

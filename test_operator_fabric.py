@@ -290,6 +290,148 @@ def test_peer_rejects_authority_widening(tmp_path, monkeypatch):
     assert exc.value.code == "FABRIC_AUTHORITY_DENIED"
 
 
+def test_coordinator_rejects_profile_outside_contract_scope_on_dry_run(tmp_path, monkeypatch):
+    svc = service(tmp_path, monkeypatch)
+    coord = coordinator(tmp_path, svc)
+    value = contract(tmp_path)
+    value["allowed_scope"]["profiles"] = ["qa"]
+
+    with pytest.raises(fabric.FabricError) as exc:
+        coord.dispatch(value, dry_run=True, confirm=False, timeout=10)
+
+    assert exc.value.code == "FABRIC_AUTHORITY_DENIED"
+    assert "Work Contract profile scope" in str(exc.value)
+
+
+def test_peer_rejects_envelope_profile_outside_preserved_scope(tmp_path, monkeypatch):
+    svc = service(tmp_path, monkeypatch)
+    value = contract(tmp_path)
+    value["allowed_scope"]["profiles"] = ["qa"]
+    envelope = envelope_for(svc, value)
+
+    assert envelope["allowed_profiles"] == ["qa"]
+    local = svc._local_contract(envelope, policy(tmp_path).workspace_mappings["repo"])
+    assert local["allowed_scope"]["profiles"] == ["qa"]
+
+    with pytest.raises(fabric.FabricError) as exc:
+        svc.handle(accept_request(envelope), "Bearer 0123456789abcdef0123456789abcdef")
+    assert exc.value.code == "FABRIC_AUTHORITY_DENIED"
+
+
+def test_coordinator_rejects_contract_profile_scope_wider_than_node_policy(tmp_path, monkeypatch):
+    svc = service(tmp_path, monkeypatch)
+    coord = coordinator(tmp_path, svc)
+    value = contract(tmp_path)
+    value["allowed_scope"]["profiles"] = ["default", "qa"]
+
+    with pytest.raises(fabric.FabricError) as exc:
+        coord.dispatch(value, dry_run=True, confirm=False, timeout=10)
+
+    assert exc.value.code == "FABRIC_AUTHORITY_DENIED"
+    assert "allowed profile scope" in str(exc.value)
+
+
+def test_peer_rejects_contract_profile_scope_wider_than_peer_policy(tmp_path, monkeypatch):
+    svc = service(tmp_path, monkeypatch)
+    value = contract(tmp_path)
+    value["allowed_scope"]["profiles"] = ["default", "qa"]
+    envelope = envelope_for(svc, value)
+
+    with pytest.raises(fabric.FabricError) as exc:
+        svc._authorize_envelope(envelope, "coord-main", policy(tmp_path))
+
+    assert exc.value.code == "FABRIC_AUTHORITY_DENIED"
+    assert "profile scope exceeds peer policy" in str(exc.value)
+
+
+def test_remote_forbidden_actions_are_preserved_and_admitted(tmp_path, monkeypatch):
+    observed: list[dict[str, str]] = []
+    counter = {"count": 0}
+    svc = service(tmp_path, monkeypatch, dispatch_counter=counter, observed=observed)
+    value = contract(tmp_path)
+    value["forbidden_actions"] = [
+        {"action": "public_publish", "reason": "must remain private", "class": "HIGH"}
+    ]
+    envelope = envelope_for(svc, value)
+
+    assert envelope["forbidden_actions"] == value["forbidden_actions"]
+    local = svc._local_contract(envelope, policy(tmp_path).workspace_mappings["repo"])
+    assert local["forbidden_actions"] == value["forbidden_actions"]
+
+    coord = coordinator(tmp_path, svc)
+    # Upstream fail-closed rule (5c67834): forbidden-action contracts are
+    # rejected at the boundary, so no remote dispatch ever happens.
+    try:
+        coord.dispatch(value, dry_run=False, confirm=True, timeout=10)
+        raised = False
+    except fabric.FabricError as exc:
+        raised = True
+        assert exc.code == "FABRIC_EVIDENCE_POLICY_INVALID"
+    assert raised
+    assert counter["count"] == 0
+    assert observed == []
+
+
+def test_remote_forbidden_violation_is_admitted_as_fail(tmp_path, monkeypatch):
+    observed: list[dict[str, str]] = []
+    svc = service(tmp_path, monkeypatch, observed=observed)
+    value = contract(tmp_path)
+    value["forbidden_actions"] = [
+        {"action": "public_publish", "reason": "must remain private", "class": "HIGH"}
+    ]
+    coord = coordinator(tmp_path, svc)
+    # Upstream fail-closed rule (5c67834): Fabric cannot prove non-empty
+    # forbidden-action checks, so the contract never reaches remote dispatch.
+    try:
+        coord.dispatch(value, dry_run=False, confirm=True, timeout=10)
+        raised = False
+    except fabric.FabricError as exc:
+        raised = True
+        assert exc.code == "FABRIC_EVIDENCE_POLICY_INVALID"
+    assert raised
+    assert observed == []
+
+
+def test_coordinator_rejects_forbidden_evidence_policy_tamper(tmp_path, monkeypatch):
+    observed = [
+        {
+            "status": "completed",
+            "outcome": "completed",
+            "started_at": "2026-08-21T17:00:00Z",
+            "ended_at": "2026-08-21T17:01:00Z",
+            "error": "",
+        }
+    ]
+    svc = service(tmp_path, monkeypatch, observed=observed)
+    value = contract(tmp_path)
+    value["forbidden_actions"] = [
+        {"action": "public_publish", "reason": "must remain private", "class": "HIGH"}
+    ]
+
+    def tampering_rpc(target, request, timeout):
+        remote_task_id, response = rpc_for(svc)(target, request, timeout)
+        if request["operation"] == "evidence":
+            response = dict(response)
+            response["data"] = dict(response["data"])
+            evidence = dict(response["data"]["evidence"])
+            check = dict(evidence["forbidden_check"])
+            check["policy_sha256"] = "0" * 64
+            evidence["forbidden_check"] = check
+            response["data"]["evidence"] = evidence
+        return remote_task_id, response
+
+    coord = coordinator(tmp_path, svc, rpc=tampering_rpc)
+    # Upstream fail-closed rule (5c67834): forbidden-action contracts are
+    # rejected at the boundary, so tampered evidence can never be admitted.
+    try:
+        coord.dispatch(value, dry_run=False, confirm=True, timeout=10)
+        raised = False
+    except fabric.FabricError as exc:
+        raised = True
+        assert exc.code == "FABRIC_EVIDENCE_POLICY_INVALID"
+    assert raised
+
+
 def test_prestart_policy_drift_blocks_runner(tmp_path, monkeypatch):
     calls = {"n": 0}
     first_policy = policy(tmp_path, revision="r1")
@@ -477,6 +619,29 @@ def test_wrong_lineage_and_self_certifying_evidence_are_rejected(tmp_path, monke
             allowed_provenance=("managed_peer_structured",),
         )
     assert exc.value.code == "FABRIC_SCHEMA_INVALID"
+
+    missing_forbidden = dict(evidence)
+    missing_forbidden.pop("forbidden_check", None)
+    with pytest.raises(fabric.FabricError) as exc:
+        fabric._validate_evidence(
+            missing_forbidden,
+            attempt=attempt_map,
+            node=target,
+            allowed_provenance=("managed_peer_structured",),
+        )
+    assert exc.value.code == "FABRIC_EVIDENCE_REJECTED"
+
+    forged_forbidden = dict(evidence)
+    forged_forbidden["forbidden_check"] = dict(evidence["forbidden_check"])
+    forged_forbidden["forbidden_check"]["policy_sha256"] = "0" * 64
+    with pytest.raises(fabric.FabricError) as exc:
+        fabric._validate_evidence(
+            forged_forbidden,
+            attempt=attempt_map,
+            node=target,
+            allowed_provenance=("managed_peer_structured",),
+        )
+    assert exc.value.code == "FABRIC_EVIDENCE_LINEAGE_MISMATCH"
 
 
 def test_worker_statement_cannot_satisfy_run_state(tmp_path, monkeypatch):

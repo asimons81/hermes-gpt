@@ -895,7 +895,6 @@ def classify(mission_id: str, node_id: str, env: dict[str, Any]) -> dict[str, An
         )
 
     # ---- 5. Capability (no capable target; park + escalate) -----------------
-    cap_reasons = capability.get("reasons", []) if capability else []
     if (capability is not None and not capability["ok"]) or evidence["capability"]:
         return decide(
             CLASS_CAPABILITY,

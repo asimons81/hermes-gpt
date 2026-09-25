@@ -29,8 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
-import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -96,6 +95,28 @@ def _jobs_shape_key(profile_home: Path) -> str:
         return str(profile_home)
 
 
+def _backup_corrupt_jobs(path: Path) -> None:
+    """Preserve an unparseable jobs.json before the next atomic write
+    replaces it (rm-021: silent overwrite destroyed the only copy).
+    Best-effort: never raises, never blocks reads. The backup file's
+    presence next to jobs.json is the operator-visible signal."""
+    try:
+        payload = path.read_bytes()
+        if any(p.read_bytes() == payload for p in path.parent.glob(f"{path.name}.corrupt-*")):
+            return
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        backup = path.with_name(f"{path.name}.corrupt-{stamp}")
+        suffix = 1
+        while backup.exists():
+            if suffix > 99:
+                return
+            backup = path.with_name(f"{path.name}.corrupt-{stamp}-{suffix}")
+            suffix += 1
+        backup.write_bytes(payload)
+    except OSError:
+        pass
+
+
 def _read_jobs(profile_home: Path) -> list[dict[str, Any]]:
     """Read jobs.json. Returns [] if missing or unparseable."""
     path = _jobs_file(profile_home)
@@ -105,7 +126,14 @@ def _read_jobs(profile_home: Path) -> list[dict[str, Any]]:
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-    except (OSError, json.JSONDecodeError):
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # Keep the corrupt payload recoverable instead of letting the next
+        # atomic write silently destroy the only copy. UnicodeDecodeError
+        # covers binary/non-UTF-8 corruption (a ValueError, not a
+        # JSONDecodeError) — same recovery path, no crash.
+        _backup_corrupt_jobs(path)
+        return []
+    except OSError:
         return []
     shape = "dict" if isinstance(data, dict) else "list" if isinstance(data, list) else "dict"
     _jobs_shape_cache[_jobs_shape_key(profile_home)] = shape
@@ -151,7 +179,6 @@ def _format_job_safe(job: dict[str, Any]) -> dict[str, Any]:
     if isinstance(skills, str):
         skills = [skills]
     skills = [str(s) for s in skills if s]
-    repeat = job.get("repeat") or {}
     return {
         "job_id": str(job.get("id") or "unknown"),
         "name": str(job.get("name") or prompt[:50] or (skills[0] if skills else "") or "cron job"),
@@ -805,7 +832,6 @@ def hermes_cron_move(
 
         # Step 3: pause source.
         pause_result = None
-        partial = False
         if pause_source:
             run_fn = runner or op.run_argv
             argv = _hermes_argv(source_profile, ["cron", "pause", str(source_job.get("id"))])
@@ -817,7 +843,6 @@ def hermes_cron_move(
                 "stderr": op.redact_output(err),
             }
             if rc != 0:
-                partial = True
                 source_after = _read_jobs(source_home)
                 target_after = _read_jobs(target_home)
                 op.audit_record(

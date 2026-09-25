@@ -1,27 +1,44 @@
 name: CI
 
+# One CI run per branch: pull_request fires for the PR branch, and push
+# covers only master (the merge destination). Without the branch filter
+# every PR update fired the full matrix twice - once for the push, once
+# for the pull_request event - doubling pool occupancy (U104).
 on:
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
   workflow_call:
+  schedule:
+    # Nightly: full matrix + compatibility lane, off-peak.
+    - cron: "23 4 * * *"
+
+# A newer run for the same branch supersedes and cancels the one in
+# flight instead of stacking another full matrix onto the pool.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  private-leak:
+    uses: codeo1io/.github/.github/workflows/private-leak-sentinel.yaml@main
+
   test:
+    # PR fast lane: on pull_request only ONE lane runs (python 3.11 +
+    # mcp>=2,<3). Push(master), nightly, and dispatch run the full
+    # matrix. With one self-hosted runner executing jobs serially, the
+    # PR run previously queued every lane behind the others (run
+    # 35148449897: 2h43m wall, lanes 400-940s each).
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        python: ['3.10', '3.11', '3.12']
-        sdk: ['mcp>=1.28.1,<2', 'mcp>=2,<3']
-        include:
-          - os: ubuntu-latest
-            python: '3.10'
-            sdk: 'mcp==1.28.1'
-          - os: ubuntu-latest
-            python: '3.10'
-            sdk: 'mcp==2.0.0'
-    runs-on: ${{ matrix.os }}
+        python: ${{ github.event_name == 'pull_request' && fromJSON('["3.11"]') || fromJSON('["3.10", "3.11", "3.12"]') }}
+        sdk: ${{ github.event_name == 'pull_request' && fromJSON('["mcp>=2,<3"]') || fromJSON('["mcp>=1.28.1,<2", "mcp>=2,<3"]') }}
+        include: >-
+          ${{ github.event_name == 'pull_request' && fromJSON('[]')
+          || fromJSON('[{"python": "3.10", "sdk": "mcp==1.28.1"}, {"python": "3.10", "sdk": "mcp==2.0.0"}, {"python": "3.10", "sdk": "mcp==2.2.0"}]') }}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,7 +99,9 @@ jobs:
         run: git diff --check
 
   compatibility:
-    runs-on: ubuntu-latest
+    # Full-matrix lane: push(master) + nightly only, never the PR fast path.
+    if: github.event_name != 'pull_request'
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -97,31 +116,19 @@ jobs:
           test_operator_runners.py
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e ".[dev]"
-      - run: >-
-          python -m ruff check
-          mcp_compat.py codex_mcp.py test_mcp_sdk_migration.py test_mcp_compat.py
-          test_mcp_transport_mode.py test_codex_mcp.py test_hermetic_environment.py test_operator_codex.py
-          fabric_artifacts.py fabric_write_guard.py
-          operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py
-          test_operator_fabric.py test_operator_fabric_adversarial.py test_operator_fabric_control.py
-          test_operator_fabric_router.py test_operator_fabric_g4c.py test_operator_fabric_view.py test_operator_fabric_integration.py test_ui_fabric.py
-          operator_runners.py test_operator_runners.py operator_delegations.py test_operator_delegations.py
-          runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
-          operator_export.py test_operator_export.py test_server_export.py
-          operator_mission_runtime.py test_operator_mission_runtime.py
-          operator_live_events.py test_operator_live_events.py test_v09_system_invariants.py
-          tools/check_package_hygiene.py test_package_hygiene.py
-          ui_api.py ui_fabric.py ui_missions.py test_ui_missions.py
+      # Repo-wide gate (rm-017): previously a hand-maintained file list that
+      # silently missed new modules; the whole tree is lint-clean now.
+      - run: python -m ruff check .
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: web
@@ -129,15 +136,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
+          # No `cache: npm` — self-hosted runner, ~/.npm persists locally.
+          # The actions cache round-trip measured 820s (run 35150442933,
+          # Post setup-node step) against a 7s warm npm ci.
           node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm test
       - run: npm run build
 
   windows-docs:
-    runs-on: windows-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - name: Parse Secure MCP Tunnel PowerShell examples
@@ -163,7 +171,7 @@ jobs:
 
   build:
     needs: [test, compatibility, lint, web, windows-docs]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

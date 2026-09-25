@@ -156,7 +156,10 @@ def routes() -> list[BaseRoute]:
     result: list[BaseRoute] = []
     # Security/boundary routes are the skeleton every card builds against;
     # chat, Flight Deck, and Fabric read models compose in as sibling modules.
-    for module_name in ("ui_security", "ui_chat", "ui_ops", "ui_fabric", "ui_missions"):
+    # Register specific Mission routes before the generic ui_ops
+    # /api/ops/{surface} route. Starlette uses first-match routing, so placing
+    # ui_ops first shadows GET /api/ops/missions as an unknown generic surface.
+    for module_name in ("ui_security", "ui_chat", "ui_missions", "ui_ops", "ui_fabric"):
         result.extend(_sibling_routes(module_name))
     result.extend(_static_routes())
     return result

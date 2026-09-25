@@ -163,6 +163,11 @@ def _default_hermes_root() -> Path:
 # Redaction
 # ---------------------------------------------------------------------------
 
+# Re-exported from operator_policy so every surface reads ONE marker table
+# (B1): ui_chat's streaming hold-back buffer uses exactly the markers the
+# canonical SECRET_SHAPES can grow into — the lists can no longer drift.
+SECRET_START_RE = op.SECRET_START_RE
+
 # Keys whose values are ALWAYS replaced with the marker, regardless of mode.
 # Raw prompts, memory bodies, transcripts, request dumps, credentials, and
 # profile-secret bodies never cross the browser boundary (AGENTS.md Mission
@@ -195,7 +200,10 @@ def _is_secret_key(key: str) -> bool:
 # PII patterns for operator-derived text (mirrors operator_mission._sanitize_error).
 # Replacement may be a string or a callable (re.Pattern.sub accepts both).
 _PII_PATTERNS: list[tuple[re.Pattern[str], Any]] = [
-    (re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"), "[redacted-email]"),
+    # Local/domain parts are bounded: without the bounds, a dot-heavy run
+    # with no "@" made the local-part class backtrack quadratically on every
+    # start position (measured 0.51 s at 8 KiB, >120 s at 64 KiB).
+    (re.compile(r"(?i)\b[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]{1,255}\.[A-Z]{2,}\b"), "[redacted-email]"),
     (re.compile(r"(?<!\w)(?:\+?\d[\d().\-\s]{6,}\d)(?!\w)"), "[redacted-phone]"),
     (re.compile(r"(?<![\w@])@[A-Za-z0-9_]{1,32}\b"), "[redacted-username]"),
     (
@@ -207,6 +215,45 @@ _PII_PATTERNS: list[tuple[re.Pattern[str], Any]] = [
     (re.compile(r"\b(?:Mr|Mrs|Ms|Dr)\.\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b"), "[redacted-name]"),
     (re.compile(r"\b[A-Z][a-z]{1,30}\s+[A-Z][a-z]{1,30}\b"), "[redacted-name]"),
 ]
+
+# Index of the bare name-pair heuristic (the last pattern above).
+_NAME_PAIR_PATTERN_INDEX = len(_PII_PATTERNS) - 1
+
+# Two-word product/model phrases that must survive the name-pair heuristic
+# (B3): they are Titlecase word pairs exactly like personal names, but
+# redacting them corrupts every operator payload that names a model
+# ("Claude Sonnet 4.5" used to become "[redacted-name] 4.5"). They are
+# shielded for the name-pair pass ONLY: the label pattern ("name: …") and
+# the honorific pattern run first and unprotected, so genuinely labeled
+# names are still redacted.
+_MODEL_PHRASE_RE = re.compile(
+    r"(?i)\b(?:"
+    r"claude\s+(?:opus|sonnet|haiku)"
+    r"|gemini\s+(?:flash|pro|nano|ultra)"
+    r"|google\s+(?:gemini|cloud|ai|search|assistant)"
+    r"|chatgpt\s+(?:plus|pro|team|enterprise)"
+    r"|grok\s+(?:\d|beta)"
+    r"|windows\s+(?:\d{2}|xp)"
+    r")\b"
+)
+_SENTINEL_L, _SENTINEL_R = "\ue000", "\ue001"
+
+
+def _protect_model_phrases(text: str) -> tuple[str, list[str]]:
+    """Replace known model/product phrases with opaque sentinels."""
+    stash: list[str] = []
+
+    def _wrap(match: re.Match[str]) -> str:
+        stash.append(match.group(0))
+        return f"{_SENTINEL_L}{len(stash) - 1}{_SENTINEL_R}"
+
+    return _MODEL_PHRASE_RE.sub(_wrap, text), stash
+
+
+def _restore_model_phrases(text: str, stash: list[str]) -> str:
+    for index, phrase in enumerate(stash):
+        text = text.replace(f"{_SENTINEL_L}{index}{_SENTINEL_R}", phrase)
+    return text
 
 # Absolute filesystem paths (POSIX with 2+ segments, Windows drive, UNC,
 # home-relative ~/...). Negative lookbehind keeps URLs and single-segment
@@ -261,6 +308,49 @@ def _redact_secret_path_tokens(text: str) -> str:
     )
 
 
+# How far before a cap a secret start marker may sit and still be backed
+# out of the visible text (longest bounded canonical run + slack).
+_CAP_SECRET_WINDOW = 512
+
+
+def _cap_secret_safe(text: str, cap: int) -> str:
+    """Truncate to ``cap`` without ever showing the prefix of a secret.
+
+    The cut backs up past (a) any canonical secret shape straddling the cut
+    and (b) any UNRESOLVED secret start marker close enough to the cut that
+    its run could continue past it, so the visible text can never contain a
+    partial secret whose tail was dropped by the cap. A marker already
+    covered by a complete canonical match needs no back-up: that secret is
+    redacted whole wherever it appears.
+    """
+    if len(text) <= cap:
+        return text
+    cut = cap
+    # Back-ups can chain (backing onto one marker can expose another); a
+    # bounded re-check loop converges immediately on real payloads.
+    for _ in range(4):
+        new_cut = cut
+        spans: list[tuple[int, int]] = []
+        for pattern, _replacement in op.SECRET_SHAPES:
+            for match in pattern.finditer(text):
+                spans.append((match.start(), match.end()))
+                if match.start() < new_cut < match.end():
+                    new_cut = min(new_cut, match.start())
+        for match in op.SECRET_START_RE.finditer(text):
+            start = match.start()
+            if new_cut - _CAP_SECRET_WINDOW < start < new_cut:
+                if any(s <= start < e for s, e in spans):
+                    continue
+                new_cut = min(new_cut, start)
+                break
+        if new_cut == cut:
+            break
+        cut = new_cut
+    if cut <= 0:
+        return TRUNCATED_MARKER
+    return text[:cut] + TRUNCATED_MARKER
+
+
 def _redact_string(text: Any, *, content: bool = False, cap: int) -> str:
     """Redact/truncate a single string for the browser.
 
@@ -268,16 +358,33 @@ def _redact_string(text: Any, *, content: bool = False, cap: int) -> str:
     only unambiguous secret shapes and a generous bound apply, so a user's own
     message is never corrupted. Operator-derived text (``content=False``) gets
     the full treatment: secrets, PII, absolute paths, and secrets/ refs.
+
+    Order matters (B2): the cap is applied BEFORE any redaction pass, so the
+    pattern passes only ever see <= cap bytes and adversarial input cannot
+    force quadratic work. The cap itself is secret-safe
+    (``_cap_secret_safe``).
     """
     if not isinstance(text, str):
         text = str(text)
-    out = op.redact_output(text)
+    out = _cap_secret_safe(text, cap)
+    out = op.redact_output(out)
     if not content:
-        for pattern, replacement in _PII_PATTERNS:
+        stash: list[str] = []
+        for index, (pattern, replacement) in enumerate(_PII_PATTERNS):
+            if index == _NAME_PAIR_PATTERN_INDEX:
+                # B3: exempt known product/model phrases from the bare
+                # name-pair heuristic only (label/honorific patterns above
+                # already ran unprotected).
+                out, stash = _protect_model_phrases(out)
             out = pattern.sub(replacement, out)
+        if stash:
+            out = _restore_model_phrases(out, stash)
         out = _ABS_PATH_RE.sub("[REDACTED_PATH]", out)
         out = _redact_secret_path_tokens(out)
-    if len(out) > cap:
+    # Placeholder substitution can expand the text slightly past the cap.
+    # Everything secret in the visible window is already a placeholder by
+    # now, so a final trim cannot expose anything.
+    if len(out) > cap + len(TRUNCATED_MARKER):
         out = out[:cap] + TRUNCATED_MARKER
     return out
 

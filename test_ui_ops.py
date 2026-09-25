@@ -124,6 +124,29 @@ def test_secret_scan_regex_separates_task_ids_from_real_keys(payload, expect_sec
     assert bool(_SECRET_SCAN_RE.search(serialized)) is expect_secret
 
 
+def test_ops_envelope_redacts_even_if_upstream_leaks(client, monkeypatch):
+    """A11: ``_ok`` routes through ui_security, so a payload that somehow
+    leaves the backend with a secret in it still cannot reach the browser —
+    the adapter boundary redacts independently of upstream hygiene."""
+    leak = {
+        "generated_at": "2026-09-01T00:00:00Z",
+        "note": "leaked key sk-abcdef0123456789abcdef01 here",
+        "aws": "AKIA" + "BCDEFGHIJKLMNOP",
+        "token": "tok-abcdefghijklmnop",
+        "long": "x" * 20_000,
+    }
+    monkeypatch.setattr(ui_ops, "_surface_payload", lambda surface, force_refresh: leak)
+    resp = client.get("/api/ops/overview")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    serialized = json.dumps(body)
+    assert "sk-abcdef" not in serialized
+    assert "AKIA" not in serialized
+    assert "tok-abcdefghijklmnop" not in serialized  # secret-keyed value
+    assert len(body["data"]["data"]["long"]) <= 8192 + len("…[truncated]")
+
+
 def test_mission_surface_overview_is_composite(client):
     resp = client.get("/api/ops/overview")
     assert resp.status_code == 200

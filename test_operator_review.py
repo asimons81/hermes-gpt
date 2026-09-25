@@ -281,7 +281,7 @@ def test_accept_writes_record_and_audits(hermes_root, clean_env, audit_override,
         assert forbidden not in rec
 
     audit_lines = audit_override.read_text(encoding="utf-8").splitlines()
-    accept_audits = [json.loads(l) for l in audit_lines if '"hermes_review_accept"' in l]
+    accept_audits = [json.loads(ln) for ln in audit_lines if '"hermes_review_accept"' in ln]
     assert any(a.get("success") is True and a.get("changed") is True for a in accept_audits)
 
 

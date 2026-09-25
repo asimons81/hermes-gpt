@@ -158,6 +158,131 @@ def _validate_with_coordinator(canonical: str, coord, tmp_path):
                 runners._BACKENDS.pop("fabric", None)
 
 
+def test_remote_forbidden_violation_cannot_reach_false_satisfied(tmp_path, monkeypatch):
+    real_get_backend = runners.get_backend
+    observed: list[dict[str, str]] = []
+    svc = make_service(tmp_path, monkeypatch, observed=observed)
+    coord = make_coordinator(tmp_path, svc)
+    value = contract(tmp_path)
+    value["forbidden_actions"] = [
+        {"action": "public_publish", "reason": "must remain private", "class": "HIGH"}
+    ]
+    canonical, normalized = op_contract._canonical_contract(value)
+    backend = base.FabricBackend(coordinator_factory=lambda **_kwargs: coord)
+
+    op.set_audit_log_override(tmp_path / "audit.jsonl")
+    try:
+        # Upstream fail-closed rule (5c67834): Fabric v1 cannot prove
+        # non-empty forbidden-action checks, so such contracts are rejected at
+        # the boundary before any remote dispatch.
+        rejected = backend.dispatch(
+            normalized,
+            confirm=True,
+            dry_run=False,
+            timeout=10,
+            hermes_root=tmp_path,
+        )
+        assert rejected["success"] is False
+        assert rejected.get("code") == "FABRIC_EVIDENCE_POLICY_INVALID"
+    finally:
+        op.set_audit_log_override(None)
+
+    # A contract whose forbidden actions could never be remotely dispatched
+    # must never validate as satisfied.
+    monkeypatch.setattr(runners, "get_backend", real_get_backend)
+    verdict = _validate_with_coordinator(canonical, coord, tmp_path)
+    assert verdict["verdict"] == "NOT_SATISFIED"
+    by_kind = {item["kind"]: item for item in verdict["checks"]}
+    assert by_kind["forbidden"]["status"] in {"FAIL", "UNVERIFIED"}
+
+
+def test_remote_forbidden_clean_peer_evidence_can_satisfy(tmp_path, monkeypatch):
+    real_get_backend = runners.get_backend
+    observed: list[dict[str, str]] = []
+    svc = make_service(tmp_path, monkeypatch, observed=observed)
+    coord = make_coordinator(tmp_path, svc)
+    value = contract(tmp_path)
+    value["forbidden_actions"] = [
+        {"action": "public_publish", "reason": "must remain private", "class": "HIGH"}
+    ]
+    canonical, normalized = op_contract._canonical_contract(value)
+    backend = base.FabricBackend(coordinator_factory=lambda **_kwargs: coord)
+
+    # Upstream fail-closed rule (5c67834): forbidden-action contracts are
+    # rejected at the Fabric boundary; peer evidence cannot satisfy them.
+    rejected = backend.dispatch(
+        normalized,
+        confirm=True,
+        dry_run=False,
+        timeout=10,
+        hermes_root=tmp_path,
+    )
+    assert rejected["success"] is False
+    assert rejected.get("code") == "FABRIC_EVIDENCE_POLICY_INVALID"
+    monkeypatch.setattr(runners, "get_backend", real_get_backend)
+    verdict = _validate_with_coordinator(canonical, coord, tmp_path)
+    assert verdict["verdict"] != "SATISFIED"
+    by_kind = {item["kind"]: item for item in verdict["checks"]}
+    assert by_kind["forbidden"]["status"] == "UNVERIFIED"
+
+
+
+def test_remote_forbidden_pass_from_different_policy_cannot_satisfy_contract(tmp_path, monkeypatch):
+    real_get_backend = runners.get_backend
+    observed: list[dict[str, str]] = []
+    svc = make_service(tmp_path, monkeypatch, observed=observed)
+    coord = make_coordinator(tmp_path, svc)
+
+    # Upstream fail-closed rule (5c67834): forbidden-action contracts are
+    # rejected at the Fabric boundary before dispatch, so a differently-shaped
+    # forbidden policy can never be admitted as satisfying evidence.
+    dispatched_value = contract(tmp_path)
+    dispatched_value["forbidden_actions"] = [
+        {"action": "network_egress", "reason": "stay offline", "class": "HIGH"}
+    ]
+    _, dispatched_contract = op_contract._canonical_contract(dispatched_value)
+    backend = base.FabricBackend(coordinator_factory=lambda **_kwargs: coord)
+    rejected = backend.dispatch(
+        dispatched_contract,
+        confirm=True,
+        dry_run=False,
+        timeout=10,
+        hermes_root=tmp_path,
+    )
+    assert rejected["success"] is False
+    assert rejected.get("code") == "FABRIC_EVIDENCE_POLICY_INVALID"
+
+    stricter = contract(tmp_path)
+    stricter["forbidden_actions"] = [
+        {"action": "public_publish", "reason": "must remain private", "class": "HIGH"}
+    ]
+    stricter_canonical, _ = op_contract._canonical_contract(stricter)
+    monkeypatch.setattr(runners, "get_backend", real_get_backend)
+    verdict = _validate_with_coordinator(stricter_canonical, coord, tmp_path)
+
+    assert verdict["verdict"] != "SATISFIED"
+    by_kind = {item["kind"]: item for item in verdict["checks"]}
+    assert by_kind["forbidden"]["status"] == "UNVERIFIED"
+
+
+def test_remote_profile_scope_mismatch_is_rejected_before_dry_run_placement(tmp_path, monkeypatch):
+    svc = make_service(tmp_path, monkeypatch)
+    coord = make_coordinator(tmp_path, svc)
+    value = contract(tmp_path)
+    value["allowed_scope"]["profiles"] = ["qa"]
+    backend = base.FabricBackend(coordinator_factory=lambda **_kwargs: coord)
+
+    dispatched = backend.dispatch(
+        value,
+        confirm=False,
+        dry_run=True,
+        timeout=10,
+        hermes_root=tmp_path,
+    )
+    assert dispatched["success"] is False
+    assert dispatched["code"] == "FABRIC_AUTHORITY_DENIED"
+
+
 def test_auto_remote_dispatch_evidence_contract_and_flight_deck_compose(tmp_path, monkeypatch):
     real_get_backend = runners.get_backend
     observed: list[dict[str, str]] = []

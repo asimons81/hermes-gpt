@@ -28,7 +28,6 @@ from __future__ import annotations
 import hashlib
 import json
 import importlib
-import os
 import re
 import sys
 from pathlib import Path

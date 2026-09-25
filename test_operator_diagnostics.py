@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -178,6 +177,24 @@ def test_doctor_fails_when_heartbeat_exists_without_pid(hermes_root, clean_env, 
     assert check["code"] == "GATEWAY_PID_MISSING"
     assert check["running"] is False
     assert check["pid"] is None
+
+
+def test_doctor_uses_live_pid_from_gateway_state_when_legacy_pid_missing(
+    hermes_root, clean_env, audit_override
+):
+    (hermes_root / "cron" / "ticker_heartbeat").write_text("ok", encoding="utf-8")
+    (hermes_root / "gateway_state.json").write_text(
+        json.dumps({"pid": os.getpid(), "gateway_state": "running"}),
+        encoding="utf-8",
+    )
+
+    check = od._check_gateway_status(hermes_root)
+
+    assert check["status"] == "PASS"
+    assert check["code"] == "GATEWAY_OK"
+    assert check["pid"] == os.getpid()
+    assert check["pid_source"] == "gateway_state.json"
+    assert check["running"] is True
 
 
 def test_doctor_fails_for_corrupt_cron_jobs(hermes_root, clean_env, audit_override):

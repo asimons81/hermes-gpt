@@ -365,6 +365,7 @@ Git checkout updates require a clean checkout on the default branch and use fast
 Current operational documentation:
 
 - [Documentation map and source-of-truth rules](docs/README.md)
+- [Solutions runbooks (verified fixes for known problems)](docs/solutions/README.md)
 - [Runtime checkout pin (which checkout is live)](docs/runtime-checkout.md)
 - [Reuse / do-not-rebuild boundary](BOUNDARY.md)
 - [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md)
@@ -386,7 +387,7 @@ Historical release notes and pre-release design / risk / planning artifacts rema
 ## Development and verification
 
 ```bash
-python -m pip install -r requirements-dev.txt
+python -m pip install -e ".[dev]"
 python -m pytest
 python tools/check_package_hygiene.py dist/*
 ```

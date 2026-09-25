@@ -1,8 +1,12 @@
 # Hermes ChatGPT UI — Security & State Boundary Notes
 
-Status: current (implementation card t_7266e74c, 2026-08-15)
-Scope: `ui_security.py`, `ui_api.py` (composition), `server.py` mount,
-`web/src/shared/**`, `web/src/stores/connection.ts`, `test_ui_security.py`.
+Status: current (implementation card t_7266e74c, 2026-08-15; chat bridge
+ui_chat.py / operations bridge ui_ops.py routed through the boundary
+2026-09-01)
+Scope: `ui_security.py`, `ui_api.py` (composition), `ui_chat.py` (chat
+bridge), `ui_ops.py` (operations bridge), `server.py` mount,
+`web/src/shared/**`, `web/src/stores/connection.ts`, `test_ui_security.py`,
+`test_ui_chat.py`.
 
 These notes document the browser-facing security boundary for the
 conversational Hermes GPT UI. The authoritative design is
@@ -24,8 +28,30 @@ redaction automatically, so a handler cannot skip it by accident.
   `delta`). Everything else in that payload still gets the strict treatment.
 - `err(code, message)` — message is redacted before it leaves the server.
 
-SSE event payloads are redacted per-event by the chat bridge using the same
-function; tool events (`tool_start`/`tool_end`) use the strict default.
+SSE event payloads are redacted per-event at the `Turn.publish` chokepoint
+(`ui_chat.py`): every event that enters the replay ring — tool events, error
+messages, and metadata included — is serialized through
+`ui_security.redact_browser`, so a chat handler cannot skip it.
+
+Streaming `token`/`reasoning` deltas are redacted EXACTLY ONCE, at that same
+`Turn.publish` chokepoint: the chat bridge's hold-back buffer emits raw text
+and never pre-redacts (pre-redacting made every delta pass the pattern table
+twice and let a placeholder be mangled by the second pass). The buffer exists
+because per-event redaction alone cannot catch a secret split across two
+consecutive deltas (the secret shapes need the whole run in one string): the
+bridge holds back text whose tail is a secret START marker and flushes the
+remainder before the turn closes. The hold-back window is bounded
+(`_SSE_MAX_HOLD_CHARS` = 1024): a secret LONGER than the window can be split
+by a forced flush — the marker-bearing chunk is still redacted (an
+unterminated PEM becomes its placeholder), but the overflow body beyond the
+window can be emitted later as opaque base64 with no recognizable marker, and
+a BEGIN header dribbled one character at a time can fragment below pattern
+matchability. Secrets up to 1024 chars — and every secret that arrives whole
+in a single delta, of any size — are redacted in full; enlarging the window
+without unbounded latency is tracked follow-up work. The marker table is
+`operator_policy.SECRET_START_RE` — the single canonical list of prefixes the
+`SECRET_SHAPES` table can grow into — so the streaming boundary and the
+envelope boundary cannot drift apart.
 
 ## 2. What is redacted (strict mode)
 
@@ -37,18 +63,36 @@ function; tool events (`tool_start`/`tool_end`) use the strict default.
   `[REDACTED]`. Never silently empty.
 - `content` / `delta` keys in strict mode are treated as raw message bodies
   and redacted entirely (they survive only via `content_allowed=True`).
-- Secret substrings: `sk-…` / `sk-proj-…` OpenAI keys, `AKIA…` AWS keys,
-  `Bearer <token>`, `token=|secret=|password=|api_key=` values (reuses
-  `operator_policy.redact_output`).
+- Secret substrings, from the single canonical table
+  `operator_policy.SECRET_SHAPES` (every surface — operator output, browser
+  envelopes, SSE hold-back — reads this one table): PEM private-key blocks
+  (`-----BEGIN … PRIVATE KEY-----…`, redacted to end-of-input if the END line
+  is missing), `sk-…` / `sk-proj-…` OpenAI keys, `sk-ant-…` Anthropic keys,
+  `ghp_…` / `gho_…` / `ghu_…` GitHub tokens, `xoxb-` / `xoxp-` / `xoxa-`
+  Slack tokens, `AIza…` Google API keys, `AKIA…` / `ASIA…` AWS key IDs,
+  `Bearer <token>`, and `token=|secret=|password=|api_key=` values. Tokens
+  glued to a surrounding run (no whitespace) still redact: the bounded token
+  shapes deliberately match without word boundaries — a false positive is
+  cheaper than a leaked credential.
 - PII in operator-derived text: emails, phone numbers, `@handles`, name
-  labels (mirrors `operator_mission._sanitize_error`).
+  labels (mirrors `operator_mission._sanitize_error`). The bare two-word
+  name-pair heuristic skips known product/model phrases (`Claude Sonnet`,
+  `Gemini Flash`, `Google Cloud`, …): those are Titlecase pairs exactly like
+  personal names, but redacting them corrupted every payload that named a
+  model. Name LABELS (`name: …`) and honorific forms still redact.
 - Absolute filesystem paths (POSIX home paths, Windows drive paths, UNC, `~/...`) →
   `[REDACTED_PATH]`; secret-file paths (`secrets/…`, `.env`, `auth.json`,
   `hermes_gpt_tokens.json`, `hermes_gpt_tokens.db`, `hermes_gpt_token_key`, `.ssh/…`) →
   `[REDACTED_SECRETS_PATH]`. Store paths are never exposed.
-- Length cap: every string in strict mode is truncated to
-  `HERMES_GPT_UI_TOOL_PREVIEW_BYTES` (default 8192) with a `…[truncated]`
-  marker. Chat content is bounded at 1 MiB (conversation text is not a tool
+- Length cap, applied BEFORE any redaction pass: every string in strict
+  mode is truncated to `HERMES_GPT_UI_TOOL_PREVIEW_BYTES` (default 8192) with
+  a `…[truncated]` marker, and the redaction patterns only ever see the
+  capped bytes — a dot-heavy adversarial payload cannot force quadratic
+  regex work (a 64 KiB payload with the old cap-after-redact order measured
+  >120 s; it is now milliseconds). The cut itself is secret-safe: it backs up
+  past any secret shape straddling it and past any unresolved secret start
+  marker near it, so a partial token prefix or PEM body is never left
+  visible. Chat content is bounded at 1 MiB (conversation text is not a tool
   preview).
 
 `content_allowed=True` skips PII/path mangling and the 8 KiB cap for the
@@ -123,7 +167,7 @@ Existing env behavior is unchanged.
 ## 8. Verification
 
 ```bash
-python -m pytest test_ui_security.py      # 36 tests: redaction properties,
+python -m pytest test_ui_security.py      # 33 tests: redaction properties,
                                           # account states, auth boundary,
                                           # allowlist semantics, /api/* sweep
 cd web && npm install && npx tsc --noEmit  # frontend shared skeleton typecheck

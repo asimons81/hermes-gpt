@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -26,6 +28,17 @@ def _oauth_config() -> oauth_auth.OAuthConfig:
         client_secret="x" * 48,
         redirect_uris=("https://example.test/callback",),
     )
+
+
+def _s256(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+# Mandatory PKCE (oauth_auth.py) requires every remediation test that expects a
+# successful exchange to present a matching S256 challenge/verifier pair.
+_PKCE_VERIFIER = "x" * 48  # RFC 7636: 43-128 unreserved characters
+
 
 
 def test_signed_access_token_rejected_after_durable_revocation(tmp_path: Path):
@@ -358,13 +371,13 @@ def test_revocation_rotates_authorization_code_key(tmp_path: Path):
         redirect_uri=config.redirect_uris[0],
         scope=config.scope,
         resource=config.resource,
-        code_challenge="",
+        code_challenge=_s256(_PKCE_VERIFIER),
     )
     first = state.exchange_authorization_code(
         code=code,
         client_id=config.client_id,
         redirect_uri=config.redirect_uris[0],
-        code_verifier="",
+        code_verifier=_PKCE_VERIFIER,
     )
     assert first["access_token"]
 
@@ -376,7 +389,7 @@ def test_revocation_rotates_authorization_code_key(tmp_path: Path):
             code=code,
             client_id=config.client_id,
             redirect_uri=config.redirect_uris[0],
-            code_verifier="",
+            code_verifier=_PKCE_VERIFIER,
         )
     assert replay_exc.value.error == "invalid_grant"
     # (b) a fresh code minted before revocation is dead after key rotation
@@ -512,13 +525,13 @@ def test_post_revocation_fresh_exchange_persists(tmp_path: Path):
             redirect_uri=config.redirect_uris[0],
             scope=config.scope,
             resource=config.resource,
-            code_challenge="",
+            code_challenge=_s256(_PKCE_VERIFIER),
         )
         resp = state.exchange_authorization_code(
             code=code,
             client_id=config.client_id,
             redirect_uri=config.redirect_uris[0],
-            code_verifier="",
+            code_verifier=_PKCE_VERIFIER,
         )
     finally:
         oauth_auth.set_persist_hook(None)
@@ -717,7 +730,6 @@ def test_revocation_closes_legacy_migration(tmp_path: Path):
 
 def test_corrupt_legacy_ledger_fails_closed(tmp_path: Path):
     """An unparseable legacy retirement ledger aborts the import."""
-    import json as _json
 
     root = tmp_path / "hermes"
     config = _oauth_config()
@@ -793,7 +805,7 @@ def test_outstanding_code_dies_on_revocation(tmp_path: Path):
         redirect_uri=config.redirect_uris[0],
         scope=config.scope,
         resource=config.resource,
-        code_challenge="",
+        code_challenge=_s256(_PKCE_VERIFIER),
     )
     token_store.revoke_tokens(root, rotate_key=False)
     state.clear_live_tokens()
@@ -804,7 +816,7 @@ def test_outstanding_code_dies_on_revocation(tmp_path: Path):
             code=code,
             client_id=config.client_id,
             redirect_uri=config.redirect_uris[0],
-            code_verifier="",
+            code_verifier=_PKCE_VERIFIER,
         )
     assert excinfo.value.error == "invalid_grant"
 
@@ -820,7 +832,7 @@ def test_exchange_fails_loud_when_persistence_fails(tmp_path: Path):
         redirect_uri=config.redirect_uris[0],
         scope=config.scope,
         resource=config.resource,
-        code_challenge="",
+        code_challenge=_s256(_PKCE_VERIFIER),
     )
     # Break durable persistence AFTER the code decodes: the store exists
     # (epoch readable) but commits fail.
@@ -837,7 +849,7 @@ def test_exchange_fails_loud_when_persistence_fails(tmp_path: Path):
                 code=code,
                 client_id=config.client_id,
                 redirect_uri=config.redirect_uris[0],
-                code_verifier="",
+                code_verifier=_PKCE_VERIFIER,
             )
         assert excinfo.value.error in ("temporarily_unavailable", "invalid_grant")
     finally:
@@ -972,13 +984,13 @@ def test_startup_migration_preserves_positive_legacy_epoch(tmp_path: Path):
                 redirect_uri=config.redirect_uris[0],
                 scope=config.scope,
                 resource=config.resource,
-                code_challenge="",
+                code_challenge=_s256(_PKCE_VERIFIER),
             )
             resp = state.exchange_authorization_code(
                 code=code,
                 client_id=config.client_id,
                 redirect_uri=config.redirect_uris[0],
-                code_verifier="",
+                code_verifier=_PKCE_VERIFIER,
             )
             assert resp["access_token"]
             assert (
@@ -1006,7 +1018,7 @@ def test_retirement_tombstones_survive_expiry_and_block_reissue(tmp_path: Path):
 
     oauth_auth.set_persist_hook(lambda s, k: s.persist_tokens(root))
     try:
-        resp = seeder.exchange_refresh_token(
+        seeder.exchange_refresh_token(
             refresh_token=refresh, client_id=config.client_id, requested_scope=""
         )
     finally:
@@ -1269,11 +1281,40 @@ def test_rotation_and_issuance_are_serialized(tmp_path: Path):
     rev.join()
 
     assert outcomes["errors"] == 0, outcomes
-    # Every credential that committed must still be readable (correct key),
-    # and the revoked seed must be dead.
+    # The race must actually be exercised: with three issuers x five grants
+    # each, at least one grant must land (a vacuous run proves nothing).
+    assert outcomes["issued"] >= 1, outcomes
+    # Every granted credential is in exactly one of two legal states:
+    #   (a) committed AFTER the revocation — readable under the rotated key, or
+    #   (b) committed BEFORE it — killed by revoke's retire-all, leaving a
+    #       durable tombstone.
+    # The guarded defect ("live but encrypted under the key rotation just
+    # discarded") makes lookup_token RAISE TokenStoreError on the live,
+    # undecryptable row — it never silently returns None — so any raise here
+    # is a hard failure. A None that is not backed by a retired tombstone
+    # row is also a failure (the grant vanished).
+    import sqlite3
+
     for value in grant_values:
-        assert token_store.lookup_token(root, "access", value) is not None, (
-            "issued token unreadable after concurrent rotation"
+        try:
+            record = token_store.lookup_token(root, "access", value)
+        except token_store.TokenStoreError as exc:
+            raise AssertionError(
+                f"live token undecryptable after concurrent rotation: {exc}"
+            ) from exc
+        if record is not None:
+            continue
+        conn = sqlite3.connect(token_store._db_path(root))
+        try:
+            row = conn.execute(
+                "SELECT retired FROM tokens WHERE token_key=?",
+                (token_store.issue_key("access", value),),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None and row[0] == 1, (
+            "issued token neither readable nor durably retired by the "
+            "concurrent revocation"
         )
     assert token_store.lookup_token(root, "access", seed) is None
 
@@ -1281,7 +1322,6 @@ def test_rotation_and_issuance_are_serialized(tmp_path: Path):
 def test_negative_legacy_ledger_epoch_fails_closed(tmp_path: Path, monkeypatch):
     """A negative revocation_epoch in the legacy ledger is out-of-range
     history: it must import as epoch >= 1, never 0."""
-    import time as _time
 
     root = tmp_path / "hermes2"
     (root / "secrets").mkdir(parents=True, exist_ok=True)
@@ -1362,8 +1402,6 @@ def test_revoke_rotation_failure_reported_as_failure(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         token_store, "_store_key_in_keyring", lambda key: False, raising=False
     )
-    real_unlink = token_store.key_file_path
-
     def _boom(path):
         raise OSError("injected failure")
 

@@ -14,6 +14,8 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, List
 
+from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import CallToolResult, ToolAnnotations
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -51,6 +53,7 @@ import operator_oauth as op_oauth
 import operator_swarm as op_swarm
 import operator_recovery as op_recovery
 import operator_finance as op_finance
+from mcp_compat import HermesMCP as FastMCP
 from versioning import VERSION
 
 
@@ -729,10 +732,6 @@ def clean_error(tool_name: str, exc: Exception) -> RuntimeError:
     return RuntimeError(f"{tool_name} failed: {exc}")
 
 
-from mcp_compat import HermesMCP as FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolResult, ToolAnnotations
-
 import_hermes()
 
 
@@ -842,21 +841,67 @@ def hermes_memory(
         raise clean_error("hermes_memory", exc) from exc
 
 
-def hermes_skill_list() -> str:
+def _dedupe_skills(skills: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Deduplicate by public skill name while preserving skill-root priority."""
+    seen_names: set[str] = set()
+    unique_skills: list[dict[str, str]] = []
+    for skill in skills:
+        key = skill["name"].strip().lower()
+        if key and key not in seen_names:
+            seen_names.add(key)
+            unique_skills.append(skill)
+    return unique_skills
+
+
+def _skill_manual_only(skill: dict[str, str]) -> bool:
+    """Return whether the skill frontmatter disables model invocation."""
+    try:
+        text = Path(skill["path"]).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    if not text.startswith("---"):
+        return False
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return False
+    for line in parts[1].splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key.strip().lower() == "disable-model-invocation":
+            return value.strip().lower() in {"true", "yes", "1", "on"}
+    return False
+
+
+def hermes_skill_list(query: str = "", limit: int = 50, include_manual: bool = False) -> str:
+    """Discover installed Hermes skills for progressive model loading.
+
+    Search is case-insensitive across skill name, description, and path. Skills
+    marked ``disable-model-invocation: true`` are excluded by default so a model
+    does not auto-select manual/pipeline-only workflows; set ``include_manual``
+    only when the user explicitly asks for those skills or a complete inventory.
+    """
     try:
         require_imports()
-        skills = discover_skills()
+        capped_limit = max(1, min(int(limit), 200))
+        needle = query.strip().lower()
+        skills = _dedupe_skills(discover_skills())
+        if not include_manual:
+            skills = [skill for skill in skills if not _skill_manual_only(skill)]
+        if needle:
+            skills = [
+                skill
+                for skill in skills
+                if needle in skill["name"].lower()
+                or needle in skill["description"].lower()
+                or needle in skill["path"].lower()
+            ]
+        skills = skills[:capped_limit]
         if not skills:
-            return "No Hermes skills found."
-        # Deduplicate by name, keeping the first (user-level skills take priority)
-        seen_names: set[str] = set()
-        unique_skills: list[dict[str, str]] = []
-        for skill in skills:
-            if skill["name"].lower() not in seen_names:
-                seen_names.add(skill["name"].lower())
-                unique_skills.append(skill)
+            suffix = f" matching {query!r}" if query.strip() else ""
+            return f"No Hermes skills found{suffix}."
         lines = []
-        for skill in unique_skills:
+        for skill in skills:
             desc = f" - {skill['description']}" if skill["description"] else ""
             lines.append(f"- {skill['name']}{desc}\n  {skill['path']}")
         return "\n".join(lines)
@@ -864,26 +909,52 @@ def hermes_skill_list() -> str:
         raise clean_error("hermes_skill_list", exc) from exc
 
 
-def hermes_skill_view(name: str) -> str:
+def hermes_skill_view(
+    name: str,
+    file_path: str = "SKILL.md",
+    offset: int = 1,
+    limit: int = 500,
+) -> str:
+    """Read one installed Hermes skill or one of its skill-local text files.
+
+    Use this after ``hermes_skill_list`` to progressively load only the relevant
+    instructions, references, prompts, scripts, or text assets. ``file_path`` is
+    always resolved inside the selected skill directory and traversal is denied.
+    ``offset`` and ``limit`` are 1-based line controls for bounded reads.
+    """
     try:
         require_imports()
         query = name.strip().lower()
         matches = [
-            skill for skill in discover_skills()
+            skill
+            for skill in _dedupe_skills(discover_skills())
             if skill["name"].lower() == query or Path(skill["path"]).parent.name.lower() == query
         ]
         if not matches:
             return f"No skill matched {name!r}."
-        if len(matches) > 1:
-            return "Multiple skills matched:\n" + "\n".join(f"- {m['name']}: {m['path']}" for m in matches)
-        skill_path = Path(matches[0]["path"])
-        # Size guard: if file > 80KB, return bounded chunk with guidance
-        MAX_VIEW_BYTES = 80_000
-        file_size = skill_path.stat().st_size
-        if file_size > MAX_VIEW_BYTES:
-            text = skill_path.read_text(encoding="utf-8", errors="replace")
-            return text[:MAX_VIEW_BYTES] + f"\n\n--- TRUNCATED (showing {MAX_VIEW_BYTES} of {file_size} bytes). Use hermes_read_file for specific sections. ---"
-        return skill_path.read_text(encoding="utf-8", errors="replace")
+
+        skill_doc = Path(matches[0]["path"]).resolve()
+        skill_dir = skill_doc.parent
+        relative = Path(file_path or "SKILL.md")
+        if relative.is_absolute() or any(part == ".." for part in relative.parts):
+            raise ValueError("file_path must be a relative path inside the skill directory")
+        target = (skill_dir / relative).resolve()
+        try:
+            target.relative_to(skill_dir)
+        except ValueError as exc:
+            raise ValueError("file_path must stay inside the skill directory") from exc
+        if not target.is_file():
+            return f"Skill {matches[0]['name']!r} has no file {file_path!r}."
+
+        start = max(1, int(offset))
+        capped_limit = max(1, min(int(limit), 2000))
+        text = target.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        chunk = lines[start - 1 : start - 1 + capped_limit]
+        rendered = "\n".join(chunk)
+        if start - 1 + capped_limit < len(lines):
+            rendered += f"\n\n--- MORE: {len(lines) - (start - 1 + capped_limit)} lines remain; continue with offset={start + capped_limit}. ---"
+        return rendered
     except Exception as exc:
         raise clean_error("hermes_skill_view", exc) from exc
 
@@ -1099,7 +1170,7 @@ def hermes_session_read(
         safe_include_inactive = _validate_bool(include_inactive, "include_inactive")
         safe_include_system = _validate_bool(include_system_messages, "include_system_messages")
         safe_include_tool = _validate_bool(include_tool_messages, "include_tool_messages")
-        allowed_roles = _allowed_message_roles(
+        _allowed_message_roles(
             include_system_messages=safe_include_system,
             include_tool_messages=safe_include_tool,
         )

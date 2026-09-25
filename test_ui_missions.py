@@ -82,6 +82,15 @@ def test_mission_routes_are_get_only_and_composed(mission_root: Path):
     assert "/api/ops/missions/{mission_id}/events" in composed_paths
 
 
+def test_composed_ui_routes_do_not_shadow_mission_list(mission_root: Path):
+    client = TestClient(Starlette(routes=ui_api.routes()))
+    response = client.get("/api/ops/missions?limit=20")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["data"]["missions"][0]["mission_id"] == "msn-ui-test"
+
+
 def test_mission_list_and_detail_surface_bounded_runtime_state(
     mission_root: Path,
     monkeypatch: pytest.MonkeyPatch,

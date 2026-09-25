@@ -950,6 +950,13 @@ def hermes_mission_transition(
         if effective_dry:
             with _connect(path, write=False) as db:
                 mission = _row_to_mission(db, _get_row(db, mission_id))
+            if status == "cancelled":
+                observed = _observe_attachments(_root(hermes_root), mission)
+                would_contain = [str(a["ref"]) for a in observed if a["kind"] == "delegation" and a["state"] in {"pending", "running", "blocked"}]
+                if would_contain:
+                    # Mission cancellation is containment: unverifiable children
+                    # are force-terminated rather than blocking the Owner.
+                    return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_transition", "mission_id": mission_id, "from_status": str(mission["status"]), "to_status": status, "changed": False, "would_change": True, "would_contain": would_contain, "dry_run": True})
             current, would_change = validate(mission)
             return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_transition", "mission_id": mission_id, "from_status": current, "to_status": status, "changed": False, "would_change": would_change, "dry_run": True})
         if status == "completed":
@@ -974,6 +981,10 @@ def hermes_mission_transition(
             _audit("hermes_mission_transition", policy, dry_run=False, success=True, changed=changed, mission_id=mission_id, summary=f"mission {current}->completed")
             return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_transition", "mission_id": mission_id, "from_status": current, "to_status": "completed", "changed": changed})
         if status == "cancelled":
+            # Observe attachment stores without holding the Mission write lock,
+            # then linearize against delegation cancellation authority and
+            # commit through the Mission version CAS. Non-terminal delegation
+            # children block cancellation (containment is an Owner-only path).
             root = _root(hermes_root)
             with _connect(path, write=False) as db:
                 mission = _row_to_mission(db, _get_row(db, mission_id))

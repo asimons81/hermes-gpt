@@ -45,7 +45,7 @@ def test_historical_fabric_run_cannot_self_certify_forbidden_action_absence(
     value["forbidden_actions"] = [
         {"action": "public_publish", "reason": "must remain private", "class": "HIGH"}
     ]
-    monkeypatch.setattr(op_contract, "_observed_audit", lambda _root=None: [])
+    monkeypatch.setattr(op_contract, "_observed_audit", lambda _root=None, limit=None: [])
 
     class HistoricalFabricBackend:
         def observed_runs(self, task_id, *, hermes_root=None):
@@ -86,7 +86,7 @@ def test_fabric_observer_failure_cannot_be_masked_by_other_runner_completion(
     canonical, normalized = op_contract._canonical_contract(value)
     contract_sha = op_contract._contract_sha256(canonical)
 
-    monkeypatch.setattr(op_contract, "_observed_audit", lambda _root=None: [])
+    monkeypatch.setattr(op_contract, "_observed_audit", lambda _root=None, limit=None: [])
     monkeypatch.setattr(
         op_contract,
         "_observed_runs",
@@ -150,7 +150,7 @@ def test_auto_remote_lineage_fails_closed_when_fabric_observer_is_unavailable(
         )
         + "\n"
     )
-    monkeypatch.setattr(op_contract, "_observed_audit", lambda _root=None: [])
+    monkeypatch.setattr(op_contract, "_observed_audit", lambda _root=None, limit=None: [])
     monkeypatch.setattr(
         op_contract,
         "_observed_runs",
@@ -212,7 +212,7 @@ def test_auto_local_lineage_can_still_pass_forbidden_check(tmp_path, monkeypatch
         )
         + "\n"
     )
-    monkeypatch.setattr(op_contract, "_observed_audit", lambda _root=None: [])
+    monkeypatch.setattr(op_contract, "_observed_audit", lambda _root=None, limit=None: [])
 
     class EmptyFabricBackend:
         def observed_runs(self, task_id, *, hermes_root=None):

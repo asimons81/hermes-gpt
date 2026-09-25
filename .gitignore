@@ -29,6 +29,8 @@ tunnel-url.txt
 
 # Live deployment scripts (customized from examples/)
 *.ps1
+# ...but the shipped example templates stay trackable (pyproject data-files ships them)
+!examples/*.example.ps1
 
 # Local agent/worktree state (not part of the source tree)
 .hardproof/

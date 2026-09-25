@@ -44,7 +44,6 @@ def _make_state_db(path: Path, *, sessions: int = 2, delegations: list[dict] | N
             " id INTEGER PRIMARY KEY, session_id TEXT, input_tokens INTEGER,"
             " output_tokens INTEGER, estimated_cost_usd REAL, cost_status TEXT)"
         )
-        now = datetime.now(timezone.utc).isoformat()
         for i in range(sessions):
             conn.execute(
                 "INSERT OR IGNORE INTO sessions VALUES (?,?,?,?,?,?,?)",
@@ -240,7 +239,10 @@ def hermes_root(tmp_path: Path, monkeypatch) -> Path:
     root.mkdir(parents=True, exist_ok=True)
 
     # Default profile lives at the root (state.db, cron, gateway_state).
-    (root / "config.yaml").write_text("model: test-model\nprovider: test-provider\n", encoding="utf-8")
+    (root / "config.yaml").write_text(
+        "model:\n  default: test-model\n  provider: test-provider\n",
+        encoding="utf-8",
+    )
     _make_state_db(
         root / "state.db",
         sessions=2,
@@ -355,6 +357,16 @@ def test_envelope_contract(hermes_root, tool, surface):
     # Bounded: envelope must fit well under the surface hard cap.
     size = len(json.dumps(out))
     assert size < mission.SURFACE_HARD_CAP_BYTES
+
+
+def test_profiles_resolve_current_and_legacy_provider_config(hermes_root):
+    out = _run("hermes_mission_profiles_tool", hermes_root, force_refresh=True)
+    profiles = {item["profile"]: item for item in out["data"]["profiles"]}
+
+    assert profiles["default"]["model"] == "test-model"
+    assert profiles["default"]["provider"] == "test-provider"
+    assert profiles["dev"]["model"] == "dev-model"
+    assert profiles["dev"]["provider"] == "dev-provider"
 
 
 def test_overview_contract(hermes_root):

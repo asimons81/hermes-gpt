@@ -47,7 +47,7 @@ def main() -> int:
     c = resp.get("result", {}).get("content", [])
     t = c[0].get("text", "") if c else ""
     lines = t.split("\n")
-    names = set(l.split(" - ")[0][2:].strip().lower() for l in lines if l.startswith("- "))
+    names = set(ln.split(" - ")[0][2:].strip().lower() for ln in lines if ln.startswith("- "))
     passed = bool(c) and len(names) < 200  # dedup should reduce from 1174
     results.append(("hermes_skill_list", passed, f"{len(lines)} lines, {len(names)} unique, {len(t)} chars, {e:.1f}s"))
 
@@ -119,7 +119,7 @@ def main() -> int:
 
     # 10: no stale processes
     result = subprocess.run(["tasklist.exe"], capture_output=True, text=True, timeout=5)
-    cf = [l for l in result.stdout.split("\n") if "cloudflared" in l.lower()]
+    cf = [ln for ln in result.stdout.split("\n") if "cloudflared" in ln.lower()]
     results.append(("no stale processes", True, f"cloudflared: {len(cf)}"))
 
     for name, passed, detail in results:

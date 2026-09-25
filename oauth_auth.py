@@ -168,6 +168,19 @@ class OAuthClient:
                 or redirect.password is not None
             ):
                 raise ValueError("OAuth redirect URIs must be absolute HTTPS URLs without userinfo or fragments.")
+            if redirect_uri.endswith("*"):
+                prefix = redirect_uri[:-1]
+                if not prefix:
+                    raise ValueError("OAuth redirect URI wildcard must follow a non-empty prefix.")
+                prefix_parsed = urllib.parse.urlparse(prefix)
+                if (
+                    prefix_parsed.scheme != "https"
+                    or not prefix_parsed.netloc
+                    or not prefix_parsed.hostname
+                ):
+                    raise ValueError("OAuth redirect URI wildcard prefix must be an HTTPS origin/prefix.")
+                if "*" in prefix:
+                    raise ValueError("Only a single trailing wildcard is allowed in OAuth redirect URIs.")
         object.__setattr__(self, "client_id", self.client_id.strip())
         object.__setattr__(self, "redirect_uris", tuple(dict.fromkeys(self.redirect_uris)))
 
@@ -516,9 +529,13 @@ class OAuthState:
         if item.get("client_id") != client_id or item.get("redirect_uri") != redirect_uri:
             raise OAuthError("invalid_grant", "Authorization code validation failed.")
         challenge = item.get("code_challenge", "")
-        if challenge:
-            if not _valid_pkce_verifier(code_verifier) or not hmac.compare_digest(_s256(code_verifier), challenge):
-                raise OAuthError("invalid_grant", "Authorization code validation failed.")
+        # PKCE is mandatory: a code without a stored S256 challenge (e.g. one
+        # issued before PKCE enforcement, or by a bypassed authorize path) can
+        # never be exchanged — fail closed instead of skipping verification.
+        if not challenge:
+            raise OAuthError("invalid_grant", "Authorization code validation failed.")
+        if not _valid_pkce_verifier(code_verifier) or not hmac.compare_digest(_s256(code_verifier), challenge):
+            raise OAuthError("invalid_grant", "Authorization code validation failed.")
 
         scope = self.normalize_scope(item["scope"])
         self._require_capacity(self.used_auth_codes, self.max_auth_codes, "Authorization-code replay cache")
@@ -1014,7 +1031,7 @@ def authorization_metadata(_request: Request, state: OAuthState) -> JSONResponse
             "token_endpoint": f"{issuer}/oauth/token",
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
-            "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+            "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic", "none"],
             "code_challenge_methods_supported": ["S256"],
             "scopes_supported": list(state.config.supported_scopes),
         }
@@ -1039,6 +1056,17 @@ def _redirect_response(redirect_uri: str, values: list[tuple[str, str]]) -> Redi
     return RedirectResponse(location, status_code=302)
 
 
+def _redirect_uri_allowed(redirect_uri: str, client: OAuthClient) -> bool:
+    """Exact match, or prefix match against an entry ending in ``*``."""
+    for allowed in client.redirect_uris:
+        if allowed.endswith("*"):
+            if redirect_uri.startswith(allowed[:-1]):
+                return True
+        elif redirect_uri == allowed:
+            return True
+    return False
+
+
 def authorize(request: Request, state: OAuthState) -> JSONResponse | RedirectResponse:
     params = request.query_params
     client_id = params.get("client_id", "")
@@ -1046,7 +1074,7 @@ def authorize(request: Request, state: OAuthState) -> JSONResponse | RedirectRes
     client = state.config.client_for_id(client_id)
     if client is None:
         return _error_response(OAuthError("invalid_client", "Unknown OAuth client.", status_code=401))
-    if redirect_uri not in client.redirect_uris:
+    if not _redirect_uri_allowed(redirect_uri, client):
         return _error_response(OAuthError("invalid_request", "redirect_uri is not registered."))
     try:
         if params.get("response_type", "") != "code":
@@ -1057,10 +1085,14 @@ def authorize(request: Request, state: OAuthState) -> JSONResponse | RedirectRes
             raise OAuthError("invalid_target", "Requested resource is not supported.")
         challenge = params.get("code_challenge", "")
         method = params.get("code_challenge_method", "")
-        if challenge and (method != "S256" or not _PKCE_VALUE.fullmatch(challenge)):
-            raise OAuthError("invalid_request", "Only a valid S256 PKCE challenge is supported.")
-        if method and not challenge:
-            raise OAuthError("invalid_request", "code_challenge is required when a method is supplied.")
+        # PKCE is mandatory at authorization: every issued code is bound to
+        # an S256 challenge, so a stolen/intercepted code cannot be redeemed
+        # without the verifier (RFC 7636; public clients have no secret to
+        # authenticate with, the challenge IS the client authentication).
+        if not challenge or method != "S256" or not _PKCE_VALUE.fullmatch(challenge):
+            raise OAuthError(
+                "invalid_request", "A valid S256 code_challenge (PKCE) is required."
+            )
         code = state.issue_authorization_code(
             client_id=client.client_id,
             redirect_uri=redirect_uri,
@@ -1100,8 +1132,35 @@ def _client_credentials(request: Request, form: dict[str, list[str]]) -> tuple[s
 
 def _authenticate_client(request: Request, form: dict[str, list[str]], state: OAuthState) -> str:
     client_id, client_secret = _client_credentials(request, form)
+    # B4: non-ASCII credentials used to raise TypeError inside
+    # hmac.compare_digest and surface as a 500 on /oauth/token. Malformed
+    # credentials are a client error — reject them before any comparison.
+    for credential in (client_id, client_secret):
+        if credential and not credential.isascii():
+            raise OAuthError("invalid_client", "Invalid OAuth client credentials.", status_code=400)
     client = state.config.client_for_id(client_id)
-    if client is None or not hmac.compare_digest(client_secret, client.client_secret):
+    if client is None:
+        raise OAuthError("invalid_client", "Invalid OAuth client credentials.", status_code=401)
+    grant_type = _form_value(form, "grant_type")
+    # Public PKCE clients (e.g. ChatGPT connectors) send no client_secret.
+    # Secretless auth is only accepted for authorization_code grants that
+    # carry a syntactically valid PKCE verifier — and that verifier is then
+    # REQUIRED to match the S256 challenge stored in the authorization code
+    # (see exchange_authorization_code), so the absence of a client_secret
+    # never bypasses client authentication. Refresh-token grants stay
+    # secretless; refresh tokens are only issued to clients that already
+    # completed a verified PKCE exchange.
+    if not client_secret and (
+        grant_type == "refresh_token"
+        or (
+            grant_type == "authorization_code"
+            and _valid_pkce_verifier(_form_value(form, "code_verifier"))
+        )
+    ):
+        return client.client_id
+    if not hmac.compare_digest(
+        client_secret.encode("utf-8"), client.client_secret.encode("utf-8")
+    ):
         raise OAuthError("invalid_client", "Invalid OAuth client credentials.", status_code=401)
     return client.client_id
 
@@ -1155,7 +1214,7 @@ async def token(request: Request, state: OAuthState) -> JSONResponse:
         return _error_response(OAuthError("invalid_request", "Token request is malformed."))
     except OAuthError as exc:
         return _error_response(exc)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         # Strict durable persistence failures (and anything else unexpected)
         # surface as a bounded OAuth error, never an unhandled 500 after the
         # authorization code was consumed.

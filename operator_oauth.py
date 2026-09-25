@@ -16,7 +16,6 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import oauth_auth
 import operator_policy as op

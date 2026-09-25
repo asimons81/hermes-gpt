@@ -19,10 +19,14 @@ from its last seen ``id:`` seq before tailing live events.  The turn lease
 (``session_turn_leases``) guarantees one live turn per session; a second send
 on a busy session returns ``409 TURN_IN_PROGRESS``.
 
-Redaction: browser payloads are scrubbed here as an interim boundary until the
-``ui_security`` card lands the full ``redact_browser`` layer.  Tool summaries
-are truncated to ``HERMES_GPT_UI_TOOL_PREVIEW_BYTES`` (default 8 KiB) and
-obvious credential shapes are masked with ``[REDACTED]`` markers.  Raw
+Redaction: every browser-bound payload (JSON envelope and SSE ``data``
+line) goes through the ``ui_security`` boundary
+(``ui_security.redact_browser`` / ``ui_security.ok`` / ``ui_security.err``)
+per ``docs/ui-security-boundary.md``. The user's own conversation text
+(chat thread ``content``, SSE ``token``/``reasoning`` deltas) is serialized
+with ``content_allowed=True``; every other payload uses the strict default.
+Streaming deltas additionally use a hold-back buffer so a secret split
+across two consecutive deltas cannot reassemble in the browser. Raw
 prompts, memory bodies, transcripts, and secret-file paths are never
 serialized (AGENTS.md Mission Control invariants).
 
@@ -36,7 +40,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import threading
 import time
 import uuid
@@ -48,16 +51,19 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+import ui_security
+
 logger = logging.getLogger("hermes_gpt.ui_chat")
 
 # ── Env knobs (existing env unchanged; UI gates opt-in) ───────────────────
 UI_PROFILE_ENV = "HERMES_GPT_UI_PROFILE"
 UI_STALE_LEASE_S_ENV = "HERMES_GPT_UI_STALE_LEASE_S"
+# Same knob ui_security.preview_bytes() reads; kept here as the documented
+# chat-side name for tool-preview truncation (enforced in ui_security).
 UI_TOOL_PREVIEW_BYTES_ENV = "HERMES_GPT_UI_TOOL_PREVIEW_BYTES"
 UI_MAX_CONCURRENT_ENV = "HERMES_GPT_UI_MAX_CONCURRENT"
 
 DEFAULT_STALE_LEASE_S = 600
-DEFAULT_TOOL_PREVIEW_BYTES = 8192
 DEFAULT_MAX_CONCURRENT = 4
 
 # Finished turns keep their replay buffer this long after the last event.
@@ -94,14 +100,28 @@ class Turn:
         self.done = False
         self.cancel_requested = False
         self.tool_times: Dict[str, float] = {}
+        self.delta_redactors: list[_DeltaRedactor] = []
 
     def publish(self, event: str, data: dict) -> None:
+        # Boundary chokepoint: every SSE data line is serialized through
+        # ui_security before entering the replay ring, so no handler can
+        # skip redaction by accident (docs/ui-security-boundary.md §1).
+        # "token"/"reasoning" carry the user's own conversation stream and
+        # use content mode; everything else is strict.
+        safe_data = ui_security.redact_browser(
+            data, content_allowed=event in ("token", "reasoning")
+        )
         with self.cond:
             self.seq += 1
-            self.events.append((self.seq, event, data))
+            self.events.append((self.seq, event, safe_data))
             if len(self.events) > TURN_EVENT_RING_MAX:
                 self.events.popleft()
             self.cond.notify_all()
+
+    def flush_deltas(self) -> None:
+        """Flush streaming hold-back buffers before the turn closes."""
+        for redactor in self.delta_redactors:
+            redactor.flush()
 
     def mark_done(self, finish_reason: str, error: Optional[str] = None) -> None:
         with self.cond:
@@ -206,13 +226,6 @@ def _ui_profile() -> str:
     return os.environ.get(UI_PROFILE_ENV, "").strip() or "default"
 
 
-def _tool_preview_bytes() -> int:
-    try:
-        return int(os.environ.get(UI_TOOL_PREVIEW_BYTES_ENV, DEFAULT_TOOL_PREVIEW_BYTES))
-    except ValueError:
-        return DEFAULT_TOOL_PREVIEW_BYTES
-
-
 def _max_concurrent() -> int:
     try:
         return max(1, int(os.environ.get(UI_MAX_CONCURRENT_ENV, DEFAULT_MAX_CONCURRENT)))
@@ -273,32 +286,89 @@ def _serialize_session(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# ── Redaction-lite (interim boundary until ui_security lands) ─────────────
+# ── Redaction boundary (ui_security; see docs/ui-security-boundary.md) ────
 
-_SECRET_PATTERNS = [
-    re.compile(r"(?i)\b(sk-[A-Za-z0-9_-]{8,})\b"),
-    re.compile(r"(?i)\b(bearer\s+[A-Za-z0-9._~+/=-]{8,})\b"),
-    re.compile(r"(?i)\b(api[_-]?key[\"']?\s*[:=]\s*[\"']?[A-Za-z0-9._-]{8,})"),
-    re.compile(r"(?i)\b(password|passwd|pwd|secret|token)[\"']?\s*[:=]\s*[\"']?[^\s\"']{4,}"),
-    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-]
+def _redact_text(text: str) -> str:
+    """Strict text redaction via the ui_security boundary.
+
+    No local pattern list: the single source of secret shapes is
+    ``operator_policy.redact_output`` through ``ui_security.redact_browser``,
+    so chat-side redaction can never drift from the operator surface.
+    """
+    if not text:
+        return text
+    return ui_security.redact_browser(text)
+
+
+def _redact_content_text(text: str) -> str:
+    """Content-mode redaction for the user's own conversation text.
+
+    Rides the ``delta`` key so the payload gets exactly the documented
+    ``content_allowed=True`` class: unambiguous secret shapes removed, PII /
+    path mangling and the 8 KiB cap skipped (1 MiB bound applies).
+    """
+    if not text:
+        return text
+    return ui_security.redact_browser({"delta": text}, content_allowed=True)["delta"]
+
+
+# Streaming deltas are redacted per-event, but a secret split across two
+# consecutive deltas would reassemble client-side (the secret regexes need
+# the whole run in one string). The chat bridge therefore holds back a tail
+# window and never emits text that could still grow into a secret shape.
+_SSE_HOLD_BACK_CHARS = 256
+# Upper bound on how much text may be held back: a run of secret-looking
+# text longer than this is flushed anyway, bounding worst-case added latency.
+_SSE_MAX_HOLD_CHARS = 1024
+# Single source (B1): the same markers operator_policy.SECRET_SHAPES can
+# grow into, re-exported through the ui_security boundary.
+_SECRET_START_RE = ui_security.SECRET_START_RE
+
+
+class _DeltaRedactor:
+    """Straddle-safe redacting forwarder for one streaming delta channel."""
+
+    def __init__(self, turn: Turn, event: str) -> None:
+        self._turn = turn
+        self._event = event
+        self._pending = ""
+
+    def push(self, delta: str) -> None:
+        if not delta:
+            return
+        self._pending += delta
+        emit, self._pending = self._split_safe(self._pending)
+        if emit:
+            # B7: Turn.publish is the single redaction chokepoint — emitting
+            # raw here means each delta is redacted exactly once (content mode
+            # for token/reasoning events). Pre-redacting here redacted twice
+            # and doubled the cost of every streamed character.
+            self._turn.publish(self._event, {"delta": emit})
+
+    def flush(self) -> None:
+        if self._pending:
+            pending, self._pending = self._pending, ""
+            self._turn.publish(self._event, {"delta": pending})
+
+    @staticmethod
+    def _split_safe(buffer: str) -> tuple[str, str]:
+        cut = len(buffer) - _SSE_HOLD_BACK_CHARS
+        for match in _SECRET_START_RE.finditer(buffer):
+            # Hold from the last position that could still grow into a
+            # secret: whatever is emitted always starts at or before it, so
+            # any secret <= _SSE_MAX_HOLD_CHARS lands whole in one emit.
+            cut = min(cut, match.start())
+        cut = max(cut, len(buffer) - _SSE_MAX_HOLD_CHARS)
+        if cut <= 0:
+            return "", buffer
+        return buffer[:cut], buffer[cut:]
+
 
 # Tool args whose values are user/message content — never surfaced raw.
 _CONTENT_ARG_KEYS = {
     "prompt", "message", "content", "text", "query", "body", "input",
     "user_message", "command", "code", "goal", "context",
 }
-
-_SECRET_PATH_RE = re.compile(r"(?i)(?:/|\\|^)(?:\.env|secrets?)(?:/|\\|\.|$)|\.pem\b|\.key\b")
-
-
-def _redact_text(text: str) -> str:
-    if not text:
-        return text
-    for pattern in _SECRET_PATTERNS:
-        text = pattern.sub("[REDACTED]", text)
-    text = _SECRET_PATH_RE.sub("[REDACTED]", text)
-    return text
 
 
 def _truncate(text: str, cap: int) -> str:
@@ -369,9 +439,13 @@ def _serialize_message(row: Dict[str, Any]) -> Dict[str, Any]:
         "interrupted": finish_reason == "interrupted",
     }
     if role == "tool":
-        base["tool_result"] = _truncate(_redact_text(row.get("content") or ""), _tool_preview_bytes())
+        base["tool_result"] = _redact_text(row.get("content") or "")
         base["tool_name"] = row.get("tool_name")
         base["tool_call_id"] = row.get("tool_call_id")
+    else:
+        # The user's own conversation text: content mode (secrets removed,
+        # no PII/path mangling, 1 MiB bound) — never serialized raw.
+        base["content"] = _redact_content_text(row.get("content") or "")
     return base
 
 
@@ -383,14 +457,17 @@ def _make_stream_callbacks(turn: Turn) -> Tuple[Any, Any, Any, Any]:
     Extracted from ``_build_agent`` so tests can drive the exact SSE event
     encoding with a stub agent (no live model, no AIAgent construction).
     """
+    token_redactor = _DeltaRedactor(turn, "token")
+    reasoning_redactor = _DeltaRedactor(turn, "reasoning")
+    turn.delta_redactors = [token_redactor, reasoning_redactor]
 
     def on_token(delta: str) -> None:
         if delta:
-            turn.publish("token", {"delta": delta})
+            token_redactor.push(delta)
 
     def on_reasoning(delta: str) -> None:
         if delta:
-            turn.publish("reasoning", {"delta": delta})
+            reasoning_redactor.push(delta)
 
     def on_tool_start(call_id: str, name: str, display_args: Any) -> None:
         turn.tool_times[call_id] = time.monotonic()
@@ -478,6 +555,9 @@ def _finalize_turn(turn: Turn, result: Optional[dict], db: Any) -> None:
         finish_reason = "error"
     else:
         finish_reason = "end_turn"
+    # Close the streaming hold-back buffers first: their remainder must land
+    # before message_complete/done, or the SSE generator can exit early.
+    turn.flush_deltas()
     message_id = _latest_message_id(db, turn.session_id, role="assistant")
     if message_id is None:
         message_id = _latest_message_id(db, turn.session_id)
@@ -503,10 +583,12 @@ def _run_turn(turn: Turn, *, message: str, profile: str, model: str, db: Any, ho
         _finalize_turn(turn, result, db)
     except ImportError as exc:
         logger.error("ui_chat: agent imports unavailable: %s", exc)
+        turn.flush_deltas()
         turn.publish("error", {"code": "IMPORT_UNAVAILABLE", "message": "Hermes agent imports are unavailable in this install."})
         turn.mark_done("error", error=str(exc))
     except Exception as exc:  # noqa: BLE001 — turn must always close cleanly
         logger.exception("ui_chat: turn failed for session %s", turn.session_id)
+        turn.flush_deltas()
         turn.publish("error", {"code": "INTERNAL", "message": str(exc) or exc.__class__.__name__})
         turn.mark_done("error", error=str(exc))
     finally:
@@ -567,12 +649,19 @@ async def _replay_generator(turn: Turn, after: int) -> AsyncIterator[str]:
 
 # ── Envelope helpers ──────────────────────────────────────────────────────
 
-def _ok(data: Any, status: int = 200) -> JSONResponse:
-    return JSONResponse({"ok": True, "data": data}, status_code=status)
+def _ok(data: Any, status: int = 200, *, content_allowed: bool = False) -> JSONResponse:
+    """Success envelope via ui_security (strict by default).
+
+    ``content_allowed=True`` is reserved for the user's own conversation text
+    (chat thread messages); every other payload keeps the strict default.
+    """
+    return JSONResponse(
+        ui_security.ok(data, content_allowed=content_allowed), status_code=status
+    )
 
 
 def _error(status: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse({"ok": False, "error": {"code": code, "message": message}}, status_code=status)
+    return ui_security.err(code, message, status_code=status)
 
 
 # ── Route handlers ────────────────────────────────────────────────────────
@@ -613,7 +702,7 @@ async def _handle_session_messages(request: Request) -> Response:
         logger.warning("ui_chat: message read failed: %s", exc)
         return _error(500, "INTERNAL", "Failed to load messages")
     messages = [_serialize_message(dict(row)) for row in rows]
-    return _ok({"messages": messages})
+    return _ok({"messages": messages}, content_allowed=True)
 
 
 async def _handle_chat_post(request: Request) -> Response:

@@ -26,7 +26,6 @@ def test_codex_http_runner_does_not_trust_wildcard_proxies(monkeypatch):
 
     monkeypatch.setattr(uvicorn, "run", lambda app, **kw: captured.update(kw))
 
-    import os
 
     monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
     server._run_codex_mcp(["--http", "--host", "127.0.0.1", "--port", "7878"])

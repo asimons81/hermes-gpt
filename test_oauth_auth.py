@@ -47,6 +47,9 @@ REDIRECT_URI = "https://chatgpt.com/connector/oauth/callback"
 ISSUER = "https://mcp.example.com"
 RESOURCE = f"{ISSUER}/mcp"
 STATIC_BEARER = "test-static-bearer-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Shared PKCE pair: the authorize/exchange helpers default to a valid S256
+# challenge + verifier so every happy-path test exercises mandatory PKCE.
+DEFAULT_VERIFIER = "a" * 64
 
 
 @pytest.fixture
@@ -92,9 +95,14 @@ def authorize_code(
     client: TestClient,
     *,
     scope: str = "openid hermes offline_access",
-    code_challenge: str | None = None,
+    code_challenge: str | None = "auto",
     resource: str = RESOURCE,
 ) -> str:
+    """"auto" (default) sends a valid S256 challenge for DEFAULT_VERIFIER;
+    ``None`` omits PKCE entirely (negative tests only — authorization
+    without PKCE is rejected)."""
+    if code_challenge == "auto":
+        code_challenge = s256(DEFAULT_VERIFIER)
     params = {
         "response_type": "code",
         "client_id": CLIENT_ID,
@@ -205,10 +213,9 @@ def test_environment_config_is_disabled_by_default_and_requires_complete_confide
 def test_discovery_truthfully_advertises_implemented_capabilities(oauth_client: TestClient):
     metadata = oauth_client.get("/.well-known/oauth-authorization-server").json()
     assert metadata["grant_types_supported"] == ["authorization_code", "refresh_token"]
-    assert metadata["token_endpoint_auth_methods_supported"] == ["client_secret_post", "client_secret_basic"]
+    assert metadata["token_endpoint_auth_methods_supported"] == ["client_secret_post", "client_secret_basic", "none"]
     assert metadata["code_challenge_methods_supported"] == ["S256"]
     assert set(metadata["scopes_supported"]) == {"hermes", "openid", "offline_access"}
-    assert "none" not in metadata["token_endpoint_auth_methods_supported"]
     assert "jwks_uri" not in metadata
     assert "id_token_signing_alg_values_supported" not in metadata
 
@@ -233,7 +240,7 @@ def test_code_is_useless_without_client_authentication(oauth_client: TestClient)
 def test_wrong_client_secret_does_not_consume_authorization_code(oauth_client: TestClient):
     code = authorize_code(oauth_client)
     assert exchange_code(oauth_client, code, secret="wrong-secret-that-is-still-long-enough").status_code == 401
-    assert exchange_code(oauth_client, code).status_code == 200
+    assert exchange_code(oauth_client, code, code_verifier=DEFAULT_VERIFIER).status_code == 200
 
 
 def test_signed_authorization_code_rejects_tampering_and_replay(oauth_client: TestClient):
@@ -243,8 +250,8 @@ def test_signed_authorization_code_rejects_tampering_and_replay(oauth_client: Te
     assert tampered.status_code == 400
     assert tampered.json()["error"] == "invalid_grant"
 
-    assert exchange_code(oauth_client, code).status_code == 200
-    replay = exchange_code(oauth_client, code)
+    assert exchange_code(oauth_client, code, code_verifier=DEFAULT_VERIFIER).status_code == 200
+    replay = exchange_code(oauth_client, code, code_verifier=DEFAULT_VERIFIER)
     assert replay.status_code == 400
     assert replay.json()["error"] == "invalid_grant"
 
@@ -274,7 +281,7 @@ def test_process_restart_invalidates_signed_authorization_codes(oauth_state: OAu
         redirect_uri=REDIRECT_URI,
         scope="hermes",
         resource=RESOURCE,
-        code_challenge="",
+        code_challenge=s256(DEFAULT_VERIFIER),
     )
     restarted = OAuthState(oauth_state.config)
     with pytest.raises(OAuthError) as exc_info:
@@ -282,7 +289,7 @@ def test_process_restart_invalidates_signed_authorization_codes(oauth_state: OAu
             code=code,
             client_id=CLIENT_ID,
             redirect_uri=REDIRECT_URI,
-            code_verifier="",
+            code_verifier=DEFAULT_VERIFIER,
         )
     assert exc_info.value.error == "invalid_grant"
 
@@ -321,14 +328,59 @@ def test_token_endpoint_stops_reading_chunked_body_at_limit(oauth_state: OAuthSt
     assert receive_calls == 2
 
 
-def test_authorization_code_exchange_preserves_legacy_chatgpt_request_without_pkce(oauth_client: TestClient):
+def test_authorization_code_exchange_preserves_legacy_chatgpt_request_shape(oauth_client: TestClient):
+    """The ChatGPT connector's legacy request shape (openid scope, no
+    offline_access) still works — now always with mandatory PKCE."""
     code = authorize_code(oauth_client, scope="openid hermes")
-    response = exchange_code(oauth_client, code)
+    response = exchange_code(oauth_client, code, code_verifier=DEFAULT_VERIFIER)
     assert response.status_code == 200
     body = response.json()
     assert body["expires_in"] == ACCESS_TOKEN_TTL_SECONDS
     assert body["scope"] == "openid hermes"
     assert "refresh_token" not in body
+
+
+def test_authorize_without_pkce_challenge_is_rejected(oauth_client: TestClient):
+    """A3: PKCE is mandatory at the authorization endpoint — a request
+    without a code_challenge gets an error redirect, never a usable code
+    (reproduces the challenge-less-code path from the audit)."""
+    response = oauth_client.get(
+        "/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": CLIENT_ID,
+            "redirect_uri": REDIRECT_URI,
+            "scope": "hermes",
+            "state": "opaque-state",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(response.headers["location"]).query)
+    assert query["error"] == ["invalid_request"]
+    assert query["state"] == ["opaque-state"]
+    assert "code" not in query
+
+
+def test_legacy_code_without_stored_challenge_cannot_be_exchanged(oauth_state: OAuthState):
+    """A3: a code that carries no stored S256 challenge (issued before PKCE
+    enforcement, or via a bypassed authorize path) fails closed at exchange —
+    a valid-looking verifier alone must never be enough."""
+    code = oauth_state.issue_authorization_code(
+        client_id=CLIENT_ID,
+        redirect_uri=REDIRECT_URI,
+        scope="hermes",
+        resource=RESOURCE,
+        code_challenge="",
+    )
+    with pytest.raises(OAuthError) as exc_info:
+        oauth_state.exchange_authorization_code(
+            code=code,
+            client_id=CLIENT_ID,
+            redirect_uri=REDIRECT_URI,
+            code_verifier="A" * 43,  # syntactically valid verifier
+        )
+    assert exc_info.value.error == "invalid_grant"
 
 
 def test_pkce_s256_is_enforced_when_the_client_supplies_a_challenge(oauth_client: TestClient):
@@ -386,14 +438,14 @@ def test_resource_scope_is_required_for_authorization_and_refresh(oauth_client: 
     denied_query = urllib.parse.parse_qs(urllib.parse.urlparse(denied.headers["location"]).query)
     assert denied_query["error"] == ["invalid_scope"]
 
-    issued = exchange_code(oauth_client, authorize_code(oauth_client)).json()
+    issued = exchange_code(oauth_client, authorize_code(oauth_client), code_verifier=DEFAULT_VERIFIER).json()
     narrowed_too_far = refresh(oauth_client, issued["refresh_token"], scope="openid offline_access")
     assert narrowed_too_far.status_code == 400
     assert narrowed_too_far.json()["error"] == "invalid_scope"
 
 
 def test_offline_access_issues_rotating_client_bound_refresh_token(oauth_client: TestClient):
-    initial = exchange_code(oauth_client, authorize_code(oauth_client)).json()
+    initial = exchange_code(oauth_client, authorize_code(oauth_client), code_verifier=DEFAULT_VERIFIER).json()
     assert initial["refresh_token"]
     refreshed_response = refresh(oauth_client, initial["refresh_token"])
     assert refreshed_response.status_code == 200
@@ -406,7 +458,7 @@ def test_offline_access_issues_rotating_client_bound_refresh_token(oauth_client:
 
 
 def test_wrong_refresh_client_secret_does_not_consume_token(oauth_client: TestClient):
-    initial = exchange_code(oauth_client, authorize_code(oauth_client)).json()
+    initial = exchange_code(oauth_client, authorize_code(oauth_client), code_verifier=DEFAULT_VERIFIER).json()
     denied = refresh(oauth_client, initial["refresh_token"], secret="wrong-secret-that-is-still-long-enough")
     assert denied.status_code == 401
     assert refresh(oauth_client, initial["refresh_token"]).status_code == 200
@@ -420,6 +472,7 @@ def test_refresh_expiry_unknown_and_scope_escalation_fail_closed(oauth_client: T
     initial = exchange_code(
         oauth_client,
         authorize_code(oauth_client, scope="hermes offline_access"),
+        code_verifier=DEFAULT_VERIFIER,
     ).json()
     escalated = refresh(oauth_client, initial["refresh_token"], scope="openid hermes offline_access")
     assert escalated.status_code == 400
@@ -441,7 +494,7 @@ def test_authorization_code_replay_access_and_refresh_stores_are_bounded(oauth_s
         redirect_uri=REDIRECT_URI,
         scope="hermes",
         resource=RESOURCE,
-        code_challenge="",
+        code_challenge=s256(DEFAULT_VERIFIER),
     )
     oauth_state.used_auth_codes.update(
         {f"nonce-{index}": {"expires_at": time.time() + 60} for index in range(MAX_AUTH_CODES)}
@@ -451,7 +504,7 @@ def test_authorization_code_replay_access_and_refresh_stores_are_bounded(oauth_s
             code=code,
             client_id=CLIENT_ID,
             redirect_uri=REDIRECT_URI,
-            code_verifier="",
+            code_verifier=DEFAULT_VERIFIER,
         )
     assert exc_info.value.error == "temporarily_unavailable"
 
@@ -464,14 +517,14 @@ def test_public_authorization_requests_do_not_consume_replay_cache(oauth_state: 
             redirect_uri=REDIRECT_URI,
             scope="hermes",
             resource=RESOURCE,
-            code_challenge="",
+            code_challenge=s256(DEFAULT_VERIFIER),
         )
     assert oauth_state.used_auth_codes == {}
     assert oauth_state.exchange_authorization_code(
         code=latest,
         client_id=CLIENT_ID,
         redirect_uri=REDIRECT_URI,
-        code_verifier="",
+        code_verifier=DEFAULT_VERIFIER,
     )["access_token"]
 
 
@@ -481,7 +534,7 @@ def test_access_store_exact_capacity_fails_closed_without_consuming_code(oauth_s
         redirect_uri=REDIRECT_URI,
         scope="hermes",
         resource=RESOURCE,
-        code_challenge="",
+        code_challenge=s256(DEFAULT_VERIFIER),
     )
     oauth_state.access_tokens.update(
         {f"access-{index}": {"expires_at": time.time() + 60} for index in range(MAX_ACCESS_TOKENS)}
@@ -491,7 +544,7 @@ def test_access_store_exact_capacity_fails_closed_without_consuming_code(oauth_s
             code=code,
             client_id=CLIENT_ID,
             redirect_uri=REDIRECT_URI,
-            code_verifier="",
+            code_verifier=DEFAULT_VERIFIER,
         )
     assert exc_info.value.error == "temporarily_unavailable"
     oauth_state.access_tokens.pop("access-0")
@@ -499,7 +552,7 @@ def test_access_store_exact_capacity_fails_closed_without_consuming_code(oauth_s
         code=code,
         client_id=CLIENT_ID,
         redirect_uri=REDIRECT_URI,
-        code_verifier="",
+        code_verifier=DEFAULT_VERIFIER,
     )["access_token"]
 
 
@@ -509,7 +562,7 @@ def test_refresh_store_exact_capacity_fails_closed_without_consuming_code(oauth_
         redirect_uri=REDIRECT_URI,
         scope="hermes offline_access",
         resource=RESOURCE,
-        code_challenge="",
+        code_challenge=s256(DEFAULT_VERIFIER),
     )
     oauth_state.refresh_tokens.update(
         {f"refresh-{index}": {"expires_at": time.time() + 60} for index in range(MAX_REFRESH_TOKENS)}
@@ -519,7 +572,7 @@ def test_refresh_store_exact_capacity_fails_closed_without_consuming_code(oauth_
             code=code,
             client_id=CLIENT_ID,
             redirect_uri=REDIRECT_URI,
-            code_verifier="",
+            code_verifier=DEFAULT_VERIFIER,
         )
     assert exc_info.value.error == "temporarily_unavailable"
     oauth_state.refresh_tokens.pop("refresh-0")
@@ -527,13 +580,13 @@ def test_refresh_store_exact_capacity_fails_closed_without_consuming_code(oauth_
         code=code,
         client_id=CLIENT_ID,
         redirect_uri=REDIRECT_URI,
-        code_verifier="",
+        code_verifier=DEFAULT_VERIFIER,
     )["refresh_token"]
 
 
 def test_cleanup_removes_only_expired_credentials(oauth_client: TestClient, oauth_state: OAuthState):
-    expired = exchange_code(oauth_client, authorize_code(oauth_client)).json()
-    active = exchange_code(oauth_client, authorize_code(oauth_client)).json()
+    expired = exchange_code(oauth_client, authorize_code(oauth_client), code_verifier=DEFAULT_VERIFIER).json()
+    active = exchange_code(oauth_client, authorize_code(oauth_client), code_verifier=DEFAULT_VERIFIER).json()
     oauth_state.access_tokens[expired["access_token"]]["expires_at"] = time.time() - 1
     oauth_state.refresh_tokens[expired["refresh_token"]]["expires_at"] = time.time() - 1
     oauth_state.cleanup()
@@ -544,7 +597,7 @@ def test_cleanup_removes_only_expired_credentials(oauth_client: TestClient, oaut
 
 
 def test_credentials_are_absent_from_metadata_and_errors(oauth_client: TestClient):
-    issued = exchange_code(oauth_client, authorize_code(oauth_client)).json()
+    issued = exchange_code(oauth_client, authorize_code(oauth_client), code_verifier=DEFAULT_VERIFIER).json()
     observed = str(oauth_client.get("/.well-known/oauth-authorization-server").json())
     observed += str(refresh(oauth_client, issued["refresh_token"], secret="wrong-secret-that-is-still-long-enough").json())
     assert CLIENT_SECRET not in observed
@@ -656,7 +709,7 @@ def test_bearer_middleware_preserves_static_token_compatibility(monkeypatch: pyt
 
 
 def test_refreshed_access_token_passes_bearer_middleware(oauth_client: TestClient, oauth_state: OAuthState):
-    issued = exchange_code(oauth_client, authorize_code(oauth_client)).json()
+    issued = exchange_code(oauth_client, authorize_code(oauth_client), code_verifier=DEFAULT_VERIFIER).json()
     refreshed = refresh(oauth_client, issued["refresh_token"]).json()
     assert validate_bearer_token(refreshed["access_token"], oauth_state, static_token="")
 
@@ -673,3 +726,44 @@ def test_accept_middleware_normalizes_only_missing_or_wildcard_accept_header():
     assert missing == "application/json, text/event-stream"
     assert wildcard == "application/json, text/event-stream"
     assert explicit == "application/json"
+
+
+
+# ── B4: malformed (non-ASCII) credentials are a 400, never a 500 ─────────
+
+def test_non_ascii_client_id_is_400_not_500(oauth_client: TestClient):
+    """Regression (B4): a non-ASCII client_id used to raise TypeError inside
+    hmac.compare_digest and surface as a 500 on /oauth/token."""
+    response = oauth_client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": "café",
+            "client_secret": CLIENT_SECRET,
+            "code": "irrelevant",
+            "redirect_uri": REDIRECT_URI,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_client"
+
+
+def test_non_ascii_client_secret_is_400_not_500(oauth_client: TestClient):
+    code = authorize_code(oauth_client)
+    response = exchange_code(oauth_client, code, secret="café-secret-café-0123456789-abcdef")
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_client"
+
+
+def test_non_ascii_basic_auth_credentials_are_rejected(oauth_client: TestClient):
+    """The Basic-auth path decodes UTF-8 and must not 500 either."""
+    import base64
+
+    raw = base64.b64encode("café:test-client-secret-0123456789".encode("utf-8")).decode("ascii")
+    response = oauth_client.post(
+        "/oauth/token",
+        data={"grant_type": "authorization_code", "code": "irrelevant", "redirect_uri": REDIRECT_URI},
+        headers={"Authorization": f"Basic {raw}"},
+    )
+    assert response.status_code in (400, 401)
+    assert response.json()["error"] == "invalid_client"

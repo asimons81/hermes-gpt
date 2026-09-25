@@ -9,7 +9,11 @@ The built-in authorization server is intentionally narrow:
 - one statically configured confidential client by default, plus optional additional named client profiles (see [Additional clients](#additional-clients-gemini-spark-profile));
 - exact HTTPS redirect-URI allowlisting;
 - client authentication on every authorization-code and refresh exchange;
-- optional PKCE S256 validation when a client supplies a challenge;
+- **mandatory PKCE (RFC 7636): every authorization request must carry a
+  valid `code_challenge` with `code_challenge_method=S256`, and every
+  authorization-code exchange must present the matching verifier** — a code
+  without a stored S256 challenge can never be exchanged, so a stolen or
+  intercepted code is useless without the verifier;
 - one configured Hermes resource scope (required on every issued token) plus the connector compatibility scopes `openid` and `offline_access`;
 - one-hour HMAC-signed access tokens (verifiable by any origin that shares the confidential client secret);
 - 30-day refresh tokens with rotation and replay rejection;
@@ -18,7 +22,14 @@ The built-in authorization server is intentionally narrow:
 
 `openid` is accepted because ChatGPT may add it even with OIDC disabled. Hermes GPT does not advertise OpenID Provider metadata and does not issue ID tokens; `/.well-known/openid-configuration` is served as a public 404 (not an auth challenge) so clients that probe OIDC discovery with OIDC disabled do not mistake the connector for disconnected. Configure the ChatGPT connector with OIDC disabled.
 
-The client secret is the credential that prevents an arbitrary network caller from exchanging an authorization code. Public clients using token endpoint authentication method `none` are not supported. Do not expose an OAuth-enabled endpoint until a strong client secret is configured.
+The client secret is the credential that prevents an arbitrary network caller
+from exchanging an authorization code. Confidential clients authenticate with
+`client_secret_post` or `client_secret_basic`. Secretless (public-client,
+token endpoint auth method `none`) authorization-code exchanges are accepted
+**only** when they carry a PKCE verifier that matches the S256 challenge
+stored in the authorization code — the verified challenge is the client
+authentication, so `none` never bypasses it. Do not expose an OAuth-enabled
+endpoint until a strong client secret is configured.
 
 ## Generate a client secret
 
@@ -99,6 +110,7 @@ Token endpoint:        https://mcp.example.com/oauth/token
 Client ID:             chatgpt-client
 Client secret:         the generated confidential-client secret
 Token auth method:     client_secret_post or client_secret_basic
+                      (public clients: `none`, which then requires PKCE)
 Default scope:         hermes offline_access
 OIDC:                  disabled
 ```
