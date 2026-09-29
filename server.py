@@ -50,6 +50,7 @@ import operator_controller as op_controller
 import operator_oauth as op_oauth
 import operator_swarm as op_swarm
 import operator_recovery as op_recovery
+import operator_autopilot as op_autopilot
 import operator_finance as op_finance
 from versioning import VERSION
 
@@ -2646,6 +2647,51 @@ def hermes_controller_trigger(mission_id: str, trigger_kind: str, ref: str = "")
     )
 
 
+# --- Autopilot (v0.13 PR1) --------------------------------------------------
+#
+# Durable runtime only: places a Mission under Autopilot control via a
+# detached worker process (survives MCP disconnect/restart) and reports
+# truthful status by reconciling worker liveness, never a cached belief. The
+# worker itself does not yet dispatch any node (see docs/design/v0.13-autopilot.md).
+# Default OFF: gated both by tool registration below (HERMES_GPT_AUTOPILOT=1)
+# and, redundantly, by a live re-read inside op_autopilot for any direct call.
+
+
+def hermes_autopilot_start(
+    mission_id: str,
+    max_concurrency: int = 3,
+    max_replans: int = 2,
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Place a Mission under durable Autopilot control (PR1: runtime skeleton).
+
+    Dry-run-first; a direct call additionally requires confirm=true and the
+    HERMES_GPT_AUTOPILOT=1 machine gate. Idempotent while a non-terminal run
+    already exists for the Mission.
+    """
+    return op_autopilot.hermes_autopilot_start(
+        mission_id, max_concurrency=max_concurrency, max_replans=max_replans,
+        confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_autopilot_status(mission_id: str) -> str:
+    """Read-only Autopilot status for a Mission; reconciles worker liveness first."""
+    return op_autopilot.hermes_autopilot_status(mission_id, hermes_root=_default_hermes_root())
+
+
+def hermes_autopilot_stop(
+    mission_id: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+) -> str:
+    """Request that a Mission's Autopilot worker stop. Always allowed (the safe direction)."""
+    return op_autopilot.hermes_autopilot_stop(
+        mission_id, confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root(),
+    )
+
+
 # --- Work Contracts (v0.6 M1) ----------------------------------------------
 
 
@@ -3368,6 +3414,13 @@ def register_tools(server: FastMCP) -> None:
         hermes_controller_trigger,
     ):
         server.add_tool(_controller_tool, meta=tool_meta())
+
+    # Autopilot (v0.13 PR1) — durable runtime only, default OFF. Registered as
+    # a group so status/stop are only reachable once a run could ever exist.
+    if env_enabled(op_autopilot.AUTOPILOT_ENV):
+        server.add_tool(hermes_autopilot_start, meta=tool_meta())
+        server.add_tool(hermes_autopilot_status, meta=tool_meta())
+        server.add_tool(hermes_autopilot_stop, meta=tool_meta())
 
     # Event history (v0.7 S4): read-only normalized timeline over durable
     # stores. Registered unconditionally; each tool enforces the per-client

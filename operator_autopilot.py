@@ -1,0 +1,649 @@
+"""Durable Autopilot runtime for Hermes GPT v0.13 (PR1 slice).
+
+This is the machinery that says "this Mission is under Autopilot control" and
+nothing more. See ``docs/design/v0.13-autopilot.md`` for the full slice design
+and invariants; this module implements PR1 only:
+
+- ``hermes_autopilot_start`` / ``hermes_autopilot_status`` / ``hermes_autopilot_stop``.
+- A durable ``autopilot_runs`` store (orchestration metadata only — never a
+  shadow copy of Mission/node/delegation truth, which stay authoritative in
+  ``operator_mission_runtime`` / ``operator_mission_plan`` / ``operator_delegations``).
+- A detached worker process, reusing the exact spawn/register/reconcile
+  pattern ``operator_codex.py`` already uses via ``operator_job_supervisor``,
+  so Autopilot survives an MCP server restart or disconnect without ever
+  trusting a cached in-memory belief about whether it is still running.
+
+PR1's worker loop is intentionally a skeleton: it watches for external
+cancellation and Mission terminal state only. It does not yet call the
+controller, score placement, or dispatch any node — that begins at PR2/PR3.
+
+Reused, not rebuilt (BOUNDARY.md:25-29 — "the controller layer is a caller,
+not a competing owner"): Mission lifecycle (``operator_mission_runtime``),
+MissionPlan (``operator_mission_plan``), the canonical skill resolver
+(``operator_skill_resolution``), the durable job/process primitive
+(``operator_job_supervisor``), and the standard three-step OperatorPolicy gate
+(``require_level`` -> ``require_mutation`` -> explicit ``confirm`` check) every
+other mutating ``hermes_*`` tool in this codebase already follows.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import json
+import os
+import secrets
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterator
+
+import operator_job_supervisor as job_supervisor
+import operator_live_events as live_events
+import operator_mission_plan as mission_plan
+import operator_mission_runtime as mission_runtime
+import operator_policy as op
+import operator_skill_resolution as skill_resolution
+
+SCHEMA_VERSION = "hermes.autopilot/v1"
+
+# Global machine gate (live read, never cached). Default OFF. Mirrors the
+# idiom at operator_controller.py's CONTROLLER_EXECUTE_ENV / _execute_enabled.
+AUTOPILOT_ENV = "HERMES_GPT_AUTOPILOT"
+
+STATES = ("starting", "running", "waiting_for_owner", "stopping", "stopped", "completed", "failed")
+TERMINAL_STATES = frozenset({"stopped", "completed", "failed"})
+
+# Maps an operator_job_supervisor terminal job status onto an autopilot_runs
+# state. A job "cancelled" via hermes_autopilot_stop maps to "stopped" (owner
+# intent); any other terminal job status is a crash/exit and maps to "failed"
+# unless the worker itself recorded a clean "completed".
+_JOB_STATUS_TO_RUN_STATE = {
+    "completed": "completed",
+    "failed": "failed",
+    "cancelled": "stopped",
+    "timed_out": "failed",
+}
+
+MAX_CONCURRENCY_LIMIT = 16
+MAX_REPLANS_LIMIT = 10
+TICK_SECONDS = 2.0
+IS_WINDOWS = os.name == "nt"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _data_root(hermes_root: Path | None = None) -> Path:
+    configured = hermes_root or Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+    normalized = op.normalize_hermes_data_root(configured)
+    return Path(normalized or configured).expanduser().resolve()
+
+
+def _root(hermes_root: Path | None = None) -> Path:
+    return _data_root(hermes_root) / "autopilot"
+
+
+def _validate_mission_id(mission_id: str) -> str:
+    value = str(mission_id or "").strip()
+    if not mission_runtime.MISSION_ID_RE.fullmatch(value):
+        raise ValueError("mission_id has an invalid format")
+    return value
+
+
+def job_id_for(mission_id: str, attempt: int) -> str:
+    """A fresh job_id per start attempt.
+
+    operator_job_supervisor terminal states are monotonic/final by design
+    (mark_running refuses to resurrect a terminal record) — reusing one fixed
+    job_id across restarts would make a second ``hermes_autopilot_start`` call
+    after a stop/crash silently no-op forever. Attempt numbering lives on the
+    autopilot_runs record (see ``_claim_run``); this function only formats it.
+    """
+    return f"autopilot:{_validate_mission_id(mission_id)}:{int(attempt)}"
+
+
+def _run_path(mission_id: str, hermes_root: Path | None = None) -> Path:
+    return _root(hermes_root) / f"{_validate_mission_id(mission_id)}.json"
+
+
+def _lock_path(mission_id: str, hermes_root: Path | None = None) -> Path:
+    return _root(hermes_root) / f"{_validate_mission_id(mission_id)}.lock"
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+    with temp.open("w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.flush()
+        try:
+            os.fsync(handle.fileno())
+        except OSError:
+            pass
+    try:
+        temp.chmod(0o600)
+    except OSError:
+        pass
+    temp.replace(path)
+
+
+def _load_json(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+@contextlib.contextmanager
+def _record_lock(mission_id: str, hermes_root: Path | None = None) -> Iterator[None]:
+    """Serialize autopilot_runs writers across independently restarted processes."""
+    path = _lock_path(mission_id, hermes_root)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    handle = path.open("a+b")
+    try:
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        if IS_WINDOWS:
+            import msvcrt
+
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
+def _read_run(mission_id: str, hermes_root: Path | None = None) -> dict[str, Any] | None:
+    return _load_json(_run_path(mission_id, hermes_root))
+
+
+def _new_run_record(mission_id: str, *, attempt: int) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mission_id": mission_id,
+        "enabled": True,
+        "state": "starting",
+        "attempt": attempt,
+        "job_id": None,
+        "max_concurrency": 0,
+        "max_replans": 0,
+        "replans_used": 0,
+        "started_at": _now(),
+        "last_tick_at": None,
+        "last_event_cursor": 0,
+        "config_sha256": "",
+        "pid": None,
+    }
+
+
+def _write_run(mission_id: str, hermes_root: Path | None, **fields: Any) -> dict[str, Any]:
+    with _record_lock(mission_id, hermes_root):
+        path = _run_path(mission_id, hermes_root)
+        record = _load_json(path) or _new_run_record(mission_id, attempt=0)
+        record.update(fields)
+        record["updated_at"] = _now()
+        _atomic_json(path, record)
+        return record
+
+
+def _claim_run(
+    mission_id: str,
+    hermes_root: Path | None,
+    *,
+    max_concurrency: int,
+    max_replans: int,
+    config_sha256: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Atomically claim the one-Mission-one-scheduler-lease slot.
+
+    Returns ``(existing, None)`` when a non-terminal run already owns this
+    Mission (idempotent — the caller must not spawn), or ``(None, claimed)``
+    with a freshly written "starting" record (a new attempt number, therefore
+    a fresh job_id) that the caller now owns and must spawn a worker for.
+    Both the read and the write happen under one ``_record_lock`` critical
+    section so two concurrent ``hermes_autopilot_start`` calls cannot both
+    observe "nothing running" and both spawn a worker for the same Mission.
+    """
+    with _record_lock(mission_id, hermes_root):
+        path = _run_path(mission_id, hermes_root)
+        existing = _load_json(path)
+        if existing is not None and existing.get("state") not in TERMINAL_STATES:
+            return existing, None
+        attempt = int(existing.get("attempt", 0)) + 1 if existing else 1
+        record = _new_run_record(mission_id, attempt=attempt)
+        record.update({
+            "state": "starting",
+            "job_id": job_id_for(mission_id, attempt),
+            "max_concurrency": max_concurrency,
+            "max_replans": max_replans,
+            "config_sha256": config_sha256,
+            "last_event_cursor": live_events.high_watermark(hermes_root=hermes_root),
+        })
+        record["updated_at"] = _now()
+        _atomic_json(path, record)
+        return None, record
+
+
+def _autopilot_enabled() -> bool:
+    """Global machine gate (live read, never cached). Default OFF."""
+    return os.environ.get(AUTOPILOT_ENV, "").strip() == "1"
+
+
+def _bounded_int(value: Any, *, minimum: int, maximum: int, field: str) -> int:
+    try:
+        ivalue = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be an integer") from exc
+    if not (minimum <= ivalue <= maximum):
+        raise ValueError(f"{field} must be between {minimum} and {maximum}")
+    return ivalue
+
+
+def _load_mission(mission_id: str, hermes_root: Path | None) -> dict[str, Any]:
+    payload = json.loads(mission_runtime.hermes_mission_get(mission_id, hermes_root=hermes_root))
+    if not payload.get("success") or payload.get("found") is False:
+        raise LookupError(f"mission {mission_id!r} was not found")
+    return payload
+
+
+def _load_plan(mission_id: str, hermes_root: Path | None) -> dict[str, Any]:
+    payload = json.loads(mission_plan.hermes_plan_get(mission_id, hermes_root=hermes_root))
+    if not payload.get("success") or payload.get("found") is False:
+        raise LookupError(f"mission {mission_id!r} has no MissionPlan")
+    if not payload.get("nodes"):
+        raise ValueError("MissionPlan has no nodes")
+    return payload
+
+
+def _validate_plan_capabilities(plan: dict[str, Any], hermes_root: Path | None) -> None:
+    """Reuse the same canonical resolver operator_mission_plan gates plan creation with."""
+    for node in plan.get("nodes", []):
+        capability = node.get("capability_req") or {}
+        if not capability:
+            continue
+        rejection = skill_resolution.validate_required_skills(
+            capability.get("profile", ""), capability.get("skills", []), hermes_root,
+        )
+        if rejection is not None:
+            rejection = dict(rejection)
+            rejection["node_id"] = node.get("node_id", "")
+            raise skill_resolution.SkillRequirementsError(rejection)
+
+
+def _error(exc: Exception, code: str, action: str, *, extra: dict[str, Any] | None = None) -> str:
+    return json.dumps(op.error_from_exception(exc, layer="operator", code=code, suggested_action=action, extra=extra))
+
+
+def _audit(
+    tool: str,
+    policy: op.OperatorPolicy,
+    *,
+    dry_run: bool,
+    success: bool,
+    changed: bool,
+    mission_id: str = "",
+    extra: dict[str, Any] | None = None,
+) -> None:
+    try:
+        op.audit_record(
+            tool=tool,
+            level=policy.level,
+            apply_mode=policy.apply_mode,
+            dry_run=dry_run,
+            success=success,
+            changed=changed,
+            summary=f"{tool} mission={mission_id}",
+            extra={"mission_id": mission_id, **(extra or {})},
+        )
+    except (OSError, TypeError, ValueError):
+        return
+
+
+# ---------------------------------------------------------------------------
+# MCP-facing tools
+# ---------------------------------------------------------------------------
+
+
+def hermes_autopilot_start(
+    mission_id: str,
+    max_concurrency: int = 3,
+    max_replans: int = 2,
+    confirm: bool = False,
+    dry_run: bool = True,
+    hermes_root: Path | None = None,
+) -> str:
+    """Place a Mission under durable Autopilot control (PR1: runtime skeleton).
+
+    Validates, before any write: the Mission exists and is not terminal, a
+    MissionPlan exists with at least one node, and every node's
+    ``capability_req`` resolves through the canonical skill resolver. A
+    non-dry-run call additionally requires ``confirm=True`` and the
+    ``HERMES_GPT_AUTOPILOT=1`` machine gate (default off). A second call while
+    a non-terminal run already exists for this Mission is idempotent and does
+    not spawn a second worker.
+
+    PR1's worker only watches for external cancellation and Mission terminal
+    state — it does not yet dispatch any node (see
+    ``docs/design/v0.13-autopilot.md`` PR2/PR3).
+    """
+    policy = op.OperatorPolicy()
+    try:
+        policy.require_level("workspace")
+        policy.require_mutation(dry_run)
+        effective_dry = policy.effective_dry_run(dry_run)
+        if not effective_dry and not confirm:
+            raise PermissionError("direct autopilot start requires confirm=true")
+        if not effective_dry and not _autopilot_enabled():
+            raise PermissionError(f"direct autopilot start requires {AUTOPILOT_ENV}=1")
+
+        mission_id = _validate_mission_id(mission_id)
+        max_concurrency = _bounded_int(max_concurrency, minimum=1, maximum=MAX_CONCURRENCY_LIMIT, field="max_concurrency")
+        max_replans = _bounded_int(max_replans, minimum=0, maximum=MAX_REPLANS_LIMIT, field="max_replans")
+
+        mission = _load_mission(mission_id, hermes_root)
+        if mission.get("status") in mission_runtime.TERMINAL_STATUSES:
+            raise ValueError(f"mission is terminal ({mission.get('status')}); autopilot cannot start")
+
+        plan = _load_plan(mission_id, hermes_root)
+        _validate_plan_capabilities(plan, hermes_root)
+
+        preview = _read_run(mission_id, hermes_root)
+        if preview is not None and preview.get("state") not in TERMINAL_STATES:
+            _audit("hermes_autopilot_start", policy, dry_run=effective_dry, success=True, changed=False,
+                   mission_id=mission_id, extra={"idempotent": True})
+            return json.dumps({
+                "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start",
+                "dry_run": effective_dry, "mission_id": mission_id, "idempotent": True, "run": preview,
+            })
+
+        config = {"max_concurrency": max_concurrency, "max_replans": max_replans}
+        config_sha256 = hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
+
+        if effective_dry:
+            _audit("hermes_autopilot_start", policy, dry_run=True, success=True, changed=False, mission_id=mission_id)
+            return json.dumps({
+                "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start",
+                "dry_run": True, "mission_id": mission_id, "would_start": True,
+                "max_concurrency": max_concurrency, "max_replans": max_replans,
+                "config_sha256": config_sha256, "node_count": len(plan.get("nodes", [])),
+            })
+
+        existing, claimed = _claim_run(
+            mission_id, hermes_root,
+            max_concurrency=max_concurrency, max_replans=max_replans, config_sha256=config_sha256,
+        )
+        if claimed is None:
+            _audit("hermes_autopilot_start", policy, dry_run=False, success=True, changed=False,
+                   mission_id=mission_id, extra={"idempotent": True})
+            return json.dumps({
+                "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start",
+                "dry_run": False, "mission_id": mission_id, "idempotent": True, "run": existing,
+            })
+
+        job_id = claimed["job_id"]
+        run_dir = _root(hermes_root)
+        log_path = run_dir / f"{mission_id}.{claimed['attempt']}.log"
+        job_supervisor.register_job(
+            job_id, backend="autopilot", workspace=_data_root(hermes_root),
+            log_path=log_path, source_record=_run_path(mission_id, hermes_root),
+            hermes_root=hermes_root,
+        )
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "--worker", mission_id,
+                 "--job-id", job_id, "--root", str(_data_root(hermes_root))],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                shell=False,
+                cwd=str(_data_root(hermes_root)),
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if IS_WINDOWS else 0,
+                start_new_session=not IS_WINDOWS,
+            )
+        except (OSError, ValueError) as exc:
+            try:
+                job_supervisor.terminalize(job_id, "failed", summary=op.redact_output(str(exc)), hermes_root=hermes_root)
+            except FileNotFoundError:
+                pass
+            _write_run(mission_id, hermes_root, state="failed")
+            return _error(exc, "AUTOPILOT_START_FAILED", "Check the Python interpreter and Hermes data root permissions.")
+
+        # Deliberately do NOT call job_supervisor.mark_running from here with
+        # proc.pid: reading /proc/<pid>/cmdline this soon after Popen() returns
+        # can race a still-in-progress execve() and observe a transiently empty
+        # cmdline (a documented Linux /proc quirk), which would durably record
+        # a wrong process identity. The worker records its own (guaranteed
+        # post-exec, therefore correct) identity as the first thing it does in
+        # _worker() below. Until then job_supervisor reports status="queued",
+        # which is truthful, not "running" with a corrupted identity.
+        run = _write_run(mission_id, hermes_root, state="running", pid=proc.pid)
+        _audit("hermes_autopilot_start", policy, dry_run=False, success=True, changed=True, mission_id=mission_id,
+               extra={"job_id": job_id, "pid": proc.pid, "max_concurrency": max_concurrency, "max_replans": max_replans})
+        return json.dumps({
+            "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start",
+            "dry_run": False, "mission_id": mission_id, "job_id": job_id, "run": run,
+        })
+    except skill_resolution.SkillRequirementsError as exc:
+        payload = json.loads(_error(
+            exc, "AUTOPILOT_SKILL_REQUIREMENTS_REJECTED",
+            "Install the required skills in the requested Hermes profile before starting Autopilot.",
+            extra={"skill_validation": exc.rejection},
+        ))
+        payload.update({"schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start", "mission_id": mission_id})
+        return json.dumps(payload)
+    except (LookupError, ValueError, TypeError, PermissionError, OSError, json.JSONDecodeError) as exc:
+        return _error(exc, "AUTOPILOT_START_REJECTED",
+                      "Check Mission/Plan state, Operator policy level, and the HERMES_GPT_AUTOPILOT gate.")
+
+
+def hermes_autopilot_status(mission_id: str, hermes_root: Path | None = None) -> str:
+    """Read-only Autopilot status for a Mission; reconciles worker liveness first.
+
+    Never trusts the cached ``autopilot_runs`` record alone: every call
+    re-observes the owning ``operator_job_supervisor`` job (PID-reuse-resistant
+    identity check) and syncs the run record if the worker terminated without
+    Autopilot itself having recorded that yet — this is what keeps status
+    truthful across an MCP server restart.
+    """
+    policy = op.OperatorPolicy()
+    try:
+        policy.require_level("read_only")
+        mission_id = _validate_mission_id(mission_id)
+        run = _read_run(mission_id, hermes_root)
+        if run is None:
+            return json.dumps({
+                "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_status",
+                "mission_id": mission_id, "found": False,
+            })
+        job_id = run.get("job_id")
+        job = job_supervisor.get_job(job_id, hermes_root=hermes_root, reconcile=True) if job_id else None
+        if job is not None and run.get("state") not in TERMINAL_STATES:
+            mapped = _JOB_STATUS_TO_RUN_STATE.get(str(job.get("status") or ""))
+            if mapped and mapped != run.get("state"):
+                run = _write_run(mission_id, hermes_root, state=mapped)
+        _audit("hermes_autopilot_status", policy, dry_run=True, success=True, changed=False, mission_id=mission_id)
+        return json.dumps({
+            "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_status",
+            "mission_id": mission_id, "found": True, "run": run,
+            "worker": {
+                "pid": job.get("pid") if job else None,
+                "status": job.get("status") if job else None,
+                "process_verification": job.get("process_verification") if job else None,
+            },
+        })
+    except (LookupError, ValueError, PermissionError, OSError, json.JSONDecodeError) as exc:
+        return _error(exc, "AUTOPILOT_STATUS_FAILED", "Check the mission id and Operator read access.")
+
+
+def hermes_autopilot_stop(
+    mission_id: str,
+    confirm: bool = False,
+    dry_run: bool = True,
+    hermes_root: Path | None = None,
+) -> str:
+    """Request that a Mission's Autopilot worker stop (owner-initiated, always allowed).
+
+    Unlike ``hermes_autopilot_start``, stopping does not require the
+    ``HERMES_GPT_AUTOPILOT`` machine gate — the safe direction is never gated,
+    only starting new autonomous execution is.
+    """
+    policy = op.OperatorPolicy()
+    try:
+        policy.require_level("workspace")
+        policy.require_mutation(dry_run)
+        effective_dry = policy.effective_dry_run(dry_run)
+        if not effective_dry and not confirm:
+            raise PermissionError("direct autopilot stop requires confirm=true")
+
+        mission_id = _validate_mission_id(mission_id)
+        run = _read_run(mission_id, hermes_root)
+        if run is None or run.get("state") in TERMINAL_STATES:
+            _audit("hermes_autopilot_stop", policy, dry_run=effective_dry, success=True, changed=False, mission_id=mission_id)
+            return json.dumps({
+                "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_stop",
+                "dry_run": effective_dry, "mission_id": mission_id, "changed": False,
+                "state": run.get("state") if run else "not_found",
+            })
+
+        if effective_dry:
+            return json.dumps({
+                "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_stop",
+                "dry_run": True, "mission_id": mission_id, "would_stop": True, "state": run.get("state"),
+            })
+
+        job_id = run.get("job_id")
+        if not job_id:
+            run = _write_run(mission_id, hermes_root, state="stopped")
+            _audit("hermes_autopilot_stop", policy, dry_run=False, success=True, changed=True, mission_id=mission_id)
+            return json.dumps({
+                "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_stop",
+                "dry_run": False, "mission_id": mission_id, "changed": True, "state": "stopped",
+            })
+        result = job_supervisor.request_cancel(job_id, hermes_root=hermes_root)
+        if not result.get("success"):
+            if result.get("code") == "JOB_NOT_FOUND":
+                run = _write_run(mission_id, hermes_root, state="stopped")
+                _audit("hermes_autopilot_stop", policy, dry_run=False, success=True, changed=True, mission_id=mission_id)
+                return json.dumps({
+                    "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_stop",
+                    "dry_run": False, "mission_id": mission_id, "changed": True, "state": "stopped",
+                })
+            _audit("hermes_autopilot_stop", policy, dry_run=False, success=False, changed=False, mission_id=mission_id,
+                   extra={"code": result.get("code")})
+            return json.dumps({
+                "success": False, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_stop",
+                "mission_id": mission_id,
+                "error": {
+                    "code": result.get("code") or "AUTOPILOT_STOP_FAILED",
+                    "message": result.get("safe_message") or "autopilot worker could not be safely stopped",
+                },
+            })
+
+        mapped = _JOB_STATUS_TO_RUN_STATE.get(str(result.get("status") or ""), "stopped")
+        run = _write_run(mission_id, hermes_root, state=mapped)
+        _audit("hermes_autopilot_stop", policy, dry_run=False, success=True, changed=bool(result.get("changed")),
+               mission_id=mission_id)
+        return json.dumps({
+            "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_stop",
+            "dry_run": False, "mission_id": mission_id, "changed": bool(result.get("changed")), "state": mapped,
+        })
+    except (LookupError, ValueError, PermissionError, OSError, json.JSONDecodeError) as exc:
+        return _error(exc, "AUTOPILOT_STOP_FAILED", "Check the mission id, Operator policy level, and job liveness.")
+
+
+# ---------------------------------------------------------------------------
+# Detached worker (PR1 skeleton — no dispatch yet; see PR2/PR3)
+# ---------------------------------------------------------------------------
+
+
+def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
+    try:
+        job_supervisor.mark_running(job_id, os.getpid(), hermes_root=hermes_root)
+    except FileNotFoundError:
+        return 2
+    _write_run(mission_id, hermes_root, state="running", pid=os.getpid())
+    try:
+        while True:
+            job = job_supervisor.get_job(job_id, hermes_root=hermes_root, reconcile=False)
+            if job is None:
+                return 2
+            job_status = str(job.get("status") or "")
+            if job_status in job_supervisor.TERMINAL_STATES:
+                # Already finalized externally (e.g. hermes_autopilot_stop).
+                # Sync our own record and exit without re-terminalizing.
+                _write_run(mission_id, hermes_root,
+                           state=_JOB_STATUS_TO_RUN_STATE.get(job_status, "stopped"))
+                return 0
+            mission = json.loads(mission_runtime.hermes_mission_get(mission_id, hermes_root=hermes_root))
+            if mission.get("status") in mission_runtime.TERMINAL_STATUSES:
+                terminal = job_supervisor.terminalize(job_id, "completed", hermes_root=hermes_root)
+                _write_run(mission_id, hermes_root,
+                           state=_JOB_STATUS_TO_RUN_STATE.get(str(terminal.get("status")), "completed"))
+                return 0
+            _write_run(mission_id, hermes_root, last_tick_at=_now())
+            time.sleep(TICK_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - a durable worker must fail closed, never crash silently
+        try:
+            job_supervisor.terminalize(job_id, "failed", summary=op.redact_output(str(exc))[:500], hermes_root=hermes_root)
+        except FileNotFoundError:
+            pass
+        _write_run(mission_id, hermes_root, state="failed")
+        return 1
+
+
+def _main(argv: list[str]) -> int:
+    if len(argv) >= 7 and argv[1] == "--worker" and argv[3] == "--job-id" and argv[5] == "--root":
+        try:
+            mission_id = _validate_mission_id(argv[2])
+        except ValueError:
+            return 2
+        job_id = str(argv[4] or "").strip()
+        if not job_id:
+            return 2
+        hermes_root = Path(argv[6]).expanduser().resolve()
+        return _worker(mission_id, job_id, hermes_root)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main(sys.argv))
+
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "AUTOPILOT_ENV",
+    "STATES",
+    "TERMINAL_STATES",
+    "job_id_for",
+    "hermes_autopilot_start",
+    "hermes_autopilot_status",
+    "hermes_autopilot_stop",
+]
