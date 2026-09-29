@@ -2663,16 +2663,23 @@ def hermes_autopilot_start(
     max_replans: int = 2,
     confirm: bool = False,
     dry_run: bool = True,
+    max_attempts_per_node: int = 3,
+    max_runtime_seconds: int = 86400,
 ) -> str:
-    """Place a Mission under durable Autopilot control (PR1: runtime skeleton).
+    """Place a Mission under durable Autopilot control.
 
     Dry-run-first; a direct call additionally requires confirm=true and the
     HERMES_GPT_AUTOPILOT=1 machine gate. Idempotent while a non-terminal run
-    already exists for the Mission.
+    already exists for the Mission. Limits: max_concurrency (1-16), max_replans
+    (0-10), max_attempts_per_node (1-10, first attempt included) and
+    max_runtime_seconds (60-604800; new work stops at the limit and the run ends
+    once in-flight work has drained). New dispatch also stops whenever the
+    Mission's budget envelope is not verifiably within.
     """
     return op_autopilot.hermes_autopilot_start(
         mission_id, max_concurrency=max_concurrency, max_replans=max_replans,
         confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root(),
+        max_attempts_per_node=max_attempts_per_node, max_runtime_seconds=max_runtime_seconds,
     )
 
 

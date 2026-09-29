@@ -60,6 +60,7 @@ import operator_delegations as deleg
 import operator_failure_semantics as failure_semantics
 import operator_job_supervisor as job_supervisor
 import operator_live_events as live_events
+import operator_mission_budget as budget
 import operator_mission_plan as mission_plan
 import operator_mission_runtime as mission_runtime
 import operator_placement as placement
@@ -88,6 +89,11 @@ _JOB_STATUS_TO_RUN_STATE = {
 
 MAX_CONCURRENCY_LIMIT = 16
 MAX_REPLANS_LIMIT = 10
+# --- PR6 Mission limits (Autopilot-only operational config) -------------------
+MAX_ATTEMPTS_LIMIT = 10
+DEFAULT_MAX_RUNTIME_SECONDS = 24 * 3600
+MIN_MAX_RUNTIME_SECONDS = 60
+MAX_MAX_RUNTIME_SECONDS = 7 * 24 * 3600
 TICK_SECONDS = 2.0
 IS_WINDOWS = os.name == "nt"
 
@@ -245,6 +251,8 @@ def _new_run_record(mission_id: str, *, attempt: int) -> dict[str, Any]:
         "job_id": None,
         "max_concurrency": 0,
         "max_replans": 0,
+        "max_attempts_per_node": 3,
+        "max_runtime_seconds": DEFAULT_MAX_RUNTIME_SECONDS,
         "replans_used": 0,
         "started_at": _now(),
         "last_tick_at": None,
@@ -292,6 +300,8 @@ def _claim_run(
     max_concurrency: int,
     max_replans: int,
     config_sha256: str,
+    max_attempts_per_node: int = 3,
+    max_runtime_seconds: int = DEFAULT_MAX_RUNTIME_SECONDS,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Atomically claim the one-Mission-one-scheduler-lease slot.
 
@@ -315,6 +325,8 @@ def _claim_run(
             "job_id": job_id_for(mission_id, attempt),
             "max_concurrency": max_concurrency,
             "max_replans": max_replans,
+            "max_attempts_per_node": max_attempts_per_node,
+            "max_runtime_seconds": max_runtime_seconds,
             "config_sha256": config_sha256,
             "last_event_cursor": live_events.high_watermark(hermes_root=hermes_root),
         })
@@ -410,8 +422,10 @@ def hermes_autopilot_start(
     confirm: bool = False,
     dry_run: bool = True,
     hermes_root: Path | None = None,
+    max_attempts_per_node: int = 3,
+    max_runtime_seconds: int = DEFAULT_MAX_RUNTIME_SECONDS,
 ) -> str:
-    """Place a Mission under durable Autopilot control (PR1: runtime skeleton).
+    """Place a Mission under durable Autopilot control.
 
     Validates, before any write: the Mission exists and is not terminal, a
     MissionPlan exists with at least one node, and every node's
@@ -438,6 +452,10 @@ def hermes_autopilot_start(
         mission_id = _validate_mission_id(mission_id)
         max_concurrency = _bounded_int(max_concurrency, minimum=1, maximum=MAX_CONCURRENCY_LIMIT, field="max_concurrency")
         max_replans = _bounded_int(max_replans, minimum=0, maximum=MAX_REPLANS_LIMIT, field="max_replans")
+        max_attempts_per_node = _bounded_int(max_attempts_per_node, minimum=1, maximum=MAX_ATTEMPTS_LIMIT,
+                                             field="max_attempts_per_node")
+        max_runtime_seconds = _bounded_int(max_runtime_seconds, minimum=MIN_MAX_RUNTIME_SECONDS,
+                                           maximum=MAX_MAX_RUNTIME_SECONDS, field="max_runtime_seconds")
 
         mission = _load_mission(mission_id, hermes_root)
         if mission.get("status") in mission_runtime.TERMINAL_STATUSES:
@@ -455,7 +473,8 @@ def hermes_autopilot_start(
                 "dry_run": effective_dry, "mission_id": mission_id, "idempotent": True, "run": preview,
             })
 
-        config = {"max_concurrency": max_concurrency, "max_replans": max_replans}
+        config = {"max_concurrency": max_concurrency, "max_replans": max_replans,
+                  "max_attempts_per_node": max_attempts_per_node, "max_runtime_seconds": max_runtime_seconds}
         config_sha256 = hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
 
         if effective_dry:
@@ -464,12 +483,14 @@ def hermes_autopilot_start(
                 "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start",
                 "dry_run": True, "mission_id": mission_id, "would_start": True,
                 "max_concurrency": max_concurrency, "max_replans": max_replans,
+                "max_attempts_per_node": max_attempts_per_node, "max_runtime_seconds": max_runtime_seconds,
                 "config_sha256": config_sha256, "node_count": len(plan.get("nodes", [])),
             })
 
         existing, claimed = _claim_run(
             mission_id, hermes_root,
             max_concurrency=max_concurrency, max_replans=max_replans, config_sha256=config_sha256,
+            max_attempts_per_node=max_attempts_per_node, max_runtime_seconds=max_runtime_seconds,
         )
         if claimed is None:
             _audit("hermes_autopilot_start", policy, dry_run=False, success=True, changed=False,
@@ -518,7 +539,8 @@ def hermes_autopilot_start(
         # which is truthful, not "running" with a corrupted identity.
         run = _write_run(mission_id, hermes_root, state="running", pid=proc.pid)
         _audit("hermes_autopilot_start", policy, dry_run=False, success=True, changed=True, mission_id=mission_id,
-               extra={"job_id": job_id, "pid": proc.pid, "max_concurrency": max_concurrency, "max_replans": max_replans})
+               extra={"job_id": job_id, "pid": proc.pid, "max_concurrency": max_concurrency, "max_replans": max_replans,
+                      "max_attempts_per_node": max_attempts_per_node, "max_runtime_seconds": max_runtime_seconds})
         return json.dumps({
             "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start",
             "dry_run": False, "mission_id": mission_id, "job_id": job_id, "run": run,
@@ -1009,6 +1031,7 @@ def _backoff_seconds(node_id: str, attempt: int) -> float:
 
 def _observation_env(
     node: dict[str, Any], result: dict[str, Any], mission_status: str, final_approval: bool,
+    max_attempts: int = MAX_NODE_ATTEMPTS,
 ) -> dict[str, Any]:
     """The classifier's observation envelope, built only from observed state."""
     delegation = result.get("delegation") or {}
@@ -1047,7 +1070,7 @@ def _observation_env(
             "replan_attempts_used": 0,
         },
         "mission": {"status": mission_status, "final_approval_required": bool(final_approval)},
-        "breaker": {"consecutive_failures": retries + 1, "limit": MAX_NODE_ATTEMPTS, "gave_up": False},
+        "breaker": {"consecutive_failures": retries + 1, "limit": int(max_attempts), "gave_up": False},
     }
 
 
@@ -1155,11 +1178,12 @@ def _recover(
     outcome: ``retry`` | ``replanned`` | ``failed`` | ``conflict`` | ``held``.
     """
     node_id = node["node_id"]
+    run = _read_run(mission_id, hermes_root) or {}
     decision = _classify_failure(mission_id, node, _observation_env(
-        node, result, mission_ctx["status"], mission_ctx["final_approval_required"]))
+        node, result, mission_ctx["status"], mission_ctx["final_approval_required"],
+        max_attempts=int(run.get("max_attempts_per_node") or MAX_NODE_ATTEMPTS)))
     classification = str(decision.get("classification") or "")
     label = f"{classification}:{decision.get('row_key', '')}"
-    run = _read_run(mission_id, hermes_root) or {}
     attempt = int(node.get("retries", 0) or 0)
 
     if (
@@ -1290,7 +1314,9 @@ def _frontier_view(review: dict[str, Any], mission_status: str) -> dict[str, Any
     return {"active": active, "waiting": active and (mission_gate or not actionable), "reasons": reasons, "nodes": reached}
 
 
-def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency: int) -> dict[str, Any]:
+def schedule_tick(
+    mission_id: str, hermes_root: Path | None, *, max_concurrency: int, allow_dispatch: bool = True,
+) -> dict[str, Any]:
     """One scheduling pass: fill free worker slots with ready nodes.
 
     Holds the controller's per-mission pass lease for the tick so a controller
@@ -1303,7 +1329,7 @@ def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency:
         "dispatched": [], "adopted": [], "held": {}, "failed": {}, "skipped": "",
         "completed": [], "failed_nodes": {}, "advanced": [], "observed_held": {},
         "frontier": None, "mission_status": "", "mission_reconciled": False,
-        "retried": {}, "replanned": {},
+        "retried": {}, "replanned": {}, "limit": "", "budget": {},
     }
     if not _autopilot_enabled():
         summary["skipped"] = "autopilot_gate_off"
@@ -1327,9 +1353,72 @@ def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency:
             return summary
         try:
             mission_ctx = {"status": status, "final_approval_required": bool(mission.get("final_approval_required", True))}
-            return _schedule_locked(mission_id, hermes_root, max_concurrency, summary, db, lease_lock, mission_ctx)
+            return _schedule_locked(mission_id, hermes_root, max_concurrency, summary, db, lease_lock, mission_ctx,
+                                    allow_dispatch)
         finally:
             controller.release_lease(db, mission_id, lease_lock)
+
+
+# ---------------------------------------------------------------------------
+# PR6 — Mission limits: budget gate and runtime bound
+# ---------------------------------------------------------------------------
+
+
+def _budget_gate(mission_id: str, hermes_root: Path | None) -> tuple[str, dict[str, Any]]:
+    """Refuse new work unless the Mission's budget envelope is verifiably within.
+
+    Returns ``(reason, info)``; ``reason == ""`` means clear. Consulted before
+    *each* new dispatch. Autopilot enforces this itself rather than relying on
+    the pause: the existing hard-block path (``enforce=True``) only acts when its
+    own machine gate and per-mission policy are on, and "a budget crossing that
+    still allows new dispatch" is a release blocker. A Mission with no budget
+    account has no envelope and is unrestricted. Anything unreadable, or an
+    envelope that is not exactly ``within`` (crossing, or invalid quota/spend —
+    an invalid envelope reports ``crosses_envelope: false``), holds dispatch.
+    """
+    try:
+        view = json.loads(budget.hermes_budget_check(mission_id, hermes_root, enforce=True, confirm=True))
+    except (ValueError, TypeError, OSError, sqlite3.Error, LookupError):
+        return "budget_check_failed", {}
+    if not isinstance(view, dict) or view.get("success") is False:
+        return "budget_check_failed", {}
+    if not view.get("found"):
+        return "", {}
+    status = str(view.get("envelope_status") or "")
+    info = {
+        "status": status,
+        "crosses": bool(view.get("crosses_envelope")),
+        "enforced": bool((view.get("enforcement") or {}).get("enforced")),
+    }
+    if status != budget.STATUS_WITHIN:
+        return ("budget_crossed" if info["crosses"] else "budget_invalid"), info
+    return "", info
+
+
+def _parse_time(value: Any) -> float | None:
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _runtime_exceeded(run: dict[str, Any], now: float | None = None) -> bool:
+    """True once this run has been alive longer than ``max_runtime_seconds``.
+
+    An unparseable start time is treated as exceeded (fail closed): a run whose
+    age cannot be established must not keep starting new work.
+    """
+    started = _parse_time(run.get("started_at"))
+    limit = int(run.get("max_runtime_seconds") or DEFAULT_MAX_RUNTIME_SECONDS)
+    if started is None:
+        return True
+    return ((now if now is not None else time.time()) - started) > limit
+
+
+def _in_flight_count(mission_id: str, hermes_root: Path | None) -> int:
+    """Nodes still occupying a worker or awaiting Autopilot's own observation."""
+    review = json.loads(mission_plan.hermes_plan_review(mission_id, hermes_root=hermes_root))
+    return sum(1 for n in review.get("nodes", []) if n["state"] in OBSERVED_NODE_STATES) if review.get("success") else 0
 
 
 def _dispatch_candidates(review: dict[str, Any]) -> list[str]:
@@ -1352,7 +1441,7 @@ def _dispatch_candidates(review: dict[str, Any]) -> list[str]:
 
 def _schedule_locked(
     mission_id: str, hermes_root: Path | None, max_concurrency: int, summary: dict[str, Any],
-    db: sqlite3.Connection, lease_lock: str, mission_ctx: dict[str, Any],
+    db: sqlite3.Connection, lease_lock: str, mission_ctx: dict[str, Any], allow_dispatch: bool = True,
 ) -> dict[str, Any]:
     review = json.loads(mission_plan.hermes_plan_review(mission_id, hermes_root=hermes_root))
     if not review.get("success") or review.get("found") is False:
@@ -1376,6 +1465,9 @@ def _schedule_locked(
     run = _read_run(mission_id, hermes_root) or {}
     failures = {k: int(v) for k, v in (run.get("dispatch_failures") or {}).items()}
 
+    if not allow_dispatch:
+        slots = 0
+        summary["limit"] = "max_runtime_exceeded"
     for node_id in sorted(_dispatch_candidates(review)):
         if slots <= 0:
             break
@@ -1384,6 +1476,12 @@ def _schedule_locked(
             summary["held"][node_id] = "dispatch_failed"
             continue
         controller.renew_lease(db, mission_id, lease_lock, ttl=SCHEDULER_LEASE_TTL_SECONDS)
+        reason, info = _budget_gate(mission_id, hermes_root)
+        if reason:
+            summary["limit"] = reason
+            summary["budget"] = info
+            summary["held"][node_id] = reason
+            break  # the envelope is a Mission-wide fact: nothing else may start either
         outcome, detail = _dispatch_one(mission_id, nodes[node_id], plan_version, hermes_root, recovery)
         if outcome in ("dispatched", "adopted"):
             summary[outcome].append(node_id)
@@ -1452,8 +1550,10 @@ def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
                            state=_JOB_STATUS_TO_RUN_STATE.get(str(terminal.get("status")), "completed"))
                 return 0
             run = _read_run(mission_id, hermes_root) or {}
+            expired = _runtime_exceeded(run)
             try:
-                tick = schedule_tick(mission_id, hermes_root, max_concurrency=int(run.get("max_concurrency") or 1))
+                tick = schedule_tick(mission_id, hermes_root, max_concurrency=int(run.get("max_concurrency") or 1),
+                                     allow_dispatch=not expired)
                 last_error = ""
             except (OSError, sqlite3.Error, ValueError, LookupError, json.JSONDecodeError) as exc:
                 # Transient store contention must not kill a durable worker;
@@ -1461,6 +1561,13 @@ def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
                 tick = {"skipped": "tick_error"}
                 last_error = op.redact_output(f"{type(exc).__name__}: {exc}")[:200]
             _write_run(mission_id, hermes_root, last_tick_at=_now(), last_schedule=tick, last_error=last_error)
+            if expired and _in_flight_count(mission_id, hermes_root) == 0:
+                # Out of time and nothing left to observe: end the run instead of
+                # idling. In-flight work is always drained first, never abandoned.
+                job_supervisor.terminalize(job_id, "timed_out", summary="max_runtime_seconds exceeded",
+                                           hermes_root=hermes_root)
+                _write_run(mission_id, hermes_root, state="failed", last_error="max_runtime_exceeded")
+                return 0
             frontier = tick.get("frontier")
             if frontier is not None:
                 _set_live_state(mission_id, hermes_root, "waiting_for_owner" if frontier["waiting"] else "running")
