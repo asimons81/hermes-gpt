@@ -13,6 +13,9 @@ and invariants; this module implements PR1 only:
   so Autopilot survives an MCP server restart or disconnect without ever
   trusting a cached in-memory belief about whether it is still running.
 
+PR4 derives the Approval Frontier (``_frontier_view``) and reports
+``waiting_for_owner``; it adds no approval mechanism.
+
 PR3 adds observation and advancement (``_advance_nodes``): each in-flight node
 is reconciled through ``hermes_delegation_reconcile`` and completes only when
 the Work Contract validates ``SATISFIED`` against observed state.
@@ -248,6 +251,27 @@ def _write_run(mission_id: str, hermes_root: Path | None, **fields: Any) -> dict
         record["updated_at"] = _now()
         _atomic_json(path, record)
         return record
+
+
+LIVE_STATES = frozenset({"starting", "running", "waiting_for_owner"})
+
+
+def _set_live_state(mission_id: str, hermes_root: Path | None, state: str) -> None:
+    """Move between live states only; never resurrect a stopping/terminal run.
+
+    The worker reports ``running``/``waiting_for_owner`` every tick, while
+    ``hermes_autopilot_stop`` and status reconciliation write ``stopped``/
+    ``failed`` from other processes. An unconditional write here could overwrite
+    a stop that landed mid-tick, so the check-and-write is one critical section.
+    """
+    with _record_lock(mission_id, hermes_root):
+        path = _run_path(mission_id, hermes_root)
+        current = _load_json(path)
+        if current is None or current.get("state") not in LIVE_STATES or current.get("state") == state:
+            return
+        current["state"] = state
+        current["updated_at"] = _now()
+        _atomic_json(path, current)
 
 
 def _claim_run(
@@ -954,6 +978,41 @@ def _advance_nodes(
     return True
 
 
+# ---------------------------------------------------------------------------
+# PR4 — Approval Frontier (a derived read, never a new gate)
+# ---------------------------------------------------------------------------
+
+
+def _frontier_view(review: dict[str, Any], mission_status: str) -> dict[str, Any]:
+    """Derive where Autopilot must hand control to the owner.
+
+    Active when a gated node (approval-kind or ``high_impact``) has been
+    *reached* — it is ready, or the owner has already started moving it — or the
+    Mission itself is ``awaiting_approval``. Descendants of a gated node are
+    blocked without any extra logic (their parent is not ``completed``), so
+    independent branches keep running. ``waiting`` is True only when the
+    frontier is active and Autopilot has nothing else it could do, which is what
+    ``waiting_for_owner`` means. Resolution stays exactly the existing owner
+    tools (``hermes_mission_approve`` / the owner's own node transitions).
+    """
+    nodes = review.get("nodes", [])
+    ready = set(review.get("ready_nodes", []))
+    reached = sorted(
+        n["node_id"] for n in nodes
+        if _is_owner_gated(n)
+        and n["state"] not in mission_plan.TERMINAL_NODE_STATES
+        and (n["node_id"] in ready or n["state"] != "pending")
+    )
+    mission_gate = mission_status == "awaiting_approval"
+    actionable = any(
+        (n["state"] in OBSERVED_NODE_STATES or n["node_id"] in ready) and not _is_owner_gated(n)
+        for n in nodes
+    )
+    reasons = (["mission_awaiting_approval"] if mission_gate else []) + (["owner_gate_node"] if reached else [])
+    active = bool(reasons)
+    return {"active": active, "waiting": active and (mission_gate or not actionable), "reasons": reasons, "nodes": reached}
+
+
 def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency: int) -> dict[str, Any]:
     """One scheduling pass: fill free worker slots with ready nodes.
 
@@ -966,6 +1025,7 @@ def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency:
         "plan_version": None, "slots": 0, "in_flight": 0,
         "dispatched": [], "adopted": [], "held": {}, "failed": {}, "skipped": "",
         "completed": [], "failed_nodes": {}, "advanced": [], "observed_held": {},
+        "frontier": None, "mission_status": "", "mission_reconciled": False,
     }
     if not _autopilot_enabled():
         summary["skipped"] = "autopilot_gate_off"
@@ -974,6 +1034,8 @@ def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency:
     status = str(mission.get("status") or "")
     if status in mission_runtime.TERMINAL_STATUSES or status in MISSION_HOLD_STATUSES:
         summary["skipped"] = f"mission_{status}"
+        if status == "awaiting_approval":
+            summary["frontier"] = {"active": True, "waiting": True, "reasons": ["mission_awaiting_approval"], "nodes": []}
         return summary
 
     db_path = controller._db_path(hermes_root)
@@ -1038,6 +1100,22 @@ def _schedule_locked(
             failures[fail_key] = failures.get(fail_key, 0) + 1
             summary["failed"][node_id] = detail
     _write_run(mission_id, hermes_root, dispatch_failures=failures)
+    final = json.loads(mission_plan.hermes_plan_review(mission_id, hermes_root=hermes_root))
+    if final.get("success") and int(final.get("version", -1)) == plan_version:
+        summary["frontier"] = _frontier_view(final, "")
+        nodes_now = final.get("nodes", [])
+        if nodes_now and all(n["state"] == "completed" for n in nodes_now):
+            # Every node is done on observed evidence: let the *existing* Mission
+            # reconcile derive the Mission status from verified children. It only
+            # reaches awaiting_approval (never completed) while final approval is
+            # required, and Autopilot never approves.
+            reconciled = json.loads(mission_runtime.hermes_mission_reconcile(
+                mission_id, confirm=True, dry_run=False, hermes_root=hermes_root))
+            current = _load_mission(mission_id, hermes_root)
+            summary["mission_status"] = str(current.get("status") or "")
+            if summary["mission_status"] == "awaiting_approval":
+                summary["frontier"] = _frontier_view(final, "awaiting_approval")
+            summary["mission_reconciled"] = bool(reconciled.get("success"))
     return summary
 
 
@@ -1080,6 +1158,9 @@ def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
                 tick = {"skipped": "tick_error"}
                 last_error = op.redact_output(f"{type(exc).__name__}: {exc}")[:200]
             _write_run(mission_id, hermes_root, last_tick_at=_now(), last_schedule=tick, last_error=last_error)
+            frontier = tick.get("frontier")
+            if frontier is not None:
+                _set_live_state(mission_id, hermes_root, "waiting_for_owner" if frontier["waiting"] else "running")
             time.sleep(TICK_SECONDS)
     except Exception as exc:  # noqa: BLE001 - a durable worker must fail closed, never crash silently
         try:
