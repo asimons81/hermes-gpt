@@ -115,7 +115,9 @@ def test_observed_failure_fails_the_node_and_children_are_never_dispatched(env):
     _tick(root)
     _observe(root, _task(backend), state="failed", error="worker crashed")
     out = _tick(root)
-    assert out["failed_nodes"] == {"a": "failed"}
+    # "worker crashed" carries no classifiable flavor: the existing classifier
+    # fails closed as unknown and flags it for a human (no retry, no replan).
+    assert out["failed_nodes"] == {"a": "unknown:unknown_fail_closed need_attention"}
     assert _states(root) == {"a": "failed", "b": "pending"}
     for _ in range(2):
         assert _tick(root)["dispatched"] == []

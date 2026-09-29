@@ -57,6 +57,7 @@ from typing import Any
 import operator_contract as contract_mod
 import operator_controller as controller
 import operator_delegations as deleg
+import operator_failure_semantics as failure_semantics
 import operator_job_supervisor as job_supervisor
 import operator_live_events as live_events
 import operator_mission_plan as mission_plan
@@ -101,6 +102,16 @@ MISSION_HOLD_STATUSES = frozenset({"paused", "blocked", "awaiting_approval"})
 MAX_DISPATCH_FAILURES = 3
 SCHEDULER_LEASE_TTL_SECONDS = 120.0
 SCHEDULER_TRIGGER_KIND = "autopilot"
+
+# --- PR5 recovery constants ----------------------------------------------------
+# Hard per-node attempt ceiling (first attempt included). Fed to the existing
+# classifier as its retry breaker, so the ceiling is enforced by classify(), not
+# by a second rule here. PR6 makes it owner-configurable.
+MAX_NODE_ATTEMPTS = 3
+# Backoff mirrors the taxonomy's transient action: base 30s, cap 15min, jitter.
+RETRY_BACKOFF_BASE_SECONDS = 30.0
+RETRY_BACKOFF_CAP_SECONDS = 900.0
+RECOVERY_KEYS = ("placements", "nodes", "pending_supersede", "superseded_nodes", "replan_pending")
 
 # --- PR3 advancement constants -------------------------------------------------
 # The plan-node state machine path from dispatch to completion (§5.2). Autopilot
@@ -756,11 +767,12 @@ def _reached_backend(row: dict[str, Any]) -> bool:
 
 def _node_transition(
     mission_id: str, node_id: str, plan_version: int, hermes_root: Path | None, *, dry_run: bool,
-    target: str = "dispatched", reason: str = "autopilot dispatch",
+    target: str = "dispatched", reason: str = "autopilot dispatch", bump_retries: bool = False,
 ) -> dict[str, Any]:
     return json.loads(mission_plan.hermes_plan_node_transition(
         mission_id, node_id, target, reason=reason,
-        confirm=not dry_run, dry_run=dry_run, expected_plan_version=plan_version, hermes_root=hermes_root,
+        confirm=not dry_run, dry_run=dry_run, expected_plan_version=plan_version,
+        bump_retries=bump_retries, hermes_root=hermes_root,
     ))
 
 
@@ -775,6 +787,7 @@ def _is_owner_gated(node: dict[str, Any]) -> bool:
 
 def _dispatch_one(
     mission_id: str, node: dict[str, Any], plan_version: int, hermes_root: Path | None,
+    recovery: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """Dispatch (or adopt) one ready node. Returns ``(outcome, detail)``.
 
@@ -786,6 +799,10 @@ def _dispatch_one(
     node_id = node["node_id"]
     if _is_owner_gated(node):
         return "held", "owner_gate"
+    recovery = recovery if recovery is not None else _empty_recovery()
+    retry_info = recovery["nodes"].get(node_id) or {}
+    if float(retry_info.get("not_before", 0) or 0) > time.time():
+        return "held", "retry_backoff"
     attempt = int(node.get("retries", 0) or 0)
     key = dispatch_key(mission_id, plan_version, node_id, attempt, str(node.get("contract_sha256", "")))
     task_id = _task_id(mission_id, node_id, key)
@@ -816,7 +833,10 @@ def _dispatch_one(
     requirement = scored.get("requirement") or {}
     if str(requirement.get("authorization_class", "")) in controller.L2_FORBIDDEN_AUTH_CLASSES:
         return "held", "owner_gate"
-    agent, _profile, refusal = controller._l2_target_binding(scored, requirement)
+    if attempt > 0:
+        agent, _profile, refusal = _bind_alternate(scored, requirement, list(retry_info.get("excluded", [])))
+    else:
+        agent, _profile, refusal = controller._l2_target_binding(scored, requirement)
     if refusal:
         return "held", "no_dispatchable_target"
 
@@ -834,6 +854,8 @@ def _dispatch_one(
             return "conflict", "plan_version_conflict"
         return "held", "node_not_dispatchable"
 
+    recovery["placements"][node_id] = agent  # remembered so a later failure can exclude this peer
+    _save_recovery(mission_id, hermes_root, recovery)
     executed, result, reason, _linkage = controller._l2_dispatch(
         contract_doc, mission_id, hermes_root, delegation_id=_delegation_id(key),
     )
@@ -897,11 +919,15 @@ def _verified_success(result: dict[str, Any]) -> bool:
 
 def _advance_one(
     mission_id: str, node: dict[str, Any], plan_version: int, walking: dict[str, Any], hermes_root: Path | None,
+    recovery: dict[str, Any] | None = None, review_nodes: list[dict[str, Any]] | None = None,
+    mission_ctx: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """Observe one in-flight node and move it as far as observed evidence allows.
 
-    outcome: ``completed`` | ``failed`` | ``running`` | ``held`` | ``conflict``.
+    outcome: ``completed`` | ``failed`` | ``running`` | ``retry`` | ``replanned`` | ``held`` | ``conflict``.
     """
+    recovery = recovery if recovery is not None else _empty_recovery()
+    mission_ctx = mission_ctx or {"status": "running", "final_approval_required": True}
     node_id = node["node_id"]
     state = node["state"]
     if _is_owner_gated(node):
@@ -921,9 +947,11 @@ def _advance_one(
         return "held", "stale_observation"
     dstate = str((result.get("delegation") or {}).get("state") or "")
 
-    if dstate in ("failed", "cancelled"):
-        outcome, detail = _walk_to_failed(mission_id, node_id, plan_version, hermes_root, dstate)
-        return outcome, detail
+    if dstate == "cancelled":
+        return _walk_to_failed(mission_id, node_id, plan_version, hermes_root, dstate)  # operator intent: no recovery
+    if dstate == "failed":
+        return _recover(mission_id, node, result, existing["delegation_id"], plan_version, recovery,
+                        review_nodes or [], mission_ctx, hermes_root)
     if _verified_success(result):
         walking[node_id] = plan_version  # durable before the first step (see _advance_nodes)
         _write_run(mission_id, hermes_root, walking=dict(walking))
@@ -942,6 +970,236 @@ def _advance_one(
     return "held", dstate or "unobserved"
 
 
+# ---------------------------------------------------------------------------
+# PR5 — recovery: bounded retry (Level A) and bounded rework replan (Level B)
+# ---------------------------------------------------------------------------
+#
+# Every decision comes from the existing failure classifier
+# (operator_failure_semantics.classify): only a ``transient`` failure whose
+# breaker is closed is retried, only a ``semantic`` failure with an eligible
+# replan proposal is replanned, and every other class (authority, capability,
+# environment, ambiguous, unknown) fails the node and is reported for a human.
+# Recovery state lives in ``autopilot_runs.recovery`` (orchestration metadata);
+# plan_nodes stays the only node-state store and the delegation store the only
+# attempt history.
+
+
+def _empty_recovery() -> dict[str, Any]:
+    return {key: {} for key in RECOVERY_KEYS}
+
+
+def _load_recovery(run: dict[str, Any]) -> dict[str, Any]:
+    recovery = _empty_recovery()
+    stored = run.get("recovery") or {}
+    for key in RECOVERY_KEYS:
+        if isinstance(stored.get(key), dict):
+            recovery[key] = dict(stored[key])
+    return recovery
+
+
+def _save_recovery(mission_id: str, hermes_root: Path | None, recovery: dict[str, Any]) -> None:
+    _write_run(mission_id, hermes_root, recovery=recovery)
+
+
+def _backoff_seconds(node_id: str, attempt: int) -> float:
+    base = min(RETRY_BACKOFF_CAP_SECONDS, RETRY_BACKOFF_BASE_SECONDS * (2 ** max(0, int(attempt) - 1)))
+    jitter = int(hashlib.sha256(f"{node_id}|{attempt}".encode()).hexdigest()[:4], 16) / 0xFFFF
+    return min(RETRY_BACKOFF_CAP_SECONDS, base * (1 + 0.25 * jitter))
+
+
+def _observation_env(
+    node: dict[str, Any], result: dict[str, Any], mission_status: str, final_approval: bool,
+) -> dict[str, Any]:
+    """The classifier's observation envelope, built only from observed state."""
+    delegation = result.get("delegation") or {}
+    observed = result.get("observed") or {}
+    retries = int(node.get("retries", 0) or 0)
+    error = str(observed.get("error") or "")
+    return {
+        "delegation": {
+            "state": str(delegation.get("state") or ""),
+            "backend_state": str(delegation.get("backend_state") or ""),
+            "outcome": str(delegation.get("outcome") or ""),
+            # A failed run always fails the contract's own run-state criterion, so
+            # NOT_SATISFIED here is a consequence of the failure, not independent
+            # evidence about the work. Submitted as-is it would outrank every
+            # error-text signal in the classifier and label a rate-limit as a
+            # semantic defect. Withheld for failed delegations; the error channel
+            # then decides, and unflavored failures fail closed as unknown.
+            "validation_verdict": "" if str(delegation.get("state") or "") == "failed"
+            else str(delegation.get("validation_verdict") or ""),
+        },
+        "runner": {
+            "status": str(observed.get("status") or observed.get("state") or ""),
+            "outcome": str(observed.get("outcome") or ""),
+            "error": error,
+        } if observed else None,
+        "worker_exit": None,
+        "last_failure_error": error,
+        "capability": None,
+        "plan": {
+            "node_state": str(node.get("state") or ""),
+            "parent_done": True,
+            "all_children_terminal": False,
+            "retries": retries,
+            # Replan eligibility is judged on the failure class alone; the owner's
+            # max_replans (enforced below) is the bound Autopilot honors.
+            "replan_attempts_used": 0,
+        },
+        "mission": {"status": mission_status, "final_approval_required": bool(final_approval)},
+        "breaker": {"consecutive_failures": retries + 1, "limit": MAX_NODE_ATTEMPTS, "gave_up": False},
+    }
+
+
+def _classify_failure(mission_id: str, node: dict[str, Any], env: dict[str, Any]) -> dict[str, Any]:
+    """Classify via the existing classifier; anything malformed fails closed (unknown)."""
+    try:
+        return failure_semantics.classify(mission_id, node["node_id"], failure_semantics._validate_envelope(env))
+    except (failure_semantics.ObservationError, ValueError, TypeError, KeyError):
+        return {"classification": failure_semantics.CLASS_UNKNOWN, "row_key": "unknown_fail_closed",
+                "auto_retry": False, "need_attention": True}
+
+
+def _bind_alternate(scored: dict[str, Any], requirement: dict[str, Any], excluded: list[str]) -> tuple[str, str, str]:
+    """Prefer a dispatchable peer other than the ones this node already failed on.
+
+    Falls back to the placement's own top binding (same peer) only when no other
+    ``fleet_peer`` candidate survives placement's hard filters — a transient
+    failure on the only capable peer is still worth a bounded retry.
+    """
+    for candidate in scored.get("candidate_set") or []:
+        if not isinstance(candidate, dict) or candidate.get("kind") != "fleet_peer":
+            continue
+        name = str(candidate.get("name") or "")
+        if name and name not in excluded:
+            return name, str(requirement.get("profile", "")), ""
+    return controller._l2_target_binding(scored, requirement)
+
+
+def _find_clone(review_nodes: list[dict[str, Any]], failed_id: str) -> str | None:
+    prefix = f"{failed_id[:58]}-r"
+    clones = sorted(n["node_id"] for n in review_nodes
+                    if n["node_id"].startswith(prefix) and n["node_id"][len(prefix):].isdigit())
+    return clones[-1] if clones else None
+
+
+def _settle_supersessions(
+    mission_id: str, plan_version: int, nodes: list[dict[str, Any]], recovery: dict[str, Any],
+    hermes_root: Path | None,
+) -> list[str]:
+    """Mark replaced failed attempts as superseded once their successor exists.
+
+    Runs every tick and is idempotent, so a crash between dispatching a
+    successor and marking the old attempt just retries. Until it succeeds, the
+    failed attempt still counts against the Mission (fail closed).
+    """
+    settled: list[str] = []
+    by_id = {n["node_id"]: n for n in nodes}
+    for node_id, old_delegation in sorted(recovery["pending_supersede"].items()):
+        node = by_id.get(node_id)
+        if node is None or node["state"] in ("pending", "blockable"):
+            continue  # the successor has not been dispatched yet
+        key = dispatch_key(mission_id, plan_version, node_id, int(node.get("retries", 0) or 0),
+                           str(node.get("contract_sha256", "")))
+        successor = _existing_delegation(mission_id, node_id, _task_id(mission_id, node_id, key), hermes_root)
+        if successor is None or not _reached_backend(successor):
+            continue
+        if mission_runtime.supersede_delegation_attachment(
+            mission_id, old_delegation, successor["delegation_id"], hermes_root=hermes_root,
+        ):
+            recovery["pending_supersede"].pop(node_id, None)
+            settled.append(node_id)
+    if settled:
+        _save_recovery(mission_id, hermes_root, recovery)
+    return settled
+
+
+def _replan(
+    mission_id: str, node_id: str, plan_version: int, old_delegation: str, recovery: dict[str, Any],
+    review_nodes: list[dict[str, Any]], hermes_root: Path | None,
+) -> tuple[str, str]:
+    """Level B: replace a failed node by a rework clone. Idempotent across crashes.
+
+    ``replan_pending`` is written before anything changes; a resumed call finds
+    an already-created clone and adopts it instead of creating a second one.
+    """
+    clone_id = _find_clone(review_nodes, node_id)
+    if clone_id is None:
+        try:
+            patched = mission_plan.apply_rework_patch(
+                mission_id, node_id, expected_plan_version=plan_version, hermes_root=hermes_root)
+        except mission_plan.PlanVersionConflict:
+            return "conflict", "plan_version_conflict"
+        except (ValueError, LookupError, OSError, sqlite3.Error, skill_resolution.SkillRequirementsError):
+            recovery["replan_pending"].pop(node_id, None)
+            _save_recovery(mission_id, hermes_root, recovery)
+            return "failed", "replan_refused"
+        clone_id = patched["clone_node_id"]
+    recovery["replan_pending"].pop(node_id, None)
+    recovery["superseded_nodes"][node_id] = clone_id
+    recovery["pending_supersede"][clone_id] = old_delegation
+    _save_recovery(mission_id, hermes_root, recovery)
+    # Derived, not incremented: a crash between patching and recording cannot
+    # double-count or lose a replan.
+    _write_run(mission_id, hermes_root, replans_used=len(recovery["superseded_nodes"]))
+    return "replanned", clone_id
+
+
+def _recover(
+    mission_id: str, node: dict[str, Any], result: dict[str, Any], delegation_id: str, plan_version: int,
+    recovery: dict[str, Any], review_nodes: list[dict[str, Any]], mission_ctx: dict[str, Any],
+    hermes_root: Path | None,
+) -> tuple[str, str]:
+    """A delegation for this node failed: retry, replan, or fail it — per the classifier.
+
+    outcome: ``retry`` | ``replanned`` | ``failed`` | ``conflict`` | ``held``.
+    """
+    node_id = node["node_id"]
+    decision = _classify_failure(mission_id, node, _observation_env(
+        node, result, mission_ctx["status"], mission_ctx["final_approval_required"]))
+    classification = str(decision.get("classification") or "")
+    label = f"{classification}:{decision.get('row_key', '')}"
+    run = _read_run(mission_id, hermes_root) or {}
+    attempt = int(node.get("retries", 0) or 0)
+
+    if (
+        classification == failure_semantics.CLASS_TRANSIENT
+        and decision.get("row_key") == "retry_transient_backoff"
+        and decision.get("auto_retry") is True
+    ):
+        info = recovery["nodes"].setdefault(node_id, {})
+        info["prev_delegation"] = delegation_id
+        info["not_before"] = time.time() + _backoff_seconds(node_id, attempt + 1)
+        peer = recovery["placements"].get(node_id)
+        if peer:
+            info["excluded"] = sorted(set(info.get("excluded", [])) | {peer})
+        recovery["pending_supersede"][node_id] = delegation_id
+        _save_recovery(mission_id, hermes_root, recovery)  # intent first: a crash mid-walk resumes from here
+        for target, bump in (("paused", False), ("blockable", True)):
+            step = _node_transition(mission_id, node_id, plan_version, hermes_root, dry_run=False, target=target,
+                                    reason=f"autopilot retry: {label}", bump_retries=bump)
+            if not step.get("success"):
+                return ("conflict", "plan_version_conflict") if step.get("code") == "PLAN_VERSION_CONFLICT" else ("held", "retry_transition_rejected")
+        return "retry", label
+
+    if (
+        classification == failure_semantics.CLASS_SEMANTIC
+        and (decision.get("replan_proposal") or {}).get("eligible") is True
+        and int(run.get("replans_used", 0) or 0) + len(recovery["replan_pending"]) < int(run.get("max_replans", 0) or 0)
+        and not _is_owner_gated(node)
+    ):
+        recovery["replan_pending"][node_id] = delegation_id
+        _save_recovery(mission_id, hermes_root, recovery)
+        step = _node_transition(mission_id, node_id, plan_version, hermes_root, dry_run=False, target="failed",
+                                reason=f"autopilot replan: {label}")
+        if not step.get("success"):
+            return ("conflict", "plan_version_conflict") if step.get("code") == "PLAN_VERSION_CONFLICT" else ("held", "fail_transition_rejected")
+        return _replan(mission_id, node_id, plan_version, delegation_id, recovery, review_nodes, hermes_root)
+
+    outcome, detail = _walk_to_failed(mission_id, node_id, plan_version, hermes_root, "failed")
+    return outcome, f"{label}{' need_attention' if decision.get('need_attention') else ''}" if outcome == "failed" else detail
+
+
 def _walk_to_failed(
     mission_id: str, node_id: str, plan_version: int, hermes_root: Path | None, dstate: str,
 ) -> tuple[str, str]:
@@ -954,20 +1212,39 @@ def _walk_to_failed(
 
 def _advance_nodes(
     mission_id: str, review: dict[str, Any], plan_version: int, hermes_root: Path | None, summary: dict[str, Any],
-    db: sqlite3.Connection, lease_lock: str,
+    db: sqlite3.Connection, lease_lock: str, recovery: dict[str, Any], mission_ctx: dict[str, Any],
 ) -> bool:
     """Observe every in-flight node. Returns False if the plan moved under us."""
     run = _read_run(mission_id, hermes_root) or {}
     walking = {k: int(v) for k, v in (run.get("walking") or {}).items()}
-    for node in sorted(review.get("nodes", []), key=lambda n: n["node_id"]):
+    nodes = sorted(review.get("nodes", []), key=lambda n: n["node_id"])
+
+    # Resume a replan that crashed after the node was failed but before the clone
+    # was recorded (idempotent: an existing clone is adopted, never duplicated).
+    for node_id, old_delegation in sorted(recovery["replan_pending"].items()):
+        node = next((n for n in nodes if n["node_id"] == node_id), None)
+        if node is not None and node["state"] == "failed":
+            outcome, detail = _replan(mission_id, node_id, plan_version, old_delegation, recovery, nodes, hermes_root)
+            if outcome == "conflict":
+                summary["skipped"] = detail
+                return False
+            summary["replanned" if outcome == "replanned" else "failed_nodes"][node_id] = detail
+    _settle_supersessions(mission_id, plan_version, nodes, recovery, hermes_root)
+
+    for node in nodes:
         if node["state"] not in OBSERVED_NODE_STATES:
             continue
         controller.renew_lease(db, mission_id, lease_lock, ttl=SCHEDULER_LEASE_TTL_SECONDS)
-        outcome, detail = _advance_one(mission_id, node, plan_version, walking, hermes_root)
+        outcome, detail = _advance_one(mission_id, node, plan_version, walking, hermes_root,
+                                       recovery, nodes, mission_ctx)
         if outcome == "completed":
             summary["completed"].append(node["node_id"])
         elif outcome == "failed":
             summary["failed_nodes"][node["node_id"]] = detail
+        elif outcome == "retry":
+            summary["retried"][node["node_id"]] = detail
+        elif outcome == "replanned":
+            summary["replanned"][node["node_id"]] = detail
         elif outcome == "running":
             summary["advanced"].append(node["node_id"])
         elif outcome == "conflict":
@@ -1026,6 +1303,7 @@ def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency:
         "dispatched": [], "adopted": [], "held": {}, "failed": {}, "skipped": "",
         "completed": [], "failed_nodes": {}, "advanced": [], "observed_held": {},
         "frontier": None, "mission_status": "", "mission_reconciled": False,
+        "retried": {}, "replanned": {},
     }
     if not _autopilot_enabled():
         summary["skipped"] = "autopilot_gate_off"
@@ -1048,14 +1326,33 @@ def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency:
             summary["skipped"] = "controller_pass_active"
             return summary
         try:
-            return _schedule_locked(mission_id, hermes_root, max_concurrency, summary, db, lease_lock)
+            mission_ctx = {"status": status, "final_approval_required": bool(mission.get("final_approval_required", True))}
+            return _schedule_locked(mission_id, hermes_root, max_concurrency, summary, db, lease_lock, mission_ctx)
         finally:
             controller.release_lease(db, mission_id, lease_lock)
 
 
+def _dispatch_candidates(review: dict[str, Any]) -> list[str]:
+    """Ready nodes: pending (the plan's own ready set) plus ``blockable`` retries.
+
+    A retried node parks in ``blockable`` (paused -> blockable is the state
+    machine's own path back to ``dispatched``). ``hermes_plan_review`` only
+    lists ``pending`` nodes as ready, so retry candidates are derived here with
+    the same "every parent completed" rule.
+    """
+    nodes = {n["node_id"]: n for n in review.get("nodes", [])}
+    ready = set(review.get("ready_nodes", []))
+    for node in nodes.values():
+        if node["state"] == "blockable" and all(
+            parent in nodes and nodes[parent]["state"] == "completed" for parent in node.get("parents", [])
+        ):
+            ready.add(node["node_id"])
+    return sorted(ready)
+
+
 def _schedule_locked(
     mission_id: str, hermes_root: Path | None, max_concurrency: int, summary: dict[str, Any],
-    db: sqlite3.Connection, lease_lock: str,
+    db: sqlite3.Connection, lease_lock: str, mission_ctx: dict[str, Any],
 ) -> dict[str, Any]:
     review = json.loads(mission_plan.hermes_plan_review(mission_id, hermes_root=hermes_root))
     if not review.get("success") or review.get("found") is False:
@@ -1063,7 +1360,8 @@ def _schedule_locked(
         return summary
     plan_version = int(review["version"])
     summary["plan_version"] = plan_version
-    if not _advance_nodes(mission_id, review, plan_version, hermes_root, summary, db, lease_lock):
+    recovery = _load_recovery(_read_run(mission_id, hermes_root) or {})
+    if not _advance_nodes(mission_id, review, plan_version, hermes_root, summary, db, lease_lock, recovery, mission_ctx):
         return summary
     # Re-read: completions free slots and unblock children for this same tick.
     review = json.loads(mission_plan.hermes_plan_review(mission_id, hermes_root=hermes_root))
@@ -1078,7 +1376,7 @@ def _schedule_locked(
     run = _read_run(mission_id, hermes_root) or {}
     failures = {k: int(v) for k, v in (run.get("dispatch_failures") or {}).items()}
 
-    for node_id in sorted(review.get("ready_nodes", [])):
+    for node_id in sorted(_dispatch_candidates(review)):
         if slots <= 0:
             break
         fail_key = f"{plan_version}:{node_id}"
@@ -1086,7 +1384,7 @@ def _schedule_locked(
             summary["held"][node_id] = "dispatch_failed"
             continue
         controller.renew_lease(db, mission_id, lease_lock, ttl=SCHEDULER_LEASE_TTL_SECONDS)
-        outcome, detail = _dispatch_one(mission_id, nodes[node_id], plan_version, hermes_root)
+        outcome, detail = _dispatch_one(mission_id, nodes[node_id], plan_version, hermes_root, recovery)
         if outcome in ("dispatched", "adopted"):
             summary[outcome].append(node_id)
             slots -= 1
@@ -1104,7 +1402,12 @@ def _schedule_locked(
     if final.get("success") and int(final.get("version", -1)) == plan_version:
         summary["frontier"] = _frontier_view(final, "")
         nodes_now = final.get("nodes", [])
-        if nodes_now and all(n["state"] == "completed" for n in nodes_now):
+        _settle_supersessions(mission_id, plan_version, nodes_now, recovery, hermes_root)
+        # A failed node that was replaced by a rework clone no longer counts: the
+        # clone (and its superseded-attempt marker) carries the Mission forward.
+        replaced = set(recovery["superseded_nodes"]) - set(recovery["pending_supersede"])
+        remaining = [n for n in nodes_now if not (n["state"] == "failed" and n["node_id"] in replaced)]
+        if remaining and all(n["state"] == "completed" for n in remaining):
             # Every node is done on observed evidence: let the *existing* Mission
             # reconcile derive the Mission status from verified children. It only
             # reaches awaiting_approval (never completed) while final approval is
