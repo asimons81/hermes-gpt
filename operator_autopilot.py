@@ -13,6 +13,10 @@ and invariants; this module implements PR1 only:
   so Autopilot survives an MCP server restart or disconnect without ever
   trusting a cached in-memory belief about whether it is still running.
 
+PR7 makes the worker event-driven: it long-polls this Mission's live events
+(``_wait_for_wakeup``) with the idle poll as backstop. An event only ends the
+wait early; every wakeup re-reads durable state.
+
 PR4 derives the Approval Frontier (``_frontier_view``) and reports
 ``waiting_for_owner``; it adds no approval mechanism.
 
@@ -43,6 +47,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import math
 import os
 import secrets
 import sqlite3
@@ -95,6 +100,19 @@ DEFAULT_MAX_RUNTIME_SECONDS = 24 * 3600
 MIN_MAX_RUNTIME_SECONDS = 60
 MAX_MAX_RUNTIME_SECONDS = 7 * 24 * 3600
 TICK_SECONDS = 2.0
+# --- PR7 event-driven wakeups -------------------------------------------------
+# The worker long-polls this Mission's live events instead of sleeping, so an
+# owner action (pause, approve, resume, cancel) is seen in well under a tick.
+# The idle poll is the backstop: it is also what observes backend progress,
+# because runner completions publish no live event. It is an operational knob
+# (default TICK_SECONDS) so it can be widened or narrowed without a code change.
+IDLE_POLL_ENV = "HERMES_GPT_AUTOPILOT_IDLE_SECONDS"
+MIN_IDLE_POLL_SECONDS = 0.5
+MAX_IDLE_POLL_SECONDS = 60.0
+# Never tick faster than this, whatever the event rate (flood / self-echo guard).
+MIN_TICK_INTERVAL_SECONDS = 0.25
+# Longest single block inside the wait; a cancel is noticed between slices.
+WAIT_SLICE_SECONDS = 1.0
 IS_WINDOWS = os.name == "nt"
 
 # --- PR2 scheduler constants -------------------------------------------------
@@ -1521,8 +1539,77 @@ def _schedule_locked(
 
 
 # ---------------------------------------------------------------------------
+# PR7 — event-driven wakeups (a wakeup is never proof of anything)
+# ---------------------------------------------------------------------------
+
+
+def _idle_poll_seconds() -> float:
+    """The backstop poll interval: env override, clamped; garbage means the default."""
+    raw = os.environ.get(IDLE_POLL_ENV, "").strip()
+    try:
+        value = float(raw) if raw else TICK_SECONDS
+    except ValueError:
+        return TICK_SECONDS
+    if math.isnan(value):
+        return TICK_SECONDS
+    return max(MIN_IDLE_POLL_SECONDS, min(MAX_IDLE_POLL_SECONDS, value))
+
+
+def _wait_for_wakeup(
+    mission_id: str, cursor: int, wait_seconds: float, hermes_root: Path | None,
+    abort_check: Any = None,
+) -> tuple[int, str]:
+    """Block up to ``wait_seconds`` for a live event about this Mission.
+
+    Returns ``(new_cursor, reason)`` with reason ``event``, ``timer`` or
+    ``abort``. Per ``docs/live-events.md`` an event is a notification, never
+    proof: nothing in it is read or acted on. It only ends the wait early, and
+    the caller then re-reads durable state exactly as it would after a timer
+    wakeup. On an event the cursor jumps to the store's high-water mark instead
+    of walking the backlog, since the next tick re-reads everything anyway
+    (events are published after the authoritative commit, so state at or below
+    that mark is already visible). A missing, delayed or erroring event store
+    degrades to the timer and still honors the full wait, so it can neither
+    stall work nor turn the loop into a busy spin.
+
+    The wait is taken in slices of at most ``WAIT_SLICE_SECONDS`` and
+    ``abort_check`` is consulted between them. Normally ``hermes_autopilot_stop``
+    signals the verified worker process tree and needs none of this, but before a
+    fresh worker has registered its process identity ``request_cancel`` refuses to
+    signal an unverified PID and only records the cancel durably. In that window
+    the loop is the only thing that can notice, so a long idle poll must not be
+    allowed to delay it.
+    """
+    deadline = time.monotonic() + max(0.0, wait_seconds)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return int(cursor), "timer"
+        slice_seconds = min(WAIT_SLICE_SECONDS, remaining)
+        started = time.monotonic()
+        try:
+            payload = json.loads(live_events.hermes_live_events_since(
+                cursor, mission_id=mission_id, limit=1, wait_ms=int(slice_seconds * 1000), hermes_root=hermes_root,
+            ))
+        except (ValueError, TypeError, OSError, sqlite3.Error):
+            payload = {}
+        if isinstance(payload, dict) and payload.get("success") is True and int(payload.get("count") or 0) > 0:
+            return max(int(cursor), int(payload.get("next_cursor") or 0), int(payload.get("high_watermark") or 0)), "event"
+        pause = slice_seconds - (time.monotonic() - started)
+        if pause > 0:
+            time.sleep(pause)  # an erroring store returns instantly: never spin
+        if abort_check is not None and abort_check():
+            return int(cursor), "abort"
+
+
+# ---------------------------------------------------------------------------
 # Detached worker (PR2: watch + schedule; node observation/completion is PR3)
 # ---------------------------------------------------------------------------
+
+
+def _job_is_terminal(job_id: str, hermes_root: Path | None) -> bool:
+    job = job_supervisor.get_job(job_id, hermes_root=hermes_root, reconcile=False)
+    return job is None or str(job.get("status") or "") in job_supervisor.TERMINAL_STATES
 
 
 def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
@@ -1531,8 +1618,13 @@ def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
     except FileNotFoundError:
         return 2
     _write_run(mission_id, hermes_root, state="running", pid=os.getpid())
+    start_run = _read_run(mission_id, hermes_root) or {}
+    cursor = int(start_run.get("last_event_cursor") or 0)
+    wakeups = {"event": 0, "timer": 0}
+    wakeups.update({k: int(v) for k, v in (start_run.get("wakeups") or {}).items() if k in wakeups})
     try:
         while True:
+            tick_started = time.monotonic()
             job = job_supervisor.get_job(job_id, hermes_root=hermes_root, reconcile=False)
             if job is None:
                 return 2
@@ -1571,7 +1663,15 @@ def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
             frontier = tick.get("frontier")
             if frontier is not None:
                 _set_live_state(mission_id, hermes_root, "waiting_for_owner" if frontier["waiting"] else "running")
-            time.sleep(TICK_SECONDS)
+            # Debounce, then wait for the next event (or the idle poll).
+            floor = MIN_TICK_INTERVAL_SECONDS - (time.monotonic() - tick_started)
+            if floor > 0:
+                time.sleep(floor)
+            cursor, reason = _wait_for_wakeup(mission_id, cursor, _idle_poll_seconds(), hermes_root,
+                                              abort_check=lambda: _job_is_terminal(job_id, hermes_root))
+            if reason != "abort":  # the loop top handles a cancel; it is not a wakeup
+                wakeups[reason] += 1
+            _write_run(mission_id, hermes_root, last_event_cursor=cursor, last_wake=reason, wakeups=dict(wakeups))
     except Exception as exc:  # noqa: BLE001 - a durable worker must fail closed, never crash silently
         try:
             job_supervisor.terminalize(job_id, "failed", summary=op.redact_output(str(exc))[:500], hermes_root=hermes_root)
