@@ -985,6 +985,7 @@ def hermes_plan_node_transition(
     confirm: bool = False,
     dry_run: bool = True,
     expected_plan_version: int | None = None,
+    bump_retries: bool = False,
     hermes_root: Path | None = None,
 ) -> str:
     """Advance a plan node through the validated state machine (design §5.2).
@@ -1036,8 +1037,8 @@ def hermes_plan_node_transition(
                                    "to_state": target_state, "changed": False, "dry_run": True})
             now = _now()
             db.execute(
-                "UPDATE plan_nodes SET state=?, lease_lock='', lease_expires='', updated_at=? WHERE mission_id=? AND node_id=?",
-                (target_state, now, mission_id, node_id),
+                "UPDATE plan_nodes SET state=?, lease_lock='', lease_expires='', retries=retries+?, updated_at=? WHERE mission_id=? AND node_id=?",
+                (target_state, 1 if bump_retries else 0, now, mission_id, node_id),
             )
             db.commit()
         _audit("hermes_plan_node_transition", policy, dry_run=False, success=True, changed=True,
@@ -1099,6 +1100,138 @@ def hermes_plan_set_status(
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         _audit("hermes_plan_set_status", policy, dry_run=dry_run, success=False, changed=False, mission_id=mission_id)
         return _error(exc, "PLAN_STATUS_REJECTED", "Check mission id and plan status.")
+
+
+# ---------------------------------------------------------------------------
+# Bounded rework patch (v0.13 Autopilot PR5, Level B) — internal bridge, no tool
+# ---------------------------------------------------------------------------
+
+
+def _rework_clone_id(existing: set[str], failed_id: str) -> str:
+    for n in range(1, 100):
+        candidate = f"{failed_id[:58]}-r{n}"
+        if candidate not in existing:
+            return candidate
+    raise ValueError("too many rework clones for this node")
+
+
+def _assert_rework_invariants(
+    old_nodes: list[dict[str, Any]], new_nodes: list[dict[str, Any]], states: dict[str, str],
+    *, failed_id: str, clone_id: str, child_ids: set[str],
+) -> None:
+    """Belt-and-braces re-check that the patch touched only what it may touch.
+
+    The patch is built to satisfy these by construction; asserting them again
+    on the finished result means a future edit that breaks one fails loudly
+    instead of silently rewriting history.
+    """
+    old_by = {n["node_id"]: n for n in old_nodes}
+    new_by = {n["node_id"]: n for n in new_nodes}
+    if set(new_by) != set(old_by) | {clone_id}:
+        raise ValueError("rework patch may only add the clone node")
+    for node_id, old in old_by.items():
+        new = new_by[node_id]
+        if states.get(node_id) == "completed" and new != old:
+            raise ValueError(f"rework patch may not rewrite completed node {node_id!r}")
+        if node_id == failed_id and new != old:
+            raise ValueError("rework patch may not rewrite the failed node (its history is preserved)")
+        if node_id not in child_ids and new != old:
+            raise ValueError(f"rework patch may not change unrelated node {node_id!r}")
+        for key in ("kind", "owner", "capability_req", "budget", "expected_artifacts", "objective_sha256"):
+            if new[key] != old[key]:
+                raise ValueError(f"rework patch may not change {key} of node {node_id!r}")
+    clone, failed = new_by[clone_id], old_by[failed_id]
+    for key in ("kind", "owner", "capability_req", "budget", "expected_artifacts", "objective_sha256", "parents"):
+        if clone[key] != failed[key]:
+            raise ValueError(f"rework clone must copy {key} of the failed node")
+    if sum(1 for n in new_nodes if n["kind"] == KIND_APPROVAL) != sum(1 for n in old_nodes if n["kind"] == KIND_APPROVAL):
+        raise ValueError("rework patch may not add or remove an approval node")
+
+
+def apply_rework_patch(
+    mission_id: str,
+    failed_node_id: str,
+    *,
+    expected_plan_version: int,
+    hermes_root: Path | None = None,
+) -> dict[str, Any]:
+    """Replace a *failed* node by a fresh clone, in place, without touching history.
+
+    Level B recovery. The failed node stays ``failed`` (evidence preserved); a
+    clone ``<node>-rN`` with the same definition and parents is added as
+    ``pending``; the failed node's direct children are re-parented onto the
+    clone. ``mission_plans.version`` is deliberately **not** bumped: the plan was
+    extended, not replaced, so dispatch identities of in-flight nodes stay
+    valid. Concurrent replacement by ``hermes_plan_create`` still bumps the
+    version and is caught by ``expected_plan_version``.
+
+    Refused (``ValueError``/``PlanVersionConflict``) unless: the version matches;
+    the node is ``failed`` and not an approval node or ``high_impact``; every
+    direct child is still ``pending``; and the patched plan re-validates as a
+    whole (DAG, caps, secret scan) with the clone's skills re-resolved. Never
+    touches a completed node, an authorization class, or an approval node.
+    """
+    path = _db_path(hermes_root)
+    with _connect(path, write=True) as db:
+        _begin_write(db)
+        row = _get_plan_row(db, mission_id)
+        if int(row["version"]) != int(expected_plan_version):
+            raise PlanVersionConflict(int(expected_plan_version), int(row["version"]))
+        plan = json.loads(row["plan_json"])
+        old_nodes = plan["nodes"]
+        states = {r["node_id"]: r["state"] for r in _nodes_rows(db, mission_id)}
+        by_id = {n["node_id"]: n for n in old_nodes}
+        failed = by_id.get(failed_node_id)
+        if failed is None or states.get(failed_node_id) != "failed":
+            raise ValueError("rework requires an existing failed node")
+        if failed["kind"] == KIND_APPROVAL or failed["capability_req"].get("authorization_class") == "high_impact":
+            raise ValueError("a human-gated node is never replanned around")
+        children = [n for n in old_nodes if failed_node_id in n["parents"]]
+        started = [n["node_id"] for n in children if states.get(n["node_id"]) != "pending"]
+        if started:
+            raise ValueError(f"rework refused: descendant already started: {started}")
+        clone_id = _rework_clone_id(set(by_id), failed_node_id)
+        child_ids = {c["node_id"] for c in children}
+
+        clone = _canonical_node({**failed, "node_id": clone_id, "contract_sha256": ""})
+        new_nodes: list[dict[str, Any]] = []
+        for node in old_nodes:
+            if node["node_id"] in child_ids:
+                reparented = [clone_id if p == failed_node_id else p for p in node["parents"]]
+                node = _canonical_node({**node, "parents": reparented, "contract_sha256": ""})
+            new_nodes.append(node)
+        new_nodes.append(clone)
+        _assert_rework_invariants(old_nodes, new_nodes, states, failed_id=failed_node_id,
+                                  clone_id=clone_id, child_ids=child_ids)
+
+        raw_plan = {k: v for k, v in plan.items() if k != "nodes"}
+        raw_plan["nodes"] = new_nodes
+        canonical_json, canonical = _canonical_plan(raw_plan)  # DAG, caps, secret scan on the whole result
+        _validate_plan_skill_requirements({"nodes": [clone]}, hermes_root)
+        canon_by = {n["node_id"]: n for n in canonical["nodes"]}
+        now = _now()
+        db.execute(
+            "UPDATE mission_plans SET plan_json=?, plan_sha256=?, updated_at=? WHERE mission_id=?",
+            (json.dumps({k: v for k, v in canonical.items() if k != "status"}, sort_keys=True),
+             _plan_sha256(canonical_json), now, mission_id),
+        )
+        db.execute(
+            "INSERT INTO plan_nodes(mission_id,node_id,contract_sha256,capability_req,budget,deps,state,lease_lock,lease_expires,epoch,failure_kind,retries,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (mission_id, clone_id, clone["contract_sha256"], json.dumps(clone["capability_req"], sort_keys=True),
+             json.dumps(clone["budget"], sort_keys=True), json.dumps(clone["parents"], sort_keys=True),
+             "pending", "", "", 0, "", 0, now, now),
+        )
+        for child_id in sorted(child_ids):
+            child = canon_by[child_id]
+            db.execute(
+                "UPDATE plan_nodes SET deps=?, contract_sha256=?, updated_at=? WHERE mission_id=? AND node_id=?",
+                (json.dumps(child["parents"], sort_keys=True), child["contract_sha256"], now, mission_id, child_id),
+            )
+        db.commit()
+    _audit("hermes_plan_rework_patch", op.OperatorPolicy(), dry_run=False, success=True, changed=True,
+           mission_id=mission_id, node_id=failed_node_id,
+           extra={"clone": clone_id, "reparented": sorted(child_ids), "plan_version": int(expected_plan_version)})
+    return {"clone_node_id": clone_id, "reparented": sorted(child_ids), "plan_version": int(expected_plan_version)}
 
 
 # ---------------------------------------------------------------------------
