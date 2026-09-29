@@ -61,8 +61,7 @@ class Backend:
         return json.dumps({"success": True, "changed": True, "state": "running"})
 
 
-@pytest.fixture
-def env(tmp_path: Path, monkeypatch):
+def make_env(tmp_path: Path, monkeypatch):
     root = tmp_path / "hermes"
     root.mkdir()
     op.set_audit_log_override(tmp_path / "audit.jsonl")
@@ -76,6 +75,11 @@ def env(tmp_path: Path, monkeypatch):
     backend = Backend()
     monkeypatch.setattr(contract_mod, "hermes_contract_dispatch", backend)
     return root, backend
+
+
+@pytest.fixture
+def env(tmp_path: Path, monkeypatch):
+    return make_env(tmp_path, monkeypatch)
 
 
 def _node(node_id: str, parents=(), *, kind="single", owner="hermes-researcher", auth="reversible_write") -> dict:

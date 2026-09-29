@@ -13,6 +13,10 @@ and invariants; this module implements PR1 only:
   so Autopilot survives an MCP server restart or disconnect without ever
   trusting a cached in-memory belief about whether it is still running.
 
+PR3 adds observation and advancement (``_advance_nodes``): each in-flight node
+is reconciled through ``hermes_delegation_reconcile`` and completes only when
+the Work Contract validates ``SATISFIED`` against observed state.
+
 PR2 adds the parallel DAG scheduler (``schedule_tick``): a peer caller one
 level above ``operator_controller`` — it never changes ``_frontier()`` or
 ``hermes_controller_reconcile``. Each tick it dispatches up to
@@ -94,6 +98,16 @@ MISSION_HOLD_STATUSES = frozenset({"paused", "blocked", "awaiting_approval"})
 MAX_DISPATCH_FAILURES = 3
 SCHEDULER_LEASE_TTL_SECONDS = 120.0
 SCHEDULER_TRIGGER_KIND = "autopilot"
+
+# --- PR3 advancement constants -------------------------------------------------
+# The plan-node state machine path from dispatch to completion (§5.2). Autopilot
+# only walks it for a node whose delegation it has just verified as SATISFIED.
+NODE_ADVANCE_CHAIN = ("dispatched", "running", "awaiting_review", "validated", "awaiting_approval", "completed")
+# Nodes Autopilot observes each tick. The awaiting_* states are only advanced
+# when Autopilot itself recorded that it was mid-walk (crash recovery); otherwise
+# they may be an owner's manual gate and are left alone.
+OBSERVED_NODE_STATES = frozenset({"dispatched", "running", "awaiting_review", "validated", "awaiting_approval"})
+MID_WALK_STATES = frozenset({"awaiting_review", "validated", "awaiting_approval"})
 
 
 def _now() -> str:
@@ -718,9 +732,10 @@ def _reached_backend(row: dict[str, Any]) -> bool:
 
 def _node_transition(
     mission_id: str, node_id: str, plan_version: int, hermes_root: Path | None, *, dry_run: bool,
+    target: str = "dispatched", reason: str = "autopilot dispatch",
 ) -> dict[str, Any]:
     return json.loads(mission_plan.hermes_plan_node_transition(
-        mission_id, node_id, "dispatched", reason="autopilot dispatch",
+        mission_id, node_id, target, reason=reason,
         confirm=not dry_run, dry_run=dry_run, expected_plan_version=plan_version, hermes_root=hermes_root,
     ))
 
@@ -811,6 +826,134 @@ def _dispatch_one(
     return "failed", "transition_rejected"
 
 
+# ---------------------------------------------------------------------------
+# PR3 — observe, validate, advance (never trusts a worker's self-report)
+# ---------------------------------------------------------------------------
+
+
+def _walk_to(
+    mission_id: str, node_id: str, current: str, target: str, plan_version: int, hermes_root: Path | None,
+    *, reason: str,
+) -> tuple[str, str]:
+    """Walk the node state machine from ``current`` up to ``target`` along the chain.
+
+    Returns ``(outcome, detail)``: ``ok`` | ``conflict`` | ``rejected``. Each step
+    is its own CAS-guarded transition, so a partial walk is durable and resumable.
+    """
+    chain = NODE_ADVANCE_CHAIN
+    for step in chain[chain.index(current) + 1: chain.index(target) + 1]:
+        result = _node_transition(mission_id, node_id, plan_version, hermes_root, dry_run=False,
+                                  target=step, reason=reason)
+        if not result.get("success"):
+            if result.get("code") == "PLAN_VERSION_CONFLICT":
+                return "conflict", "plan_version_conflict"
+            return "rejected", f"transition_to_{step}_rejected"
+    return "ok", ""
+
+
+def _verified_success(result: dict[str, Any]) -> bool:
+    """Completion evidence gate: a node completes only on observed, validated state.
+
+    ``hermes_delegation_reconcile`` promotes a delegation to ``succeeded`` only
+    when the matching Work Contract validates ``SATISFIED`` against observed
+    state; this re-checks that all three of state, verdict and the
+    contract-bound ``evidence_ref`` agree, so a missing or partial result
+    fails closed instead of completing the node.
+    """
+    delegation = result.get("delegation") or {}
+    sha = str(delegation.get("contract_sha256") or "")
+    return bool(
+        result.get("success") is True
+        and delegation.get("state") == "succeeded"
+        and delegation.get("validation_verdict") == "SATISFIED"
+        and sha
+        and result.get("evidence_ref") == f"contract:{sha}"
+    )
+
+
+def _advance_one(
+    mission_id: str, node: dict[str, Any], plan_version: int, walking: dict[str, Any], hermes_root: Path | None,
+) -> tuple[str, str]:
+    """Observe one in-flight node and move it as far as observed evidence allows.
+
+    outcome: ``completed`` | ``failed`` | ``running`` | ``held`` | ``conflict``.
+    """
+    node_id = node["node_id"]
+    state = node["state"]
+    if _is_owner_gated(node):
+        return "held", "owner_gate"
+    if state in MID_WALK_STATES and walking.get(node_id) != plan_version:
+        return "held", "review_gate"  # not parked by Autopilot: may be an owner's manual gate
+    key = dispatch_key(mission_id, plan_version, node_id, int(node.get("retries", 0) or 0),
+                       str(node.get("contract_sha256", "")))
+    existing = _existing_delegation(mission_id, node_id, _task_id(mission_id, node_id, key), hermes_root)
+    if existing is None or not _reached_backend(existing):
+        return "held", "no_delegation"
+
+    result = json.loads(deleg.hermes_delegation_reconcile(existing["delegation_id"], apply=True, hermes_root=hermes_root))
+    if not result.get("success"):
+        return "held", "reconcile_failed"
+    if result.get("stale_observation"):
+        return "held", "stale_observation"
+    dstate = str((result.get("delegation") or {}).get("state") or "")
+
+    if dstate in ("failed", "cancelled"):
+        outcome, detail = _walk_to_failed(mission_id, node_id, plan_version, hermes_root, dstate)
+        return outcome, detail
+    if _verified_success(result):
+        walking[node_id] = plan_version  # durable before the first step (see _advance_nodes)
+        _write_run(mission_id, hermes_root, walking=dict(walking))
+        outcome, detail = _walk_to(mission_id, node_id, state, "completed", plan_version, hermes_root,
+                                   reason="autopilot: contract SATISFIED on observed state")
+        if outcome == "ok":
+            walking.pop(node_id, None)
+            _write_run(mission_id, hermes_root, walking=dict(walking))
+            return "completed", existing["delegation_id"]
+        return ("conflict" if outcome == "conflict" else "held"), detail
+    if dstate == "running" and state == "dispatched":
+        outcome, detail = _walk_to(mission_id, node_id, "dispatched", "running", plan_version, hermes_root,
+                                   reason="autopilot: backend observed running")
+        return ("running", "") if outcome == "ok" else (("conflict" if outcome == "conflict" else "held"), detail)
+    # queued / reconciling / running-already: nothing observed that justifies a move.
+    return "held", dstate or "unobserved"
+
+
+def _walk_to_failed(
+    mission_id: str, node_id: str, plan_version: int, hermes_root: Path | None, dstate: str,
+) -> tuple[str, str]:
+    result = _node_transition(mission_id, node_id, plan_version, hermes_root, dry_run=False,
+                              target="failed", reason=f"autopilot: delegation {dstate}")
+    if result.get("success"):
+        return "failed", dstate
+    return ("conflict", "plan_version_conflict") if result.get("code") == "PLAN_VERSION_CONFLICT" else ("held", "fail_transition_rejected")
+
+
+def _advance_nodes(
+    mission_id: str, review: dict[str, Any], plan_version: int, hermes_root: Path | None, summary: dict[str, Any],
+    db: sqlite3.Connection, lease_lock: str,
+) -> bool:
+    """Observe every in-flight node. Returns False if the plan moved under us."""
+    run = _read_run(mission_id, hermes_root) or {}
+    walking = {k: int(v) for k, v in (run.get("walking") or {}).items()}
+    for node in sorted(review.get("nodes", []), key=lambda n: n["node_id"]):
+        if node["state"] not in OBSERVED_NODE_STATES:
+            continue
+        controller.renew_lease(db, mission_id, lease_lock, ttl=SCHEDULER_LEASE_TTL_SECONDS)
+        outcome, detail = _advance_one(mission_id, node, plan_version, walking, hermes_root)
+        if outcome == "completed":
+            summary["completed"].append(node["node_id"])
+        elif outcome == "failed":
+            summary["failed_nodes"][node["node_id"]] = detail
+        elif outcome == "running":
+            summary["advanced"].append(node["node_id"])
+        elif outcome == "conflict":
+            summary["skipped"] = detail
+            return False
+        else:
+            summary["observed_held"][node["node_id"]] = detail
+    return True
+
+
 def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency: int) -> dict[str, Any]:
     """One scheduling pass: fill free worker slots with ready nodes.
 
@@ -822,6 +965,7 @@ def schedule_tick(mission_id: str, hermes_root: Path | None, *, max_concurrency:
     summary: dict[str, Any] = {
         "plan_version": None, "slots": 0, "in_flight": 0,
         "dispatched": [], "adopted": [], "held": {}, "failed": {}, "skipped": "",
+        "completed": [], "failed_nodes": {}, "advanced": [], "observed_held": {},
     }
     if not _autopilot_enabled():
         summary["skipped"] = "autopilot_gate_off"
@@ -856,6 +1000,14 @@ def _schedule_locked(
         summary["skipped"] = "no_plan"
         return summary
     plan_version = int(review["version"])
+    summary["plan_version"] = plan_version
+    if not _advance_nodes(mission_id, review, plan_version, hermes_root, summary, db, lease_lock):
+        return summary
+    # Re-read: completions free slots and unblock children for this same tick.
+    review = json.loads(mission_plan.hermes_plan_review(mission_id, hermes_root=hermes_root))
+    if not review.get("success") or int(review.get("version", -1)) != plan_version:
+        summary["skipped"] = "plan_version_conflict"
+        return summary
     nodes = {n["node_id"]: n for n in review.get("nodes", [])}
     in_flight = sum(1 for n in nodes.values() if n["state"] in IN_FLIGHT_NODE_STATES)
     slots = max(0, int(max_concurrency) - in_flight)
