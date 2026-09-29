@@ -245,3 +245,38 @@ def test_stop_cancels_the_worker_and_state_survives_a_fresh_status_read(hermes_r
     _wait_for_worker_running(hermes_root, mid)
     cleanup = _j(autopilot.hermes_autopilot_stop(mid, confirm=True, dry_run=False, hermes_root=hermes_root))
     assert cleanup["success"] is True, cleanup
+
+
+def test_worker_runs_the_scheduler_and_fails_closed_without_a_dispatchable_peer(hermes_root, monkeypatch):
+    """PR2 exit gate for the runtime shell: the detached worker schedules.
+
+    The hermetic data root has no fleet peers, so placement classifies the node
+    ``no_capable_target``. The worker must record that as a held node — not
+    dispatch, not crash — and stay alive and stoppable.
+    """
+    monkeypatch.setenv(autopilot.AUTOPILOT_ENV, "1")
+    mid = "msn-ap-sched-worker"
+    _make_mission(hermes_root, mid)
+    _make_plan(hermes_root, mid)
+    started = _j(autopilot.hermes_autopilot_start(mid, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert started["success"] is True, started
+    try:
+        deadline = time.monotonic() + 15.0
+        run: dict = {}
+        while time.monotonic() < deadline:
+            run = _j(autopilot.hermes_autopilot_status(mid, hermes_root=hermes_root))["run"]
+            if run.get("last_schedule", {}).get("plan_version") is not None:
+                break
+            time.sleep(0.1)
+        schedule = run.get("last_schedule", {})
+        assert schedule.get("plan_version") == 1, run
+        assert schedule["dispatched"] == [] and schedule["held"] == {"a": "no_capable_target"}, schedule
+        assert run["state"] == "running" and not run.get("last_error")
+        assert plan_states(hermes_root, mid) == {"a": "pending"}
+    finally:
+        autopilot.hermes_autopilot_stop(mid, confirm=True, dry_run=False, hermes_root=hermes_root)
+
+
+def plan_states(root: Path, mid: str) -> dict[str, str]:
+    review = _j(plan.hermes_plan_review(mid, hermes_root=root))
+    return {n["node_id"]: n["state"] for n in review["nodes"]}

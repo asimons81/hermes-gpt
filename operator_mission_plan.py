@@ -107,6 +107,22 @@ NODE_TRANSITIONS: dict[str, set[str]] = {
 TERMINAL_NODE_STATES = frozenset({"completed", "failed"})
 
 
+class PlanVersionConflict(ValueError):
+    """The plan was replaced (``hermes_plan_create``) after the caller read it.
+
+    Raised by the optional ``expected_plan_version`` compare-and-swap on
+    ``hermes_plan_node_transition``. ``hermes_plan_create`` replaces the whole
+    plan (and resets every node to ``pending``) with no read-verify-write of its
+    own, so an out-of-process writer such as Autopilot must be able to refuse a
+    node write that was computed against a plan version that no longer exists.
+    """
+
+    def __init__(self, expected: int, actual: int | None):
+        super().__init__(f"plan version changed (expected {expected}, found {actual})")
+        self.expected = expected
+        self.actual = actual
+
+
 # ---------------------------------------------------------------------------
 # Time / root / DB helpers (reuse the Mission runtime store)
 # ---------------------------------------------------------------------------
@@ -968,12 +984,20 @@ def hermes_plan_node_transition(
     *,
     confirm: bool = False,
     dry_run: bool = True,
+    expected_plan_version: int | None = None,
     hermes_root: Path | None = None,
 ) -> str:
     """Advance a plan node through the validated state machine (design §5.2).
 
     This mutates only the plan node's own state; it never dispatches a worker
     and never completes/approves a Mission (read-only slice).
+
+    ``expected_plan_version`` is an optional compare-and-swap: when given, the
+    transition is refused with ``PLAN_VERSION_CONFLICT`` unless
+    ``mission_plans.version`` still equals it, checked inside the same
+    ``BEGIN IMMEDIATE`` transaction as the write (and before the dry-run
+    return, so a dry run can pre-validate it). ``None`` keeps the historical
+    unchecked behavior.
     """
     policy = op.OperatorPolicy()
     try:
@@ -988,6 +1012,13 @@ def hermes_plan_node_transition(
         path = _db_path(hermes_root)
         with _connect(path, write=True) as db:
             _begin_write(db)
+            if expected_plan_version is not None:
+                plan_row = db.execute(
+                    "SELECT version FROM mission_plans WHERE mission_id=?", (mission_id,)
+                ).fetchone()
+                actual_version = int(plan_row["version"]) if plan_row else None
+                if actual_version != int(expected_plan_version):
+                    raise PlanVersionConflict(int(expected_plan_version), actual_version)
             row = db.execute(
                 "SELECT state FROM plan_nodes WHERE mission_id=? AND node_id=?", (mission_id, node_id)
             ).fetchone()
@@ -1014,6 +1045,14 @@ def hermes_plan_node_transition(
         return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_plan_node_transition",
                            "mission_id": mission_id, "node_id": node_id, "from_state": current,
                            "to_state": target_state, "changed": True, "dry_run": False})
+    except PlanVersionConflict as exc:
+        _audit("hermes_plan_node_transition", policy, dry_run=dry_run, success=False, changed=False,
+               mission_id=mission_id, node_id=node_id)
+        return _error(
+            exc, "PLAN_VERSION_CONFLICT",
+            "The plan was replaced since it was read; re-read the plan and recompute before writing.",
+            extra={"expected_plan_version": exc.expected, "actual_plan_version": exc.actual},
+        )
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         _audit("hermes_plan_node_transition", policy, dry_run=dry_run, success=False, changed=False,
                mission_id=mission_id, node_id=node_id)
