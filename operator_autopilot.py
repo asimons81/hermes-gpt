@@ -237,8 +237,8 @@ def _claim_run(
         if existing is not None and existing.get("state") not in TERMINAL_STATES:
             return existing, None
         attempt = int(existing.get("attempt", 0)) + 1 if existing else 1
-        record = _new_run_record(mission_id, attempt=attempt)
-        record.update({
+        claimed = _new_run_record(mission_id, attempt=attempt)
+        claimed.update({
             "state": "starting",
             "job_id": job_id_for(mission_id, attempt),
             "max_concurrency": max_concurrency,
@@ -246,9 +246,9 @@ def _claim_run(
             "config_sha256": config_sha256,
             "last_event_cursor": live_events.high_watermark(hermes_root=hermes_root),
         })
-        record["updated_at"] = _now()
-        _atomic_json(path, record)
-        return None, record
+        claimed["updated_at"] = _now()
+        _atomic_json(path, claimed)
+        return None, claimed
 
 
 def _autopilot_enabled() -> bool:

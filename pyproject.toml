@@ -66,6 +66,7 @@ py-modules = [
   "operator_capability_manifest",
   "operator_placement",
   "operator_failure_semantics",
+  "operator_autopilot",
   "operator_controller",
   "operator_contract",
   "operator_delegations",
