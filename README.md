@@ -264,6 +264,8 @@ HERMES_GPT_OWNER_ACTIVE=1
 HERMES_GPT_OWNER_ACK=I_UNDERSTAND_THIS_CAN_MUTATE_MY_MACHINE
 ```
 
+Workspace/Owner file patch and overwrite tools create a timestamped `.bak.*` copy by default. Set `HERMES_GPT_OPERATOR_FILE_BACKUPS=0` to disable those copies when the workspace already has its own version-control/rollback strategy; atomic replace writes remain enabled.
+
 `hermes_export_file(path)` is a workspace-authorized, read-only transfer surface for existing local binary files. It requires a non-empty `HERMES_GPT_OPERATOR_ALLOWED_PATHS`, preserves denied secret paths, defaults to a 4 MiB limit with a 16 MiB hard ceiling, and returns bytes as an MCP embedded resource rather than base64 text. See [Binary file export](docs/file-export.md) for the complete limits and client-rendering contract.
 
 See [docs/operator-mode.md](docs/operator-mode.md) for the complete policy model and exact gates.
