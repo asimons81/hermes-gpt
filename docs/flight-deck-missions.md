@@ -30,6 +30,7 @@ It follows the same rules as the rest of this screen:
 
 - **GET only, no writes.** Unlike the `hermes_autopilot_status` MCP tool, which heals the stored run record and reconciles the job, this route writes nothing. It stays truthful anyway: it checks worker liveness without writing and reports an `effective_state` with `stale: true` when the stored record says `running` but the worker is dead or already finished. The stored record is shown as found.
 - **Allow-listed fields.** The browser receives an explicit projection of the run, not the stored record, so a field added later is never exposed by accident. No process ids, config hashes, placements, or raw recovery internals.
+- **Derived summary.** The response includes a `summary` (progress, approval frontier, budget, recovery counters, limits, wake-up counters, and an `attention` list with `needs_owner`) built by the same code as the `hermes_autopilot_status` tool. It is an allow-listed projection: worker peers, delegation ids, and unlisted fields are never sent, and if it cannot be built the route returns `{"available": false}` while still reporting the run. Reading it never enforces a budget or pauses a Mission.
 - **Cursor first.** `live_cursor` is captured before the durable read, as on the Mission detail route.
 - **Redacted and read-level.** The payload passes through the Flight Deck redaction boundary and requires the Operator read level.
 

@@ -216,3 +216,46 @@ def test_the_live_event_cursor_is_captured_before_the_durable_read(root, monkeyp
 
 def test_existing_mission_routes_are_untouched(root):
     assert _client().get("/api/ops/missions/msn-missing").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Status v2 summary projection (PR9)
+# ---------------------------------------------------------------------------
+
+
+def test_summary_is_projected_through_an_allow_list(root, monkeypatch):
+    _run(root)
+    _register(root, pid=os.getpid())
+    derived = {
+        "available": True, "mission_status": "running", "plan_version": 1,
+        "progress": {"total": 3, "completed": 1, "percent": 33, "by_state": {"pending": 2}, "ready": 1, "in_flight": 0},
+        "workers": [{"node_id": "a", "state": "dispatched", "attempt": 1, "peer": "rza",
+                     "delegation_id": "dlg-secretish", "delegation_state": "running"}],
+        "frontier": {"active": True, "waiting": True, "reasons": ["owner_gate_node"], "nodes": ["g"]},
+        "budget": {"configured": True, "status": "within", "crosses": False, "unit": "usd", "spend": 1.0, "quota": 10.0},
+        "recovery": {"retries": 1, "replans_used": 1, "max_replans": 2, "superseded_nodes": 1, "failed_nodes": [],
+                     "internal_note": "nope"},
+        "limits": {"max_runtime_seconds": 600}, "wake": {"last_wake": "event"},
+        "attention": [{"code": "owner_gate_node", "severity": "owner", "nodes": ["g"], "scratch": "nope"}],
+        "needs_owner": True, "hidden_extra": "nope",
+    }
+    monkeypatch.setattr(autopilot, "build_summary", lambda *a, **k: derived)
+    summary = _get().json()["data"]["summary"]
+    assert summary["needs_owner"] is True and summary["progress"]["percent"] == 33
+    assert summary["workers"] == [{"node_id": "a", "state": "dispatched", "attempt": 1, "delegation_state": "running"}]
+    assert summary["attention"] == [{"code": "owner_gate_node", "severity": "owner", "nodes": ["g"]}]
+    text = json.dumps(summary)
+    for forbidden in ("rza", "dlg-secretish", "hidden_extra", "internal_note", "scratch"):
+        assert forbidden not in text, forbidden
+
+
+def test_an_unavailable_summary_is_reported_as_such(root, monkeypatch):
+    _run(root)
+    _register(root, pid=os.getpid())
+
+    def broken(*args, **kwargs):
+        raise OSError("plan store unreadable")
+
+    monkeypatch.setattr(autopilot, "build_summary", broken)
+    data = _get().json()["data"]
+    assert data["found"] is True and data["summary"] == {"available": False}

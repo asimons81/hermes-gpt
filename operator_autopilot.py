@@ -576,6 +576,156 @@ def hermes_autopilot_start(
                       "Check Mission/Plan state, Operator policy level, and the HERMES_GPT_AUTOPILOT gate.")
 
 
+# ---------------------------------------------------------------------------
+# PR9 — bounded status summary (additive; shared by the MCP tool and Flight Deck)
+# ---------------------------------------------------------------------------
+
+# A live worker that has not completed a tick for this long is reported as silent.
+# Comfortably above the 60s maximum idle poll plus a slow tick.
+SILENT_TICK_SECONDS = 120.0
+SUMMARY_MAX_WORKERS = 64
+_OWNER_ATTENTION = frozenset({"mission_awaiting_approval", "owner_gate_node", "budget_crossed", "budget_invalid",
+                              "budget_check_failed", "node_failed"})
+
+
+def _budget_summary(mission_id: str, hermes_root: Path | None) -> dict[str, Any]:
+    """Read-only budget view. ``enforce=False``: a status read can never pause a Mission."""
+    try:
+        view = json.loads(budget.hermes_budget_check(mission_id, hermes_root, enforce=False))
+    except (ValueError, TypeError, OSError, sqlite3.Error, LookupError):
+        return {"configured": None, "error": True}
+    if not isinstance(view, dict) or view.get("success") is False:
+        return {"configured": None, "error": True}
+    if not view.get("found"):
+        return {"configured": False}
+    envelope = view.get("envelope") or {}
+    return {
+        "configured": True,
+        "status": str(view.get("envelope_status") or ""),
+        "crosses": bool(view.get("crosses_envelope")),
+        "unit": str(envelope.get("unit") or ""),
+        "spend": envelope.get("spend"),
+        "quota": envelope.get("quota"),
+        "utilization_percent": envelope.get("utilization_percent"),
+    }
+
+
+def build_summary(
+    mission_id: str, run: dict[str, Any], hermes_root: Path | None = None, *, now: float | None = None,
+) -> dict[str, Any]:
+    """The bounded, derived Autopilot summary. Pure read: it writes nothing.
+
+    Everything here is recomputed from durable state on each call (plan, budget,
+    Mission, delegations) plus the run's own orchestration metadata; in
+    particular the approval frontier is derived from the *current* plan rather
+    than read back from the last tick. Additive to the PR1 status payload.
+    """
+    now = time.time() if now is None else now
+    review = json.loads(mission_plan.hermes_plan_review(mission_id, hermes_root=hermes_root))
+    nodes = review.get("nodes", []) if review.get("success") and review.get("found") is not False else []
+    plan_version = int(review["version"]) if nodes else None
+    try:
+        mission_status = str(_load_mission(mission_id, hermes_root).get("status") or "")
+    except LookupError:
+        mission_status = ""
+    recovery = _load_recovery(run)
+    replaced = set(recovery["superseded_nodes"]) - set(recovery["pending_supersede"])
+
+    by_state = {state: 0 for state in mission_plan.NODE_STATES}
+    for node in nodes:
+        by_state[node["state"]] = by_state.get(node["state"], 0) + 1
+    counted = [n for n in nodes if not (n["state"] == "failed" and n["node_id"] in replaced)]
+    completed = sum(1 for n in counted if n["state"] == "completed")
+    ready = [nid for nid in _dispatch_candidates(review)
+             if not _is_owner_gated(next(n for n in nodes if n["node_id"] == nid))] if nodes else []
+    progress = {
+        "total": len(counted), "completed": completed,
+        "percent": int(100 * completed / len(counted)) if counted else 0,
+        "by_state": by_state, "ready": len(ready),
+        "in_flight": sum(1 for n in nodes if n["state"] in IN_FLIGHT_NODE_STATES),
+    }
+
+    workers: list[dict[str, Any]] = []
+    for node in sorted((n for n in nodes if n["state"] in OBSERVED_NODE_STATES), key=lambda n: n["node_id"])[:SUMMARY_MAX_WORKERS]:
+        attempt = int(node.get("retries", 0) or 0)
+        key = dispatch_key(mission_id, plan_version or 0, node["node_id"], attempt, str(node.get("contract_sha256", "")))
+        found = _existing_delegation(mission_id, node["node_id"], _task_id(mission_id, node["node_id"], key), hermes_root)
+        workers.append({
+            "node_id": node["node_id"], "state": node["state"], "attempt": attempt,
+            "peer": recovery["placements"].get(node["node_id"]),
+            "delegation_id": found["delegation_id"] if found else None,
+            "delegation_state": found["state"] if found else None,
+        })
+
+    frontier = _frontier_view({"nodes": nodes, "ready_nodes": review.get("ready_nodes", [])}, mission_status)
+    budget_view = _budget_summary(mission_id, hermes_root)
+    started = _parse_time(run.get("started_at"))
+    max_runtime = int(run.get("max_runtime_seconds") or DEFAULT_MAX_RUNTIME_SECONDS)
+    elapsed = max(0.0, now - started) if started is not None else None
+    last_tick = _parse_time(run.get("last_tick_at"))
+    tick_age = max(0.0, now - last_tick) if last_tick is not None else None
+    failed_nodes = sorted(n["node_id"] for n in counted if n["state"] == "failed")
+
+    attention: list[dict[str, Any]] = []
+    if mission_status == "awaiting_approval":
+        attention.append({"code": "mission_awaiting_approval", "nodes": []})
+    if frontier["nodes"]:
+        attention.append({"code": "owner_gate_node", "nodes": frontier["nodes"]})
+    if failed_nodes:
+        attention.append({"code": "node_failed", "nodes": failed_nodes})
+    if budget_view.get("error"):
+        attention.append({"code": "budget_check_failed", "nodes": []})
+    elif budget_view.get("configured") and budget_view.get("status") != budget.STATUS_WITHIN:
+        attention.append({"code": "budget_crossed" if budget_view.get("crosses") else "budget_invalid", "nodes": []})
+    if elapsed is None or elapsed > max_runtime:  # an unknowable age counts as exceeded, as in _runtime_exceeded
+        attention.append({"code": "runtime_exceeded", "nodes": []})
+    if run.get("state") == "running" and tick_age is not None and tick_age > SILENT_TICK_SECONDS:
+        attention.append({"code": "worker_silent", "nodes": []})
+    for item in attention:
+        item["severity"] = "owner" if item["code"] in _OWNER_ATTENTION else "info"
+
+    return {
+        "available": True,
+        "mission_status": mission_status,
+        "plan_version": plan_version,
+        "progress": progress,
+        "workers": workers,
+        "frontier": frontier,
+        "budget": budget_view,
+        "recovery": {
+            "retries": sum(int(n.get("retries", 0) or 0) for n in nodes),
+            "replans_used": int(run.get("replans_used", 0) or 0),
+            "max_replans": int(run.get("max_replans", 0) or 0),
+            "max_attempts_per_node": int(run.get("max_attempts_per_node") or MAX_NODE_ATTEMPTS),
+            "superseded_nodes": len(recovery["superseded_nodes"]),
+            "pending_supersede": len(recovery["pending_supersede"]),
+            "replan_pending": len(recovery["replan_pending"]),
+            "failed_nodes": failed_nodes,
+        },
+        "limits": {
+            "max_concurrency": int(run.get("max_concurrency") or 0),
+            "max_runtime_seconds": max_runtime,
+            "runtime_elapsed_seconds": round(elapsed, 1) if elapsed is not None else None,
+            "runtime_remaining_seconds": round(max(0.0, max_runtime - elapsed), 1) if elapsed is not None else 0.0,
+        },
+        "wake": {
+            "last_wake": run.get("last_wake"), "wakeups": run.get("wakeups") or {"event": 0, "timer": 0},
+            "last_event_cursor": int(run.get("last_event_cursor") or 0),
+            "tick_age_seconds": round(tick_age, 1) if tick_age is not None else None,
+        },
+        "attention": attention,
+        "needs_owner": any(item["severity"] == "owner" for item in attention),
+    }
+
+
+def _safe_summary(mission_id: str, run: dict[str, Any], hermes_root: Path | None) -> dict[str, Any]:
+    """Summary must never make status fail: the derived part degrades to ``available: false``."""
+    try:
+        return build_summary(mission_id, run, hermes_root)
+    except (LookupError, ValueError, TypeError, KeyError, OSError, sqlite3.Error, PermissionError, StopIteration):
+        return {"available": False}
+
+
 def hermes_autopilot_status(mission_id: str, hermes_root: Path | None = None) -> str:
     """Read-only Autopilot status for a Mission; reconciles worker liveness first.
 
@@ -610,6 +760,7 @@ def hermes_autopilot_status(mission_id: str, hermes_root: Path | None = None) ->
                 "status": job.get("status") if job else None,
                 "process_verification": job.get("process_verification") if job else None,
             },
+            "summary": _safe_summary(mission_id, run, hermes_root),
         })
     except (LookupError, ValueError, PermissionError, OSError, json.JSONDecodeError) as exc:
         return _error(exc, "AUTOPILOT_STATUS_FAILED", "Check the mission id and Operator read access.")
@@ -669,6 +820,7 @@ def observe_status(mission_id: str, hermes_root: Path | None = None) -> dict[str
         "effective_state": effective,
         "stale": stale,
         "worker": {"status": (job or {}).get("status"), "liveness": liveness},
+        "summary": _safe_summary(mission_id, run, hermes_root),
     }
 
 

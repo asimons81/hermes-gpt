@@ -152,6 +152,31 @@ _SCHEDULE_FIELDS = (
 )
 
 
+_SUMMARY_KEYS = ("available", "mission_status", "plan_version", "progress", "frontier", "budget", "limits", "wake",
+                 "needs_owner")
+
+
+def _project_summary(summary: Any) -> dict[str, Any]:
+    """Allow-list of the derived summary. Worker peers and delegation ids stay out of the browser."""
+    if not isinstance(summary, dict) or not summary.get("available"):
+        return {"available": False}
+    projected = {key: summary.get(key) for key in _SUMMARY_KEYS if key in summary}
+    projected["workers"] = [
+        {"node_id": w.get("node_id"), "state": w.get("state"), "attempt": w.get("attempt"),
+         "delegation_state": w.get("delegation_state")}
+        for w in (summary.get("workers") or []) if isinstance(w, dict)
+    ]
+    projected["attention"] = [
+        {"code": a.get("code"), "severity": a.get("severity"), "nodes": list(a.get("nodes") or [])}
+        for a in (summary.get("attention") or []) if isinstance(a, dict)
+    ]
+    recovery = summary.get("recovery") if isinstance(summary.get("recovery"), dict) else {}
+    projected["recovery"] = {key: recovery.get(key) for key in (
+        "retries", "replans_used", "max_replans", "max_attempts_per_node", "superseded_nodes",
+        "pending_supersede", "replan_pending", "failed_nodes") if key in recovery}
+    return projected
+
+
 def _project_run(run: dict[str, Any]) -> dict[str, Any]:
     projected = {key: run.get(key) for key in _RUN_FIELDS if key in run}
     schedule = run.get("last_schedule")
@@ -186,6 +211,7 @@ def _mission_autopilot(request: Request) -> JSONResponse:
             "stale": view["stale"],
             "worker": view["worker"],
             "run": _project_run(view["run"]),
+            "summary": _project_summary(view.get("summary")),
         })
     return JSONResponse(ui_security.ok(data))
 
