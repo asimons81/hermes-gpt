@@ -1,6 +1,6 @@
 # Operator Mode for Hermes GPT
 
-Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.12.0 behavior, including the durable Mission lifecycle, unified delegation lineage, live-event bus, and Fabric-backed cross-machine Swarm execution, plus the vNext slice-1 additive surfaces (MissionPlan DAG, derived capability-manifest / mission-ledger views, budget envelope, placement scoring, failure classification + recovery matrix, and the shadow/observe mission controller) and the vNext slice-2 gated execution rungs (budget D3 hard-block enforcement behind `HERMES_GPT_BUDGET_HARD_BLOCK=1`, and the controller L2 rung behind `HERMES_GPT_CONTROLLER_EXECUTE=1`). The slice-1 surfaces are decision-only; the slice-2 rungs are default-off, add no tools, and keep every existing surface byte-identical until their gates are armed. They are documented further in [vnext-capability-manifest-and-mission-ledger.md](vnext-capability-manifest-and-mission-ledger.md) and [design/](design/).
+Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.13.0 behavior, including the durable Mission lifecycle, unified delegation lineage, live-event bus, and Fabric-backed cross-machine Swarm execution, plus the vNext slice-1 additive surfaces (MissionPlan DAG, derived capability-manifest / mission-ledger views, budget envelope, placement scoring, failure classification + recovery matrix, and the shadow/observe mission controller) and the vNext slice-2 gated execution rungs (budget D3 hard-block enforcement behind `HERMES_GPT_BUDGET_HARD_BLOCK=1`, and the controller L2 rung behind `HERMES_GPT_CONTROLLER_EXECUTE=1`). The slice-1 surfaces are decision-only; the slice-2 rungs are default-off, add no tools, and keep every existing surface byte-identical until their gates are armed. They are documented further in [vnext-capability-manifest-and-mission-ledger.md](vnext-capability-manifest-and-mission-ledger.md) and [design/](design/).
 
 For documentation authority and historical-artifact rules, see [docs/README.md](README.md).
 
@@ -689,3 +689,8 @@ Local runner timeout and explicit-cancellation cleanup share one platform-aware
 path. POSIX signals the runner process group. Windows uses `taskkill /T /F` for
 the process tree and falls back to direct process termination if `taskkill` is
 unavailable, times out, or reports failure.
+
+## Autopilot (v0.13)
+
+Autopilot is an optional, default-off runtime that drives one Mission through its MissionPlan. It is enabled by the machine gate `HERMES_GPT_AUTOPILOT=1`, which registers `hermes_autopilot_start`, `hermes_autopilot_status`, and `hermes_autopilot_stop`; with the gate unset none of them exist. Starting needs `workspace` level, direct apply mode, `dry_run=false`, and `confirm=true` (a dry run previews and writes nothing); stopping never needs the machine gate. It adds no authority: every dispatch goes through the existing placement, Work Contract, and delegation surfaces, it never dispatches or advances an approval or `high_impact` node, and it cannot approve a Mission. See [autopilot.md](autopilot.md).
+

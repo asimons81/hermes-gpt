@@ -38,3 +38,8 @@ The initial v0.9 producers are first-class Mission lifecycle changes and Swarm o
 ## Retention
 
 The live-event journal is bounded. `HERMES_GPT_LIVE_EVENT_RETENTION` controls the retained row count within the implementation hard cap. Retention affects notification history only; it never removes the underlying Mission/Swarm/Fabric evidence stores.
+
+## Autopilot as a consumer (v0.13)
+
+The Autopilot worker (`operator_autopilot.py`, off unless `HERMES_GPT_AUTOPILOT=1`) long-polls `hermes_live_events_since` for its own Mission. It follows the authority model above exactly: an event only ends the worker's wait early, no event field is read or acted on, and every wakeup re-reads durable Mission, plan, delegation, and evidence state. A periodic idle poll (`HERMES_GPT_AUTOPILOT_IDLE_SECONDS`, default 2.0s) remains the backstop, both because runner completions publish no live event and so that a missing or delayed event can never stall work. Ticks are never closer than 0.25s regardless of event rate.
+

@@ -70,3 +70,17 @@ For Mission-bound work, Hermes commits a private `pending` delegation attachment
 Delegation reconciliation does not require callers to resupply the Work Contract. Dispatch stores a private, prompt-free validation manifest containing the manifest schema, immutable contract and validation-context digests, validation-only fields, and timestamps. It never stores objectives, prompts, transcripts, raw inputs, constraints, secrets, or backend request/response bodies; secret-like durable values are rejected before dispatch. Reconciliation uses the same observed-state validation algorithm as `hermes_contract_validate`, with or without a matching `contract_json` supplied for parity checking.
 
 Missing, corrupt, mismatched, or secret-like manifests fail closed. Missing current backend observation also fails closed, even if an earlier cached lifecycle or validation value claimed success. Mission reconciliation and Owner approval freshly re-observe delegation backend state, artifacts, review evidence, authorization, and the manifest on every decision. Verified Mission evidence is exactly `contract:<contract_sha256>`; cached attachment state and cached delegation verdicts are not completion authority.
+
+## Superseded delegation attempts (v0.13)
+
+By default one failed delegation child fails the whole Mission on reconciliation, so a retry could never rescue it. A bounded Autopilot retry or replan therefore marks the failed attempt as replaced: its attachment `relationship` becomes `superseded_by:<successor delegation id>`. Reconciliation, Owner approval, and the completion/cancellation guards then skip that attempt and judge the live end of the chain instead.
+
+The marker is deliberately hard to misuse:
+
+- it is written only by the internal `supersede_delegation_attachment` bridge, never by a tool; public `hermes_mission_attach` refuses any `superseded_by:` relationship;
+- the old attempt must be authoritatively `failed` or `cancelled` in the delegation store when marked, and again every time it is observed; a live, running, ambiguous, or succeeded attempt is never skipped;
+- the successor must be a different delegation attachment of the same Mission, the chain must not loop, and it must end at an attachment that is not itself superseded;
+- a marker that fails any of these checks (forged, stale, dangling, self-referencing, cyclic) has no effect and the attempt is observed normally, so the Mission fails closed;
+- the marker changes no approval rule: `final_approval_required` still stops at `awaiting_approval`, and Owner approval still needs at least one freshly verified success.
+
+Until the successor delegation exists, the failed attempt still fails the Mission if it is reconciled; the marker can only be applied once the successor has been dispatched.

@@ -1529,21 +1529,31 @@ def _l2_work_contract(
 
 
 def _l2_dispatch(
-    contract_doc: dict[str, Any], mission_id: str, hermes_root: Path | None
+    contract_doc: dict[str, Any],
+    mission_id: str,
+    hermes_root: Path | None,
+    delegation_id: str = "",
 ) -> tuple[bool, str, str, dict[str, Any]]:
     """Dispatch through the EXISTING delegation authority surface.
 
     Returns ``(executed, result, refused_reason, linkage)``. No retry loop:
     a failed or ambiguous dispatch is terminal for this pass (fail-closed;
     bounded rework on a new attempt_seq gets a new idempotency key).
+
+    ``delegation_id`` is optional and defaults to the delegation surface's own
+    (time-salted) id, i.e. unchanged controller behavior. A caller that must be
+    able to retry the *same* dispatch (Autopilot) passes a deterministic id:
+    without one, a retried ``task_id`` is rejected as a different lineage.
     """
     try:
+        extra = {"delegation_id": delegation_id} if delegation_id else {}
         raw = deleg.hermes_delegation_dispatch(
             json.dumps(contract_doc),
             mission_id=mission_id,
             confirm=True,
             dry_run=False,
             hermes_root=hermes_root,
+            **extra,
         )
         payload = json.loads(raw)
     except (
