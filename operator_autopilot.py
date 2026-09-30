@@ -615,6 +615,63 @@ def hermes_autopilot_status(mission_id: str, hermes_root: Path | None = None) ->
         return _error(exc, "AUTOPILOT_STATUS_FAILED", "Check the mission id and Operator read access.")
 
 
+def _worker_liveness(job: dict[str, Any] | None) -> str:
+    """Observe a worker *without writing* (``reconcile_job`` writes, so it is not used).
+
+    ``terminal`` | ``alive`` | ``dead`` | ``unverified`` | ``unverifiable`` |
+    ``unregistered`` (queued, no pid yet) | ``unknown`` (no job record).
+    """
+    if job is None:
+        return "unknown"
+    if str(job.get("status") or "") in job_supervisor.TERMINAL_STATES:
+        return "terminal"
+    pid = job.get("pid")
+    if not isinstance(pid, int) or pid <= 1:
+        return "unregistered"
+    expected = job.get("process_identity")
+    verified = job_supervisor.verify_process(pid, expected if isinstance(expected, dict) else None)
+    if verified is True:
+        return "alive"
+    if verified is False:
+        return "unverifiable"  # the recorded pid now belongs to a different process
+    return "dead" if job_supervisor._pid_exists(pid) is False else "unverified"
+
+
+def observe_status(mission_id: str, hermes_root: Path | None = None) -> dict[str, Any] | None:
+    """A strictly read-only, truthful view of a Mission's Autopilot run (for Flight Deck).
+
+    Unlike ``hermes_autopilot_status`` this never writes: it does not heal the
+    run record and does not reconcile the job. It stays truthful anyway by
+    deriving ``effective_state`` from a write-free liveness check, so a run
+    whose cached state says ``running`` but whose worker is dead or already
+    terminal is reported as such with ``stale: true`` while the stored record is
+    left exactly as found. Returns ``None`` when the Mission has no run.
+    """
+    op.OperatorPolicy().require_level("read_only")
+    mission_id = _validate_mission_id(mission_id)
+    run = _read_run(mission_id, hermes_root)
+    if run is None:
+        return None
+    job_id = run.get("job_id")
+    job = job_supervisor.get_job(job_id, hermes_root=hermes_root, reconcile=False) if job_id else None
+    liveness = _worker_liveness(job)
+    state = str(run.get("state") or "")
+    effective, stale = state, False
+    if state not in TERMINAL_STATES:
+        if liveness == "terminal":
+            mapped = _JOB_STATUS_TO_RUN_STATE.get(str((job or {}).get("status") or ""))
+            if mapped and mapped != state:
+                effective, stale = mapped, True
+        elif liveness == "dead":
+            effective, stale = "failed", True
+    return {
+        "run": run,
+        "effective_state": effective,
+        "stale": stale,
+        "worker": {"status": (job or {}).get("status"), "liveness": liveness},
+    }
+
+
 def hermes_autopilot_stop(
     mission_id: str,
     confirm: bool = False,
