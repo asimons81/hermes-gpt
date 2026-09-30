@@ -9,8 +9,8 @@
 
 ## Current status
 
-- **Repository version:** 0.12.0
-- **GitHub release target:** v0.12.0
+- **Repository version:** 0.13.0
+- **GitHub release target:** v0.13.0
 - **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
@@ -18,9 +18,21 @@
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 
 > [!IMPORTANT]
-> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.12 features unless the badge reports 0.12.0 or newer.
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.13 (Autopilot) features unless the badge reports 0.13.0 or newer, or v0.12 features unless it reports 0.12.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.13.0 adds
+
+v0.13.0 adds **Autopilot**: a durable, default-off runtime that drives one Mission through its MissionPlan (place, run in parallel, observe, validate, recover, and stop for approval) without a human re-triggering every node. It is a caller of the existing Mission, plan, placement, Work Contract, delegation, budget, and live-event surfaces and adds no authority of its own. Full guide: [docs/autopilot.md](docs/autopilot.md).
+
+1. **Three gated tools** - `hermes_autopilot_start`, `hermes_autopilot_status`, and `hermes_autopilot_stop` exist only when `HERMES_GPT_AUTOPILOT=1`; with it unset the connector surface is unchanged at 137 tools. Start is dry-run first and needs `workspace` level, direct apply mode, and `confirm=true`. A detached worker owns one Mission and survives an MCP server restart.
+2. **It never crosses an approval boundary** - approval nodes and `high_impact` nodes are never dispatched or advanced; Autopilot reports `waiting_for_owner` and dispatches nothing past them. It cannot approve or complete a Mission: it stops at `awaiting_approval`, and only `hermes_mission_approve` in Owner mode completes it.
+3. **Evidence, not claims** - a node completes only when its Work Contract validates against observed state; a worker's own success report is never accepted, and missing evidence fails closed.
+4. **Bounded everything** - concurrency, attempts per node, replans, and runtime are capped at start; new dispatch is held whenever the Mission's budget envelope is not verifiably within its limit; recovery is decided by the existing failure classifier and only transient failures are retried.
+5. **Additive elsewhere** - `hermes_autopilot_status` carries a derived summary without changing any earlier key, Flight Deck gets a read-only Autopilot view, and a failed delegation attempt can now be marked superseded by its successor (see [docs/missions.md](docs/missions.md)) without changing any approval rule.
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.13.0 change list.
 
 ## What v0.12.0 adds
 

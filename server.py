@@ -3422,8 +3422,10 @@ def register_tools(server: FastMCP) -> None:
     ):
         server.add_tool(_controller_tool, meta=tool_meta())
 
-    # Autopilot (v0.13 PR1) — durable runtime only, default OFF. Registered as
-    # a group so status/stop are only reachable once a run could ever exist.
+    # Autopilot (v0.13) — default OFF. The three tools are registered only when
+    # HERMES_GPT_AUTOPILOT=1, so the default connector surface is unchanged;
+    # status/stop are only reachable once a run could ever exist. See
+    # docs/autopilot.md.
     if env_enabled(op_autopilot.AUTOPILOT_ENV):
         server.add_tool(hermes_autopilot_start, meta=tool_meta())
         server.add_tool(hermes_autopilot_status, meta=tool_meta())

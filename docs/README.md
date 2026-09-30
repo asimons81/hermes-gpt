@@ -16,9 +16,9 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.12.0**. The GitHub release target is `v0.12.0`; verify the public GitHub Releases and PyPI channels independently.
+Repository version: **0.13.0**. The GitHub release target is `v0.13.0`; verify the public GitHub Releases and PyPI channels independently.
 
-PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.12 gated budget-enforcement and controller-L2 behavior requires a published PyPI version of 0.12.0 or newer *and* the corresponding machine gates armed; v0.11 Gemini Spark / Bot Chat / SDK 2 behavior requires a published PyPI version of 0.11.0 or newer; v0.10 vNext derived views / controller surfaces and v0.9 Mission/delegation/live-event behavior require 0.10.0 (or 0.9.0) or newer, respectively.
+PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.13 Autopilot requires a published PyPI version of 0.13.0 or newer *and* `HERMES_GPT_AUTOPILOT=1`; v0.12 gated budget-enforcement and controller-L2 behavior requires a published PyPI version of 0.12.0 or newer *and* the corresponding machine gates armed; v0.11 Gemini Spark / Bot Chat / SDK 2 behavior requires a published PyPI version of 0.11.0 or newer; v0.10 vNext derived views / controller surfaces and v0.9 Mission/delegation/live-event behavior require 0.10.0 (or 0.9.0) or newer, respectively.
 
 ## Current operational docs
 
@@ -35,6 +35,7 @@ PyPI is an independent distribution channel. Check the PyPI badge in the root RE
 | [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration, v0.8 Fabric execution, and Flight Deck surfaces |
 | [`finance.md`](finance.md) | current | bounded ChatGPT-to-Hermes Finance bridge, finance evidence/decision contracts, persistence boundary, activation, and verification |
 | [`missions.md`](missions.md) | current | v0.9 first-class Mission lifecycle, bounded context/skills manifests, attachments, reconciliation, and Owner approval |
+| [`autopilot.md`](autopilot.md) | current | v0.13 Autopilot: gates, tools, limits, the durable worker, approval frontier, recovery, budget interplay, status summary |
 | [`live-events.md`](live-events.md) | current | v0.9 durable event cursor/long-poll and authenticated WebSocket wake-up stream |
 | [`flight-deck-missions.md`](flight-deck-missions.md) | current | v0.9 read-only Mission/delegation Flight Deck views with durable live refresh |
 | [`delegations.md`](delegations.md) | current | v0.9 normalized delegation lifecycle across Pi/OpenCode/Codex/Fabric with durable lineage and reconciliation |
