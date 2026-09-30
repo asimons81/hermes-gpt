@@ -311,12 +311,21 @@ def test_autopilot_acceptance_scenario(world: Path, restarting: bool):
         assert started["run"]["attempt"] == 1
 
         # ---- >= 3 independent nodes run in parallel, on >= 2 placements ----
-        first = _wait(lambda: len(_ledger(root)) >= 3 and _by_node(root), "three parallel dispatches")
+        # The remote ledger is written inside dispatch, before _dispatch_one commits
+        # the plan node's durable "dispatched" transition. Wait for both facts:
+        # all remote submissions exist and the authoritative plan summary records
+        # all three as in flight. Never sample the summary in the post-dispatch gap.
+        def all_three_in_flight():
+            if len(_ledger(root)) < 3:
+                return None
+            current = server.call("status")
+            return current if current["summary"]["progress"]["in_flight"] == 3 else None
+
+        status = _wait(all_three_in_flight, "three durable in-flight plan nodes")
+        first = _by_node(root)
         assert sorted(first) == ["n1", "n2", "n3"] and all(len(v) == 1 for v in first.values())
         assert first["n1"][0]["agent"] == "rza" and first["n3"][0]["agent"] == "rza"
         assert first["n2"][0]["agent"] == "rzb"  # >= 2 placements: the dev node went to the other peer
-        status = server.call("status")
-        assert status["summary"]["progress"]["in_flight"] == 3
         worker_pid = status["run"]["pid"]
         assert worker_pid and _alive(worker_pid)
 

@@ -244,8 +244,27 @@ def test_mission_awaiting_approval_needs_the_owner(env):
 
 
 def _snapshot(root: Path) -> dict[str, bytes]:
-    return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*"))
-            if p.is_file() and "audit" not in p.name and not p.name.endswith((".lock", "-shm"))}  # -shm: SQLite's read-side scratch
+    return {
+        str(p.relative_to(root)): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+        and "audit" not in p.name
+        and not p.name.endswith((".lock", "-shm"))
+        and not (p.name.endswith("-wal") and p.stat().st_size == 0)
+    }  # SQLite read-only connections may create empty WAL bookkeeping files; nonempty WAL data stays covered.
+
+
+def test_snapshot_keeps_nonempty_wal_data_and_ignores_only_empty_wal(tmp_path: Path):
+    db = tmp_path / "missions.db"
+    empty_wal = tmp_path / "missions.db-wal"
+    nonempty_wal = tmp_path / "delegations.db-wal"
+    db.write_bytes(b"database")
+    empty_wal.write_bytes(b"")
+    nonempty_wal.write_bytes(b"wal frames")
+
+    snapshot = _snapshot(tmp_path)
+
+    assert snapshot == {"missions.db": b"database", "delegations.db-wal": b"wal frames"}
 
 
 def test_building_the_summary_writes_nothing(env):
