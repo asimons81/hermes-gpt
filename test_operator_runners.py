@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -980,7 +981,7 @@ def test_windows_process_tree_cleanup_uses_taskkill(monkeypatch: pytest.MonkeyPa
         calls.append(argv)
         return runners.subprocess.CompletedProcess(argv, 0)
 
-    monkeypatch.setattr(runners.os, "name", "nt")
+    monkeypatch.setattr(runners, "os", SimpleNamespace(**{**vars(runners.os), "name": "nt"}))
     monkeypatch.setattr(runners.subprocess, "run", _run)
     runners._terminate_process_tree(_Proc(), timeout=1)
     assert ["taskkill", "/PID", "4242", "/T", "/F"] in calls
@@ -1000,7 +1001,7 @@ def test_windows_detached_pid_cleanup_falls_back_when_taskkill_fails(
             raise FileNotFoundError("taskkill unavailable")
         return runners.subprocess.CompletedProcess(argv, 1)
 
-    monkeypatch.setattr(runners.os, "name", "nt")
+    monkeypatch.setattr(runners, "os", SimpleNamespace(**{**vars(runners.os), "name": "nt"}))
     monkeypatch.setattr(runners.subprocess, "run", _run)
     monkeypatch.setattr(runners.os, "kill", lambda pid, sig: direct_kills.append((pid, sig)))
 
@@ -1023,8 +1024,8 @@ def test_posix_process_tree_cleanup_uses_process_group(monkeypatch: pytest.Monke
             self.waits += 1
             return 0
 
-    monkeypatch.setattr(runners.os, "name", "posix")
-    monkeypatch.setattr(runners.os, "killpg", lambda pid, sig: calls.append((pid, sig)))
+    monkeypatch.setattr(runners, "os", SimpleNamespace(**{**vars(runners.os), "name": "posix"}))
+    monkeypatch.setattr(runners.os, "killpg", lambda pid, sig: calls.append((pid, sig)), raising=False)
     runners._terminate_process_tree(_Proc(), timeout=1)
     assert calls == [(4343, runners.signal.SIGTERM)]
 

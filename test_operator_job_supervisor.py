@@ -148,7 +148,12 @@ def test_pid_reuse_mismatch_never_signals(monkeypatch, tmp_path):
 
     monkeypatch.setattr(jobs, "verify_process", lambda pid, expected: False)
     signalled = []
-    monkeypatch.setattr(jobs.os, "killpg", lambda *args: signalled.append(args))
+    monkeypatch.setattr(jobs.os, "killpg", lambda *args: signalled.append(args), raising=False)
+    def capture_control(argv, **kwargs):
+        if argv[0] == "taskkill":
+            signalled.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(jobs.subprocess, "run", capture_control)
     result = jobs.request_cancel("task-reused", hermes_root=tmp_path)
 
     assert result["success"] is False
@@ -188,7 +193,12 @@ def test_cancel_reverifies_identity_immediately_before_signal(monkeypatch, tmp_p
     checks = iter([True, False])
     monkeypatch.setattr(jobs, "verify_process", lambda pid, expected: next(checks))
     signalled = []
-    monkeypatch.setattr(jobs.os, "killpg", lambda *args: signalled.append(args))
+    monkeypatch.setattr(jobs.os, "killpg", lambda *args: signalled.append(args), raising=False)
+    def capture_control(argv, **kwargs):
+        if argv[0] == "taskkill":
+            signalled.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(jobs.subprocess, "run", capture_control)
 
     result = jobs.request_cancel(job_id, hermes_root=tmp_path)
 
@@ -232,7 +242,9 @@ def test_cancel_signal_failure_never_publishes_cancelled(monkeypatch, tmp_path):
     def refuse_signal(*args, **kwargs):
         raise PermissionError("no signal permission")
 
-    monkeypatch.setattr(jobs.os, "killpg", refuse_signal)
+    monkeypatch.setattr(jobs.os, "killpg", refuse_signal, raising=False)
+    if jobs.IS_WINDOWS:
+        monkeypatch.setattr(jobs.subprocess, "run", refuse_signal)
     result = jobs.request_cancel(job_id, hermes_root=tmp_path)
 
     assert result["success"] is False

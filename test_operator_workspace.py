@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -439,7 +440,7 @@ def test_owner_run_command_does_not_defer_other_systemctl_commands(
 
 
 def test_owner_run_command_windows_quoted_argument(monkeypatch, clean_env, audit_override):
-    monkeypatch.setattr(ows.os, "name", "nt", raising=False)
+    monkeypatch.setattr(ows, "os", SimpleNamespace(**{**vars(ows.os), "name": "nt"}))
     _enable_owner(monkeypatch)
     captured = {}
 
@@ -458,7 +459,7 @@ def test_owner_run_command_windows_quoted_argument(monkeypatch, clean_env, audit
 
 
 def test_split_command_argv_preserves_unquoted_windows_backslashes(monkeypatch):
-    monkeypatch.setattr(ows.os, "name", "nt", raising=False)
+    monkeypatch.setattr(ows, "os", SimpleNamespace(**{**vars(ows.os), "name": "nt"}))
     argv = ows._split_command_argv(r"python C:\Users\asimo\probe.py")
     assert argv == ["python", r"C:\Users\asimo\probe.py"]
 

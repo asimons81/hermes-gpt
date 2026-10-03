@@ -31,7 +31,7 @@ jobs:
       - name: Run full test suite
         env:
           HERMES_HTTP_TEST: "1"
-        run: python -m pytest -q
+        run: python -m pytest -q -o addopts='' --tb=short
       - name: Run runner regression tests
         run: >-
           python -m pytest -q
