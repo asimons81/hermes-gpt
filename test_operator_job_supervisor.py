@@ -8,6 +8,21 @@ import time
 import operator_job_supervisor as jobs
 
 
+def test_windows_liveness_preserves_native_query_states(monkeypatch):
+    import operator_workspace as workspace
+
+    monkeypatch.setattr(jobs, "IS_WINDOWS", True)
+    for state in (True, False, None):
+        monkeypatch.setattr(workspace, "_windows_pid_state", lambda pid, value=state: value)
+        assert jobs._pid_exists(42) is state
+
+    def unavailable(pid):
+        raise OSError("process inspection unavailable")
+
+    monkeypatch.setattr(workspace, "_windows_pid_state", unavailable)
+    assert jobs._pid_exists(42) is None
+
+
 def test_process_identity_matches_current_process():
     identity = jobs.process_identity(os.getpid())
     assert identity is not None

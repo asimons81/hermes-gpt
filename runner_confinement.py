@@ -395,7 +395,7 @@ def _probe_confinement(tool: str, *, writable: bool = True, expose_proc: bool = 
             if writable:
                 return inside.read_text(encoding="utf-8") == "ok" and outside.read_text(encoding="utf-8") == "outside"
             return inside.read_text(encoding="utf-8") == "inside" and outside.read_text(encoding="utf-8") == "outside"
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, RuntimeError, subprocess.SubprocessError):
         return False
 
 

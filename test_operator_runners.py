@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -64,6 +65,18 @@ def _enable_pi_confinement(monkeypatch: pytest.MonkeyPatch) -> None:
         "wrap_argv",
         lambda argv, workspace, *, writable=True, expose_proc=False: list(argv),
     )
+
+
+def _launch_python_fixture(monkeypatch: pytest.MonkeyPatch, script: Path) -> None:
+    """Run the real child process without requiring POSIX shebang support."""
+    launch = runners._popen_process_group
+
+    def portable_launch(argv, **kwargs):
+        if argv[0] == str(script):
+            argv = [sys.executable, *argv]
+        return launch(argv, **kwargs)
+
+    monkeypatch.setattr(runners, "_popen_process_group", portable_launch)
 
 
 def test_builtin_backends_registered():
@@ -168,6 +181,7 @@ def test_pi_rpc_prompt_rejection_fails_immediately(tmp_path: Path, monkeypatch: 
         encoding="utf-8",
     )
     fake_pi.chmod(0o755)
+    _launch_python_fixture(monkeypatch, fake_pi)
     contract = _contract(tmp_path, backend="pi_rpc")
     contract["authorization"] = {"class": "read_only", "approved": True}
 
@@ -194,6 +208,7 @@ def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest
         encoding="utf-8",
     )
     fake_pi.chmod(0o755)
+    _launch_python_fixture(monkeypatch, fake_pi)
     contract = _contract(tmp_path, backend="pi_rpc")
     contract["authorization"] = {"class": "read_only", "approved": True}
     started = time.monotonic()
@@ -274,6 +289,7 @@ def test_opencode_worker_pipes_prompt_and_uses_confinement(tmp_path: Path, monke
         encoding="utf-8",
     )
     fake.chmod(0o755)
+    _launch_python_fixture(monkeypatch, fake)
     contract = _contract(ws, backend="opencode", options={"model": "cliproxyapi/glm-test"})
     rc, final_text = runners._worker_opencode(str(fake), contract, 5, tmp_path / "events.jsonl")
     assert rc == 0
@@ -390,7 +406,7 @@ def test_read_only_opencode_uses_read_only_confinement(tmp_path: Path, monkeypat
     assert calls == [(False, True)]
 
 
-def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path):
+def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ws = tmp_path / "ws"
     ws.mkdir()
     fake_omx = tmp_path / "fake-omx-descendant"
@@ -402,6 +418,7 @@ def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path):
         encoding="utf-8",
     )
     fake_omx.chmod(0o755)
+    _launch_python_fixture(monkeypatch, fake_omx)
     contract = _contract(ws, backend="omx")
     started = time.monotonic()
     rc, final_text = runners._worker_omx(str(fake_omx), contract, 1, tmp_path / "events.jsonl")

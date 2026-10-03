@@ -162,8 +162,8 @@ def _read_gateway_pid_from_state(state: dict[str, Any]) -> int | None:
 IS_WINDOWS = os.name == "nt"
 
 
-def _windows_pid_alive(pid: int) -> bool:
-    """Query process exit state without sending Windows console signals."""
+def _windows_pid_state(pid: int) -> bool | None:
+    """Query liveness, preserving uncertainty when Windows denies inspection."""
     import ctypes
     from ctypes import wintypes
 
@@ -176,12 +176,19 @@ def _windows_pid_alive(pid: int) -> bool:
     kernel.CloseHandle.restype = wintypes.BOOL
     handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
     if not handle:
-        return False
+        return False if ctypes.get_last_error() == 87 else None  # ERROR_INVALID_PARAMETER
     try:
         code = wintypes.DWORD()
-        return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
+        if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return None
+        return code.value == 259
     finally:
         kernel.CloseHandle(handle)
+
+
+def _windows_pid_alive(pid: int) -> bool:
+    """Best-effort health probe; an uninspectable process is not proven alive."""
+    return _windows_pid_state(pid) is True
 
 
 def _is_pid_alive(pid: int | None) -> bool:

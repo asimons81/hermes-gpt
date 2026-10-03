@@ -392,6 +392,7 @@ def test_owner_run_command_direct_runs(workspace_tree, clean_env, audit_override
 
 def test_owner_run_command_defers_exact_self_restart(workspace_tree, clean_env, audit_override, monkeypatch):
     _enable_owner(monkeypatch)
+    monkeypatch.setattr(ows, "os", SimpleNamespace(**{**vars(ows.os), "name": "posix"}))
     captured = {}
 
     def fake_runner(argv, timeout=120, workdir=None):
@@ -692,5 +693,23 @@ def test_windows_native_probe_queries_exit_state_and_closes_handle(monkeypatch):
     assert ows._windows_pid_alive(42) is False
     assert kernel.CloseHandle.call_count == 2
     kernel.OpenProcess.return_value = 0
+    monkeypatch.setattr(ctypes, 'get_last_error', lambda: 87, raising=False)
     assert ows._windows_pid_alive(43) is False
     assert kernel.CloseHandle.call_count == 2
+
+
+def test_windows_native_probe_preserves_inspection_uncertainty(monkeypatch):
+    import ctypes
+    from unittest.mock import Mock
+
+    kernel = Mock()
+    kernel.OpenProcess.return_value = 0
+    monkeypatch.setattr(ctypes, 'WinDLL', lambda *args, **kwargs: kernel, raising=False)
+    monkeypatch.setattr(ctypes, 'get_last_error', lambda: 5, raising=False)
+    assert ows._windows_pid_state(42) is None
+    monkeypatch.setattr(ctypes, 'get_last_error', lambda: 87)
+    assert ows._windows_pid_state(42) is False
+    kernel.OpenProcess.return_value = 123
+    kernel.GetExitCodeProcess.return_value = False
+    assert ows._windows_pid_state(42) is None
+    kernel.CloseHandle.assert_called_once_with(123)

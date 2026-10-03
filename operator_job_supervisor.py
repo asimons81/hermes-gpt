@@ -296,9 +296,12 @@ def _pid_exists(pid: int) -> bool | None:
     if not isinstance(pid, int) or pid <= 1:
         return False
     if IS_WINDOWS:
-        # Without a verified CIM identity Windows cannot distinguish a dead PID
-        # from unavailable identity tooling. Preserve uncertainty.
-        return True if process_identity(pid) is not None else None
+        from operator_workspace import _windows_pid_state
+
+        try:
+            return _windows_pid_state(pid)
+        except (OSError, AttributeError):
+            return None
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
