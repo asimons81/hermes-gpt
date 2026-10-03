@@ -58,7 +58,7 @@ def _db_path(hermes_root: Path | None = None) -> Path:
 def _connect(path: Path, *, write: bool) -> sqlite3.Connection:
     if write:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        db = sqlite3.connect(path)
+        db = sqlite3.connect(path, factory=mission_runtime._ClosingConnection)
         try:
             path.parent.chmod(0o700)
         except OSError:
@@ -66,7 +66,7 @@ def _connect(path: Path, *, write: bool) -> sqlite3.Connection:
     else:
         if not path.is_file():
             raise FileNotFoundError(path)
-        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, factory=mission_runtime._ClosingConnection)
     db.row_factory = sqlite3.Row
     return db
 

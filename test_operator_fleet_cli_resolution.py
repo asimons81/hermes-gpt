@@ -14,7 +14,7 @@ def test_hermes_bin_uses_local_bin_fallback(monkeypatch, tmp_path):
     fake_cli = fake_home / ".local" / "bin" / "hermes"
     fake_cli.parent.mkdir(parents=True)
     fake_cli.write_text("#!/bin/sh\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(fleet.Path, "home", classmethod(lambda cls: fake_home))
     monkeypatch.delenv("HERMES_CLI", raising=False)
     monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.setattr(fleet.shutil, "which", lambda name: None)

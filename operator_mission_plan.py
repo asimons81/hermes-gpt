@@ -33,9 +33,12 @@ Every public call is audited (refs / hashes / a bounded summary only).
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
 import re
+import secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -121,6 +124,47 @@ class PlanVersionConflict(ValueError):
         super().__init__(f"plan version changed (expected {expected}, found {actual})")
         self.expected = expected
         self.actual = actual
+
+
+class PlanInFlightError(ValueError):
+    """Replacing a plan would orphan an active scheduler or unfinished work."""
+
+
+@contextlib.contextmanager
+def _replacement_lease(mission_id: str, hermes_root: Path | None):
+    # Serialize with both schedulers, including the dispatch-before-node-write
+    # window. Checking node state alone cannot close that window.
+    import operator_controller as controller
+
+    lock = f"plan-replace-{os.getpid()}-{secrets.token_hex(8)}"
+    with controller._connect(controller._db_path(hermes_root), write=True) as db:
+        lease = controller.acquire_lease(db, mission_id, "operator_request", ttl=60, lease_lock=lock)
+        if not lease.get("acquired"):
+            raise PlanInFlightError("A scheduler pass is active; stop and drain work before replacing the plan")
+        try:
+            yield
+        finally:
+            controller.release_lease(db, mission_id, lock)
+
+
+def _assert_replaceable(db: sqlite3.Connection, mission_id: str, hermes_root: Path | None) -> None:
+    import operator_autopilot as autopilot
+
+    active = db.execute(
+        "SELECT node_id FROM plan_nodes WHERE mission_id=? AND state IN "
+        "('dispatched','running','awaiting_review','validated','awaiting_approval','paused') LIMIT 1",
+        (mission_id,),
+    ).fetchone()
+    run = autopilot._read_run(mission_id, hermes_root)
+    if active or (run and run.get("state") not in autopilot.TERMINAL_STATES):
+        raise PlanInFlightError("Stop Autopilot and resolve unfinished plan nodes before replacing the plan")
+    current = mission._row_to_mission(db, mission._get_row(db, mission_id))
+    root = mission._root(hermes_root)
+    for attachment in current["attachments"]:
+        if attachment["kind"] == "delegation":
+            state, _, _ = mission._delegation_state(root, mission_id, attachment)
+            if state not in ("succeeded", "failed", "cancelled"):
+                raise PlanInFlightError("Resolve unfinished delegations before replacing the plan")
 
 
 # ---------------------------------------------------------------------------
@@ -730,6 +774,12 @@ def hermes_plan_create(
             raise PermissionError("direct plan creation requires confirm=true")
 
         if effective_dry:
+            path = _db_path(hermes_root)
+            if path.exists():
+                with _connect(path, write=False) as db:
+                    tables = db.execute("SELECT name FROM sqlite_master WHERE name='mission_plans'").fetchone()
+                    if tables and db.execute("SELECT 1 FROM mission_plans WHERE mission_id=?", (mission_id,)).fetchone():
+                        _assert_replaceable(db, mission_id, hermes_root)
             _audit("hermes_plan_create", policy, dry_run=True, success=True, changed=False,
                    mission_id=mission_id, extra={"node_count": len(plan["nodes"]), "plan_sha256": plan_sha})
             return json.dumps({
@@ -740,13 +790,15 @@ def hermes_plan_create(
             })
 
         path = _db_path(hermes_root)
-        with _connect(path, write=True) as db:
+        with _replacement_lease(mission_id, hermes_root), _connect(path, write=True) as db:
             _begin_write(db)
             mission._get_row(db, mission_id)  # verify mission exists (raises LookupError)
             now = _now()
             existing = db.execute(
                 "SELECT version FROM mission_plans WHERE mission_id=?", (mission_id,)
             ).fetchone()
+            if existing:
+                _assert_replaceable(db, mission_id, hermes_root)
             new_version = int(existing["version"]) + 1 if existing else int(plan.get("version", 1))
             store_plan = dict(plan)
             store_plan.pop("status", None)
@@ -784,6 +836,9 @@ def hermes_plan_create(
             "mission_id": mission_id, "version": new_version, "plan_sha256": plan_sha,
             "node_count": len(plan["nodes"]), "status": status, "changed": True, "dry_run": False,
         })
+    except PlanInFlightError as exc:
+        _audit("hermes_plan_create", policy, dry_run=dry_run, success=False, changed=False, mission_id=mission_id)
+        return _error(exc, "PLAN_IN_FLIGHT", "Stop the scheduler and resolve unfinished work before replacing the plan.")
     except skill_resolution.SkillRequirementsError as exc:
         _audit(
             "hermes_plan_create",

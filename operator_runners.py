@@ -18,20 +18,22 @@ backend names; contracts select them with ``execution.backend``.
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import http.client
 import importlib.metadata
 import json
 import logging
 import os
+import queue
 import re
 import secrets
-import selectors
 import shutil
 import signal
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -82,13 +84,13 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
         path.parent.chmod(0o700)
     except OSError:
         pass
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
     tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     try:
         tmp.chmod(0o600)
     except OSError:
         pass
-    tmp.replace(path)
+    job_supervisor._replace_json_file(tmp, path)
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
@@ -1300,26 +1302,69 @@ def _worker_pi(
         env=child_env,
     )
     assert proc.stdin is not None and proc.stdout is not None
+    # Windows selectors accept sockets, not subprocess pipes. A reader thread
+    # also keeps a partial JSONL line from blocking the worker's deadline.
+    lines: queue.Queue[str | None] = queue.Queue(maxsize=128)
+    stop_reader = threading.Event()
+
+    def enqueue(line: str | None) -> None:
+        while not stop_reader.is_set():
+            try:
+                lines.put(line, timeout=0.1)
+                return
+            except queue.Full:
+                continue
+
+    def read_lines() -> None:
+        try:
+            while not stop_reader.is_set():
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                enqueue(line)
+        except (OSError, ValueError) as exc:
+            logger.debug("Pi RPC stream failed before EOF", exc_info=exc)
+        finally:
+            enqueue(None)
+
+    reader = threading.Thread(target=read_lines, name="hermes-pi-rpc-reader", daemon=True)
+    reader.start()
+    try:
+        return _collect_pi_rpc(proc, contract, timeout, log_path, lines)
+    finally:
+        stop_reader.set()
+        if proc.poll() is None:
+            _terminate_process_group(proc)
+        reader.join(timeout=1)
+        if not reader.is_alive():
+            proc.stdout.close()
+        with contextlib.suppress(OSError):
+            if not proc.stdin.closed:
+                proc.stdin.close()
+
+
+def _collect_pi_rpc(
+    proc: subprocess.Popen[str],
+    contract: dict[str, Any],
+    timeout: int,
+    log_path: Path,
+    lines: queue.Queue[str | None],
+) -> tuple[int, str]:
+    assert proc.stdin is not None
     proc.stdin.write(json.dumps({"id": "dispatch", "type": "prompt", "message": contract["objective"]}, ensure_ascii=False) + "\n")
     proc.stdin.flush()
     final_text = ""
     settled = False
     rpc_error = ""
-    deadline = datetime.now(timezone.utc).timestamp() + timeout
-    selector = selectors.DefaultSelector()
-    selector.register(proc.stdout, selectors.EVENT_READ)
-    while datetime.now(timezone.utc).timestamp() < deadline:
-        remaining = max(0.0, deadline - datetime.now(timezone.utc).timestamp())
-        ready = selector.select(timeout=min(0.5, remaining))
-        if not ready:
-            if proc.poll() is not None:
-                break
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = max(0.0, deadline - time.monotonic())
+        try:
+            line = lines.get(timeout=min(0.5, remaining))
+        except queue.Empty:
             continue
-        line = proc.stdout.readline()
-        if not line:
-            if proc.poll() is not None:
-                break
-            continue
+        if line is None:
+            break
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -1337,7 +1382,6 @@ def _worker_pi(
         if etype == "agent_settled":
             settled = True
             break
-    selector.close()
     if rpc_error:
         _terminate_process_group(proc)
         raise RuntimeError(f"Pi RPC prompt failed: {rpc_error}")

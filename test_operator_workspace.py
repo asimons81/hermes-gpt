@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -391,6 +392,7 @@ def test_owner_run_command_direct_runs(workspace_tree, clean_env, audit_override
 
 def test_owner_run_command_defers_exact_self_restart(workspace_tree, clean_env, audit_override, monkeypatch):
     _enable_owner(monkeypatch)
+    monkeypatch.setattr(ows, "os", SimpleNamespace(**{**vars(ows.os), "name": "posix"}))
     captured = {}
 
     def fake_runner(argv, timeout=120, workdir=None):
@@ -439,7 +441,7 @@ def test_owner_run_command_does_not_defer_other_systemctl_commands(
 
 
 def test_owner_run_command_windows_quoted_argument(monkeypatch, clean_env, audit_override):
-    monkeypatch.setattr(ows.os, "name", "nt", raising=False)
+    monkeypatch.setattr(ows, "os", SimpleNamespace(**{**vars(ows.os), "name": "nt"}))
     _enable_owner(monkeypatch)
     captured = {}
 
@@ -458,7 +460,7 @@ def test_owner_run_command_windows_quoted_argument(monkeypatch, clean_env, audit
 
 
 def test_split_command_argv_preserves_unquoted_windows_backslashes(monkeypatch):
-    monkeypatch.setattr(ows.os, "name", "nt", raising=False)
+    monkeypatch.setattr(ows, "os", SimpleNamespace(**{**vars(ows.os), "name": "nt"}))
     argv = ows._split_command_argv(r"python C:\Users\asimo\probe.py")
     assert argv == ["python", r"C:\Users\asimo\probe.py"]
 
@@ -653,3 +655,61 @@ def test_operator_policy_tool_returns_default_safe_summary(monkeypatch):
     assert parsed["apply_mode"] == "dry_run"
     assert parsed["owner_mode_ready"] is False
     assert parsed["mutation_allowed"] is False
+
+
+def test_windows_liveness_fallback_never_sends_a_signal(monkeypatch):
+    import sys
+    import operator_diagnostics as diagnostics
+
+    monkeypatch.setitem(sys.modules, 'psutil', None)
+    monkeypatch.setattr(ows, 'IS_WINDOWS', True)
+    monkeypatch.setattr(ows, '_windows_pid_alive', lambda pid: pid == 42)
+    def no_signal(*args):
+        raise AssertionError('a read-only Windows probe must not send a signal')
+    monkeypatch.setattr(ows.os, 'kill', no_signal)
+    assert ows._is_pid_alive(42) is True
+    assert ows._is_pid_alive(43) is False
+    assert diagnostics._is_process_alive(42) is True
+    assert ows._is_pid_alive(None) is False
+    assert ows._is_pid_alive(0) is False
+
+
+def test_windows_native_probe_queries_exit_state_and_closes_handle(monkeypatch):
+    import ctypes
+    from unittest.mock import Mock
+
+    kernel = Mock()
+    kernel.OpenProcess.return_value = 123
+    def exit_code(handle, pointer):
+        pointer._obj.value = 259
+        return True
+    kernel.GetExitCodeProcess.side_effect = exit_code
+    monkeypatch.setattr(ctypes, 'WinDLL', lambda *args, **kwargs: kernel, raising=False)
+    assert ows._windows_pid_alive(42) is True
+    kernel.OpenProcess.assert_called_once_with(0x1000, False, 42)
+    kernel.CloseHandle.assert_called_once_with(123)
+    kernel.GetExitCodeProcess.side_effect = None
+    kernel.GetExitCodeProcess.return_value = False
+    assert ows._windows_pid_alive(42) is False
+    assert kernel.CloseHandle.call_count == 2
+    kernel.OpenProcess.return_value = 0
+    monkeypatch.setattr(ctypes, 'get_last_error', lambda: 87, raising=False)
+    assert ows._windows_pid_alive(43) is False
+    assert kernel.CloseHandle.call_count == 2
+
+
+def test_windows_native_probe_preserves_inspection_uncertainty(monkeypatch):
+    import ctypes
+    from unittest.mock import Mock
+
+    kernel = Mock()
+    kernel.OpenProcess.return_value = 0
+    monkeypatch.setattr(ctypes, 'WinDLL', lambda *args, **kwargs: kernel, raising=False)
+    monkeypatch.setattr(ctypes, 'get_last_error', lambda: 5, raising=False)
+    assert ows._windows_pid_state(42) is None
+    monkeypatch.setattr(ctypes, 'get_last_error', lambda: 87)
+    assert ows._windows_pid_state(42) is False
+    kernel.OpenProcess.return_value = 123
+    kernel.GetExitCodeProcess.return_value = False
+    assert ows._windows_pid_state(42) is None
+    kernel.CloseHandle.assert_called_once_with(123)

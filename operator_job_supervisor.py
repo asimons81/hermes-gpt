@@ -55,16 +55,54 @@ def _validate_job_id(job_id: str) -> str:
     return value
 
 
+def _storage_id(job_id: str) -> str:
+    value = _validate_job_id(job_id)
+    reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    if IS_WINDOWS and (":" in value or value.endswith(".") or value.split(".")[0].upper() in reserved):
+        # '~' is outside the job-ID grammar, so encoded IDs cannot collide
+        # with ordinary IDs. Keep existing POSIX records at their old paths.
+        return "~" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return value
+
+
 def _record_path(job_id: str, hermes_root: Path | None = None) -> Path:
-    return _root(hermes_root) / f"{_validate_job_id(job_id)}.json"
+    return _root(hermes_root) / f"{_storage_id(job_id)}.json"
 
 
 def _lock_path(job_id: str, hermes_root: Path | None = None) -> Path:
-    return _root(hermes_root) / f"{_validate_job_id(job_id)}.lock"
+    return _root(hermes_root) / f"{_storage_id(job_id)}.lock"
 
 
 def _cancel_path(job_id: str, hermes_root: Path | None = None) -> Path:
-    return _root(hermes_root) / f"{_validate_job_id(job_id)}.cancel.json"
+    return _root(hermes_root) / f"{_storage_id(job_id)}.cancel.json"
+
+
+def _replace_json_file(temp: Path, path: Path) -> None:
+    """Bounded retry for Windows readers temporarily denying delete sharing."""
+    attempts = 50 if IS_WINDOWS else 1
+    for attempt in range(attempts):
+        try:
+            temp.replace(path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                with contextlib.suppress(OSError):
+                    temp.unlink()
+                raise
+            time.sleep(0.02)
+
+
+def _read_json_text(path: Path) -> str:
+    """Retry transient Windows sharing contention; never invent missing state."""
+    attempts = 50 if IS_WINDOWS else 1
+    for attempt in range(attempts):
+        try:
+            return path.read_text(encoding="utf-8")
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.02)
+    raise AssertionError("unreachable")
 
 
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:
@@ -85,12 +123,14 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
         temp.chmod(0o600)
     except OSError:
         pass
-    temp.replace(path)
+    _replace_json_file(temp, path)
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(_read_json_text(path))
+    except PermissionError:
+        raise
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
@@ -286,9 +326,12 @@ def _pid_exists(pid: int) -> bool | None:
     if not isinstance(pid, int) or pid <= 1:
         return False
     if IS_WINDOWS:
-        # Without a verified CIM identity Windows cannot distinguish a dead PID
-        # from unavailable identity tooling. Preserve uncertainty.
-        return True if process_identity(pid) is not None else None
+        from operator_workspace import _windows_pid_state
+
+        try:
+            return _windows_pid_state(pid)
+        except (OSError, AttributeError):
+            return None
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -458,17 +501,27 @@ def reconcile_job(job_id: str, *, hermes_root: Path | None = None) -> dict[str, 
     """Re-observe a durable worker without ever trusting PID alone."""
     job_id = _validate_job_id(job_id)
     record_path = _record_path(job_id, hermes_root)
+    observed = _load_json(record_path)
+    if not observed or str(observed.get("status")) in TERMINAL_STATES:
+        return observed
+    pid = observed.get("pid")
+    if not isinstance(pid, int) or pid <= 1:
+        return observed
+    expected = observed.get("process_identity")
+    # CIM can take seconds. Observation must not hold the writer lock and
+    # prevent the worker from publishing its own terminal result.
+    verified = verify_process(pid, expected if isinstance(expected, dict) else None)
+    exists = _pid_exists(pid) if verified is None else None
     with _record_lock(job_id, hermes_root):
         record = _load_json(record_path)
         if not record:
             return None
         if str(record.get("status")) in TERMINAL_STATES:
             return record
-        pid = record.get("pid")
-        if not isinstance(pid, int) or pid <= 1:
+        if record.get("pid") != pid or record.get("process_identity") != expected:
+            # The registered worker changed while observation was in progress.
+            # Leave the newer registration untouched; a later read observes it.
             return record
-        expected = record.get("process_identity")
-        verified = verify_process(pid, expected if isinstance(expected, dict) else None)
         if verified is True:
             record["process_verification"] = "verified"
         elif verified is False:
@@ -477,7 +530,6 @@ def reconcile_job(job_id: str, *, hermes_root: Path | None = None) -> dict[str, 
             record["process_verification"] = "mismatch"
             record["reconciliation"] = "recorded pid now belongs to a different process; job process is unverifiable"
         else:
-            exists = _pid_exists(pid)
             if exists is False:
                 record["process_verification"] = "exited-unfinalized"
                 record["status"] = "failed"

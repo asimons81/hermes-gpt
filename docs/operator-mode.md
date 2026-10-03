@@ -694,3 +694,5 @@ unavailable, times out, or reports failure.
 
 Autopilot is an optional, default-off runtime that drives one Mission through its MissionPlan. It is enabled by the machine gate `HERMES_GPT_AUTOPILOT=1`, which registers `hermes_autopilot_start`, `hermes_autopilot_status`, and `hermes_autopilot_stop`; with the gate unset none of them exist. Starting needs `workspace` level, direct apply mode, `dry_run=false`, and `confirm=true` (a dry run previews and writes nothing); stopping never needs the machine gate. It adds no authority: every dispatch goes through the existing placement, Work Contract, and delegation surfaces, it never dispatches or advances an approval or `high_impact` node, and it cannot approve a Mission. See [autopilot.md](autopilot.md).
 
+
+Autopilot carries node artifact requirements into Work Contracts, refuses replacement of plans with unfinished work (`PLAN_IN_FLIGHT`), and exposes bounded recovery deferral in Mission reconciliation. See [autopilot.md](autopilot.md) for the exact acceptance and recovery rules. Its read-only browser panel is included in release wheels; browser access still requires the existing UI/authentication gates.

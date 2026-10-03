@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,6 +65,18 @@ def _enable_pi_confinement(monkeypatch: pytest.MonkeyPatch) -> None:
         "wrap_argv",
         lambda argv, workspace, *, writable=True, expose_proc=False: list(argv),
     )
+
+
+def _launch_python_fixture(monkeypatch: pytest.MonkeyPatch, script: Path) -> None:
+    """Run the real child process without requiring POSIX shebang support."""
+    launch = runners._popen_process_group
+
+    def portable_launch(argv, **kwargs):
+        if argv[0] == str(script):
+            argv = [sys.executable, *argv]
+        return launch(argv, **kwargs)
+
+    monkeypatch.setattr(runners, "_popen_process_group", portable_launch)
 
 
 def test_builtin_backends_registered():
@@ -167,6 +181,7 @@ def test_pi_rpc_prompt_rejection_fails_immediately(tmp_path: Path, monkeypatch: 
         encoding="utf-8",
     )
     fake_pi.chmod(0o755)
+    _launch_python_fixture(monkeypatch, fake_pi)
     contract = _contract(tmp_path, backend="pi_rpc")
     contract["authorization"] = {"class": "read_only", "approved": True}
 
@@ -193,6 +208,7 @@ def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest
         encoding="utf-8",
     )
     fake_pi.chmod(0o755)
+    _launch_python_fixture(monkeypatch, fake_pi)
     contract = _contract(tmp_path, backend="pi_rpc")
     contract["authorization"] = {"class": "read_only", "approved": True}
     started = time.monotonic()
@@ -200,6 +216,29 @@ def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest
     assert rc == 0
     assert final_text == "done"
     assert time.monotonic() - started < 5
+
+
+def test_pi_partial_rpc_line_cannot_block_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _enable_pi_confinement(monkeypatch)
+    monkeypatch.setattr(runners, "_pi_selection", lambda contract: (None, None))
+    fake_pi = tmp_path / "fake-pi-partial-line"
+    fake_pi.write_text(
+        "import sys, time\n"
+        "sys.stdin.readline()\n"
+        "sys.stdout.write('{\"type\":')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    _launch_python_fixture(monkeypatch, fake_pi)
+    contract = _contract(tmp_path, backend="pi_rpc")
+    contract["authorization"] = {"class": "read_only", "approved": True}
+    started = time.monotonic()
+    rc, final_text = runners._worker_pi(str(fake_pi), contract, 1, tmp_path / "events.jsonl", tmp_path / "hermes")
+    assert rc == 124
+    assert final_text == ""
+    assert time.monotonic() - started < 5
+    assert not any(thread.name == "hermes-pi-rpc-reader" and thread.is_alive() for thread in runners.threading.enumerate())
 
 
 def test_opencode_dry_run_uses_pure_json_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -273,6 +312,7 @@ def test_opencode_worker_pipes_prompt_and_uses_confinement(tmp_path: Path, monke
         encoding="utf-8",
     )
     fake.chmod(0o755)
+    _launch_python_fixture(monkeypatch, fake)
     contract = _contract(ws, backend="opencode", options={"model": "cliproxyapi/glm-test"})
     rc, final_text = runners._worker_opencode(str(fake), contract, 5, tmp_path / "events.jsonl")
     assert rc == 0
@@ -389,7 +429,7 @@ def test_read_only_opencode_uses_read_only_confinement(tmp_path: Path, monkeypat
     assert calls == [(False, True)]
 
 
-def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path):
+def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ws = tmp_path / "ws"
     ws.mkdir()
     fake_omx = tmp_path / "fake-omx-descendant"
@@ -401,6 +441,7 @@ def test_omx_timeout_kills_descendant_holding_inherited_pipes(tmp_path: Path):
         encoding="utf-8",
     )
     fake_omx.chmod(0o755)
+    _launch_python_fixture(monkeypatch, fake_omx)
     contract = _contract(ws, backend="omx")
     started = time.monotonic()
     rc, final_text = runners._worker_omx(str(fake_omx), contract, 1, tmp_path / "events.jsonl")
@@ -980,7 +1021,7 @@ def test_windows_process_tree_cleanup_uses_taskkill(monkeypatch: pytest.MonkeyPa
         calls.append(argv)
         return runners.subprocess.CompletedProcess(argv, 0)
 
-    monkeypatch.setattr(runners.os, "name", "nt")
+    monkeypatch.setattr(runners, "os", SimpleNamespace(**{**vars(runners.os), "name": "nt"}))
     monkeypatch.setattr(runners.subprocess, "run", _run)
     runners._terminate_process_tree(_Proc(), timeout=1)
     assert ["taskkill", "/PID", "4242", "/T", "/F"] in calls
@@ -1000,7 +1041,7 @@ def test_windows_detached_pid_cleanup_falls_back_when_taskkill_fails(
             raise FileNotFoundError("taskkill unavailable")
         return runners.subprocess.CompletedProcess(argv, 1)
 
-    monkeypatch.setattr(runners.os, "name", "nt")
+    monkeypatch.setattr(runners, "os", SimpleNamespace(**{**vars(runners.os), "name": "nt"}))
     monkeypatch.setattr(runners.subprocess, "run", _run)
     monkeypatch.setattr(runners.os, "kill", lambda pid, sig: direct_kills.append((pid, sig)))
 
@@ -1023,8 +1064,8 @@ def test_posix_process_tree_cleanup_uses_process_group(monkeypatch: pytest.Monke
             self.waits += 1
             return 0
 
-    monkeypatch.setattr(runners.os, "name", "posix")
-    monkeypatch.setattr(runners.os, "killpg", lambda pid, sig: calls.append((pid, sig)))
+    monkeypatch.setattr(runners, "os", SimpleNamespace(**{**vars(runners.os), "name": "posix"}))
+    monkeypatch.setattr(runners.os, "killpg", lambda pid, sig: calls.append((pid, sig)), raising=False)
     runners._terminate_process_tree(_Proc(), timeout=1)
     assert calls == [(4343, runners.signal.SIGTERM)]
 
