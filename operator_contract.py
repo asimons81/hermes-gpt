@@ -802,29 +802,41 @@ def _admitted_artifact_evidence(
 
 def _artifact_hash(path: Path) -> str:
     """Bounded observed hash; reject nonfiles, sharing failures and changing bytes."""
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-    try:
-        before = os.fstat(fd)
-        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_ARTIFACT_HASH_BYTES:
-            raise OSError("artifact cannot be hashed within the verification limit")
-        digest = hashlib.sha256()
-        size = 0
-        while True:
-            chunk = os.read(fd, 65536)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > MAX_ARTIFACT_HASH_BYTES:
-                raise OSError("artifact exceeded the verification limit")
-            digest.update(chunk)
-        after = os.fstat(fd)
-        def identity(s):
-            return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
-        if identity(before) != identity(after) or identity(after) != identity(path.stat()) or size != after.st_size:
+    def identity(s):
+        return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+
+    def observe():
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_ARTIFACT_HASH_BYTES:
+                raise OSError("artifact cannot be hashed within the verification limit")
+            digest = hashlib.sha256()
+            size = 0
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_ARTIFACT_HASH_BYTES:
+                    raise OSError("artifact exceeded the verification limit")
+                digest.update(chunk)
+            after = os.fstat(fd)
+            if identity(before) != identity(after) or size != after.st_size:
+                raise OSError("artifact changed during verification")
+        finally:
+            os.close(fd)
+        if identity(after) != identity(path.stat()):
             raise OSError("artifact changed during verification")
-        return digest.hexdigest()
-    finally:
-        os.close(fd)
+        return digest.hexdigest(), identity(after)
+
+    # Windows may defer write timestamps until outstanding handles close. A
+    # fresh bounded content observation detects rewrites that metadata misses.
+    first = observe()
+    second = observe()
+    if first != second:
+        raise OSError("artifact changed during verification")
+    return second[0]
 
 
 def _check_artifacts(

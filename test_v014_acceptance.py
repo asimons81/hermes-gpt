@@ -230,6 +230,26 @@ def test_hash_read_is_bounded_and_changing_content_is_unverified(tmp_path, monke
         contracts._artifact_hash(artifact)
 
 
+def test_hash_rejects_rewrite_even_when_file_metadata_is_unchanged(tmp_path, monkeypatch):
+    artifact = tmp_path / "report.md"
+    artifact.write_bytes(b"same")
+    initial = artifact.stat()
+    read = contracts.os.read
+    path_stat = type(artifact).stat
+
+    def changing(fd, size):
+        chunk = read(fd, size)
+        if chunk:
+            artifact.write_bytes(b"else")
+        return chunk
+
+    monkeypatch.setattr(contracts.os, "read", changing)
+    monkeypatch.setattr(contracts.os, "fstat", lambda fd: initial)
+    monkeypatch.setattr(type(artifact), "stat", lambda path, **kwargs: initial if path == artifact else path_stat(path, **kwargs))
+    with pytest.raises(OSError, match="changed"):
+        contracts._artifact_hash(artifact)
+
+
 def test_validation_projection_excludes_raw_details_and_unknown_fields():
     value = {"verdict": "NOT_SATISFIED", "checks": [{"kind": "artifacts", "status": "FAIL",
         "detail": "private/path/token", "failure_codes": ["artifact_missing", "secret private text"]}],
