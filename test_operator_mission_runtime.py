@@ -413,12 +413,12 @@ def test_parent_cancellation_blocked_by_reserved_delegation(hermes_root: Path):
 @pytest.mark.parametrize('fail', [False, True])
 def test_database_context_commits_or_rolls_back_and_closes(tmp_path, fail):
     path = mission._db_path(tmp_path)
-    with pytest.raises(RuntimeError) if fail else contextlib.nullcontext():
-        with mission._connect(path, write=True) as db:
-            db.execute('CREATE TABLE IF NOT EXISTS close_probe(value TEXT)')
-            db.execute("INSERT INTO close_probe VALUES ('present')")
-            if fail:
-                raise RuntimeError('rollback')
+    expected = pytest.raises(RuntimeError) if fail else contextlib.nullcontext()
+    with expected, mission._connect(path, write=True) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS close_probe(value TEXT)')
+        db.execute("INSERT INTO close_probe VALUES ('present')")
+        if fail:
+            raise RuntimeError('rollback')
     with pytest.raises(sqlite3.ProgrammingError):
         db.execute('SELECT 1')
     with mission._connect(path, write=False) as reader:
