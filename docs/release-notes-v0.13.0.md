@@ -30,6 +30,7 @@ Operational guide: [`docs/autopilot.md`](autopilot.md). Design and the findings 
 - An internal, narrow `apply_rework_patch` in the plan module (not a tool).
 - `operator_controller._l2_dispatch` gains an optional `delegation_id` (default unchanged).
 - Packaging: `operator_autopilot` and its operational guide are shipped; release wheels also include the compiled Flight Deck.
+- Gateway health uses a read-only native Windows process query when psutil is unavailable; the POSIX signal-zero probe is never used on Windows.
 - Windows job storage encodes colon-bearing and reserved job IDs without changing existing POSIX paths. Mission, delegation, and live-event database operations close their handles immediately, preventing deferred checkpoints and locked-file cleanup failures.
 
 ## Upgrade notes
@@ -39,7 +40,7 @@ Operational guide: [`docs/autopilot.md`](autopilot.md). Design and the findings 
 
 ## Release verification
 
-- The macOS full suite passes with 1,637 passed and 9 platform-specific skips (1,646 collected test IDs). Chat transport tests explicitly load the packaged SessionDB shim and stub Agent configuration so collection cannot bootstrap an installed Agent runtime.
+- The macOS full suite passes with 1,639 passed and 9 platform-specific skips (1,648 collected test IDs). Chat transport tests explicitly load the packaged SessionDB shim and stub Agent configuration so collection cannot bootstrap an installed Agent runtime.
 - CI runs full suites on Windows and Linux with Python 3.10–3.12 and both supported MCP SDK families, plus pinned SDK minimums on Linux. The Agent-loader integration and frontend tests remain separate checks.
 - The end-to-end acceptance suite runs on Linux with a real detached worker, bounded synthetic peers, a killed peer, recovery, an approval stop/resume, and an MCP server restarted mid-Mission. The worker environment proves it has no Owner authority. This is process-level acceptance with test peers, not a claim of workload acceptance on a production fleet.
 - The new deliverable tests reject missing/empty artifacts and stale attempt output; they verify recovery deferral before scheduler observation and during retry backoff, fail-closed limits/lineage, and active-plan replacement refusal.
