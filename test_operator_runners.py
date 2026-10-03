@@ -218,6 +218,29 @@ def test_pi_stderr_burst_cannot_stall_worker(tmp_path: Path, monkeypatch: pytest
     assert time.monotonic() - started < 5
 
 
+def test_pi_partial_rpc_line_cannot_block_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _enable_pi_confinement(monkeypatch)
+    monkeypatch.setattr(runners, "_pi_selection", lambda contract: (None, None))
+    fake_pi = tmp_path / "fake-pi-partial-line"
+    fake_pi.write_text(
+        "import sys, time\n"
+        "sys.stdin.readline()\n"
+        "sys.stdout.write('{\"type\":')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    _launch_python_fixture(monkeypatch, fake_pi)
+    contract = _contract(tmp_path, backend="pi_rpc")
+    contract["authorization"] = {"class": "read_only", "approved": True}
+    started = time.monotonic()
+    rc, final_text = runners._worker_pi(str(fake_pi), contract, 1, tmp_path / "events.jsonl", tmp_path / "hermes")
+    assert rc == 124
+    assert final_text == ""
+    assert time.monotonic() - started < 5
+    assert not any(thread.name == "hermes-pi-rpc-reader" and thread.is_alive() for thread in runners.threading.enumerate())
+
+
 def test_opencode_dry_run_uses_pure_json_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ws = tmp_path / "ws"
     ws.mkdir()

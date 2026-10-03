@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.13.0 candidate - Autopilot: a durable, default-off runtime that drives a Mission through its MissionPlan without a human re-triggering every node, with the connector surface unchanged at 137 tools when its machine gate is unset and three more when it is set](assets/hermes-gpt-v0.13.0-readme-hero.jpg)
+![Hermes GPT v0.13.0 - Autopilot: a durable, default-off runtime that drives a Mission through its MissionPlan without a human re-triggering every node, with the connector surface unchanged at 137 tools when its machine gate is unset and three more when it is set](assets/hermes-gpt-v0.13.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
