@@ -114,6 +114,7 @@ py-modules = [
   "docs/finance.md",
   "docs/missions.md",
   "docs/autopilot.md",
+  "docs/release-notes-v0.13.0.md",
   "docs/live-events.md",
   "docs/delegations.md",
   "docs/mcp-compatibility.md",
@@ -140,7 +141,6 @@ py-modules = [
   "docs/flight-deck-missions.md",
   "docs/gemini-spark.md",
 ]
-"share/hermes-gpt/docs/releases" = ["docs/releases/v0.13.0-release-notes.md"]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",
   "examples/start-openai-secure-mcp-tunnel.example.ps1",
