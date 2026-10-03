@@ -4,8 +4,151 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
+
+import pytest
 
 import operator_job_supervisor as jobs
+
+
+@pytest.mark.parametrize("store", ["supervisor", "autopilot"])
+def test_windows_json_sharing_contention_retries_without_losing_state(tmp_path, monkeypatch, store):
+    import operator_autopilot as autopilot
+
+    module = jobs if store == "supervisor" else autopilot
+    path = tmp_path / "state.json"
+    module._atomic_json(path, {"state": "running"})
+    replace = Path.replace
+    read_text = Path.read_text
+    calls = {"write": 0, "read": 0}
+
+    def busy_replace(source, target):
+        calls["write"] += 1
+        if calls["write"] <= 2:
+            raise PermissionError("temporary Windows delete-sharing contention")
+        return replace(source, target)
+
+    def busy_read(source, **kwargs):
+        calls["read"] += 1
+        if calls["read"] <= 2:
+            raise PermissionError("temporary Windows read-sharing contention")
+        return read_text(source, **kwargs)
+
+    monkeypatch.setattr(jobs, "IS_WINDOWS", True)
+    monkeypatch.setattr(jobs.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(Path, "replace", busy_replace)
+    monkeypatch.setattr(Path, "read_text", busy_read)
+    module._atomic_json(path, {"state": "completed"})
+    assert module._load_json(path) == {"state": "completed"}
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("store", ["supervisor", "autopilot"])
+def test_windows_permanently_unreadable_state_is_not_reported_missing(tmp_path, monkeypatch, store):
+    import operator_autopilot as autopilot
+
+    module = jobs if store == "supervisor" else autopilot
+    path = tmp_path / "state.json"
+    module._atomic_json(path, {"state": "running"})
+    before = path.read_bytes()
+
+    def denied(*args, **kwargs):
+        raise PermissionError("persistent read denial")
+
+    monkeypatch.setattr(jobs, "IS_WINDOWS", True)
+    monkeypatch.setattr(jobs.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(Path, "read_text", denied)
+    with pytest.raises(PermissionError, match="persistent read denial"):
+        module._load_json(path)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("store", ["supervisor", "autopilot"])
+def test_windows_permanently_denied_replace_preserves_previous_state(tmp_path, monkeypatch, store):
+    import operator_autopilot as autopilot
+
+    module = jobs if store == "supervisor" else autopilot
+    path = tmp_path / "state.json"
+    module._atomic_json(path, {"state": "running"})
+    before = path.read_bytes()
+
+    def denied(*args, **kwargs):
+        raise PermissionError("persistent replace denial")
+
+    monkeypatch.setattr(jobs, "IS_WINDOWS", True)
+    monkeypatch.setattr(jobs.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(Path, "replace", denied)
+    with pytest.raises(PermissionError, match="persistent replace denial"):
+        module._atomic_json(path, {"state": "completed"})
+    assert path.read_bytes() == before
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_slow_process_observation_does_not_block_terminal_publication(tmp_path, monkeypatch):
+    jobs.register_job("slow-observation", backend="test", workspace=tmp_path, log_path=None,
+                      source_record=None, hermes_root=tmp_path)
+    monkeypatch.setattr(jobs, "process_identity", lambda pid: {"platform": "test", "start_token": "1", "cmdline_sha256": "x"})
+    jobs.mark_running("slow-observation", 42, hermes_root=tmp_path)
+    observing = threading.Event()
+    release = threading.Event()
+    observed = []
+
+    def slow_verify(pid, expected):
+        observing.set()
+        assert release.wait(5)
+        return True
+
+    monkeypatch.setattr(jobs, "verify_process", slow_verify)
+    reader = threading.Thread(target=lambda: observed.append(jobs.reconcile_job("slow-observation", hermes_root=tmp_path)))
+    writer = threading.Thread(target=lambda: jobs.terminalize("slow-observation", "completed", hermes_root=tmp_path))
+    reader.start()
+    try:
+        assert observing.wait(2)
+        writer.start()
+        writer.join(timeout=1)
+        assert not writer.is_alive(), "status observation must not hold the terminal writer lock"
+    finally:
+        release.set()
+        reader.join(timeout=5)
+        if writer.ident is not None:
+            writer.join(timeout=5)
+    assert observed[0]["status"] == "completed"
+    assert observed[0]["finalization_version"] == 1
+
+
+def test_observation_does_not_overwrite_a_newer_worker_registration(tmp_path, monkeypatch):
+    jobs.register_job("changed-worker", backend="test", workspace=tmp_path, log_path=None,
+                      source_record=None, hermes_root=tmp_path)
+    monkeypatch.setattr(jobs, "process_identity", lambda pid: {"platform": "test", "start_token": str(pid), "cmdline_sha256": "x"})
+    jobs.mark_running("changed-worker", 42, hermes_root=tmp_path)
+
+    observing = threading.Event()
+    release = threading.Event()
+    result = []
+
+    def stale_verification(pid, expected):
+        observing.set()
+        assert release.wait(5)
+        return False
+
+    monkeypatch.setattr(jobs, "verify_process", stale_verification)
+    reader = threading.Thread(target=lambda: result.append(jobs.reconcile_job("changed-worker", hermes_root=tmp_path)))
+    writer = threading.Thread(target=lambda: jobs.mark_running("changed-worker", 43, hermes_root=tmp_path))
+    reader.start()
+    try:
+        assert observing.wait(2)
+        writer.start()
+        writer.join(timeout=1)
+        assert not writer.is_alive()
+    finally:
+        release.set()
+        reader.join(timeout=5)
+        if writer.ident is not None:
+            writer.join(timeout=5)
+    observed = result[0]
+    assert observed["pid"] == 43
+    assert observed["process_verification"] == "verified"
+    assert observed["process_identity"]["start_token"] == "43"
 
 
 def test_windows_liveness_preserves_native_query_states(monkeypatch):

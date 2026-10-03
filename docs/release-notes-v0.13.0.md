@@ -34,6 +34,7 @@ Operational guide: [`docs/autopilot.md`](autopilot.md). Design and the findings 
 - An unsupported confinement backend fails its capability probe and refuses launch before starting a worker.
 - Pi RPC reads subprocess output through a portable bounded queue. Windows never selects on a pipe, and a partial JSONL line cannot block the worker timeout.
 - Windows job storage encodes colon-bearing and reserved job IDs without changing existing POSIX paths. Mission, delegation, and live-event database operations close their handles immediately, preventing deferred checkpoints and locked-file cleanup failures.
+- Slow process observation runs outside the job writer lock and rechecks registration before saving, so a worker can publish its terminal result concurrently. Windows state reads/replacements retry transient sharing denial for a bounded interval; permanent denial fails closed without inventing a missing run or replacing an active plan.
 
 ## Upgrade notes
 
@@ -42,8 +43,9 @@ Operational guide: [`docs/autopilot.md`](autopilot.md). Design and the findings 
 
 ## Release verification
 
-- The macOS full suite passes with 1,643 passed and 9 platform-specific skips (1,652 collected test IDs). Chat transport tests explicitly load the packaged SessionDB shim and stub Agent configuration so collection cannot bootstrap an installed Agent runtime.
+- The macOS full suite passes with 1,653 passed and 9 platform-specific skips (1,662 collected test IDs). Chat transport tests explicitly load the packaged SessionDB shim and stub Agent configuration so collection cannot bootstrap an installed Agent runtime.
 - CI runs full suites on Windows and Linux with Python 3.10–3.12 and both supported MCP SDK families, plus pinned SDK minimums on Linux. The Agent-loader integration and frontend tests remain separate checks.
+- Pull requests run one full validation workflow. Master pushes, manual runs, and the tag publication workflow also run full CI; branch pushes no longer duplicate the same protected check names.
 - The end-to-end acceptance suite runs on Linux with a real detached worker, bounded synthetic peers, a killed peer, recovery, an approval stop/resume, and an MCP server restarted mid-Mission. The worker environment proves it has no Owner authority. This is process-level acceptance with test peers, not a claim of workload acceptance on a production fleet.
 - The new deliverable tests reject missing/empty artifacts and stale attempt output; they verify recovery deferral before scheduler observation and during retry backoff, fail-closed limits/lineage, and active-plan replacement refusal.
 - All 30 frontend tests pass. A browser check confirms the compiled Flight Deck loads under `/ui/ops/missions`, displays progress/budget/recovery/approval holds, and keeps navigation within `/ui`.

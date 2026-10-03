@@ -117,3 +117,19 @@ def test_plan_replacement_refuses_in_flight_work_and_preserves_every_record(env,
     assert out["code"] == "PLAN_IN_FLIGHT"
     assert _j(plan.hermes_plan_get(MID, hermes_root=root)) == old
     assert len(backend.calls) == 1
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_plan_replacement_refuses_unreadable_autopilot_state(env, monkeypatch, dry_run):
+    root, backend = env
+    _mk(root, [_node("a")])
+    old = _j(plan.hermes_plan_get(MID, hermes_root=root))
+
+    def denied(*args, **kwargs):
+        raise PermissionError("Autopilot state cannot be inspected")
+
+    monkeypatch.setattr(ap, "_read_run", denied)
+    out = _j(plan.hermes_plan_create(MID, confirm=True, dry_run=dry_run, hermes_root=root))
+    assert out["success"] is False
+    assert _j(plan.hermes_plan_get(MID, hermes_root=root)) == old
+    assert backend.calls == []

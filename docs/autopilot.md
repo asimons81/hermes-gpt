@@ -64,6 +64,8 @@ Run states: `starting`, `running`, `waiting_for_owner`, `stopping`, `stopped`, `
 
 `hermes_autopilot_status` returns the run and worker as before, plus a derived, read-only `summary`: progress, in-flight workers, the approval frontier, the budget view, recovery counters, limits and runtime remaining, wake-up counters, and an `attention` list with `needs_owner`. Building the summary never enforces a budget or writes anything, and if it cannot be built it degrades to `{"available": false}`.
 
+An unreadable durable run is an error, not a claim that no run exists. It also prevents plan replacement until the run can be inspected. Transient Windows file-sharing contention is retried within a bounded interval; process observation does not hold the job's terminal writer lock.
+
 Attention items marked `owner` are the ones only a human can resolve: the Mission awaiting approval, a gated node, a budget that is crossed, invalid or unreadable, and an unrecovered failed node. An expired runtime or a silent worker is informational.
 
 ## Flight Deck

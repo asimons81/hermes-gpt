@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.13.0 - 2026-09-29
+## 0.13.0 - 2026-10-03
 
 - Release hardening: enforce required nonempty node artifacts in isolated attempt workspaces; prevent plan replacement from orphaning unfinished work; preserve bounded, classifier-approved recovery during independent Mission reconciliation without hiding failed evidence.
 - Flight Deck now renders Autopilot progress, workers, budgets, recovery limits, and owner attention; release packages include the built browser assets. CI exercises the Python/MCP matrix on Windows and Linux.
+- Windows process observation leaves terminal publication unblocked; durable state handles transient file-sharing contention and fails closed on persistent read denial. Pi RPC pipe reading is portable and enforces timeouts even for partial JSONL lines.
 
 Autopilot: one durable, default-off runtime that drives a Mission through its MissionPlan without a human re-triggering every node, and never crosses an approval boundary. It is a caller of the existing Mission, plan, placement, Work Contract, delegation, budget, and live-event surfaces, not a new authority. See [docs/autopilot.md](docs/autopilot.md).
 

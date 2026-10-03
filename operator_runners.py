@@ -84,13 +84,13 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
         path.parent.chmod(0o700)
     except OSError:
         pass
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
     tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     try:
         tmp.chmod(0o600)
     except OSError:
         pass
-    tmp.replace(path)
+    job_supervisor._replace_json_file(tmp, path)
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:

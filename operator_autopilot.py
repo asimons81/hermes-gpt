@@ -207,12 +207,14 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
         temp.chmod(0o600)
     except OSError:
         pass
-    temp.replace(path)
+    job_supervisor._replace_json_file(temp, path)
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(job_supervisor._read_json_text(path))
+    except PermissionError:
+        raise
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
@@ -1954,7 +1956,7 @@ def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
             job_supervisor.terminalize(job_id, "failed", summary=op.redact_output(str(exc))[:500], hermes_root=hermes_root)
         except FileNotFoundError:
             pass
-        _write_run(mission_id, hermes_root, state="failed")
+        _write_run(mission_id, hermes_root, state="failed", last_error=op.redact_output(f"{type(exc).__name__}: {exc}")[:200])
         return 1
 
 
