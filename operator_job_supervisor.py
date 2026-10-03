@@ -55,16 +55,26 @@ def _validate_job_id(job_id: str) -> str:
     return value
 
 
+def _storage_id(job_id: str) -> str:
+    value = _validate_job_id(job_id)
+    reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    if IS_WINDOWS and (":" in value or value.endswith(".") or value.split(".")[0].upper() in reserved):
+        # '~' is outside the job-ID grammar, so encoded IDs cannot collide
+        # with ordinary IDs. Keep existing POSIX records at their old paths.
+        return "~" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return value
+
+
 def _record_path(job_id: str, hermes_root: Path | None = None) -> Path:
-    return _root(hermes_root) / f"{_validate_job_id(job_id)}.json"
+    return _root(hermes_root) / f"{_storage_id(job_id)}.json"
 
 
 def _lock_path(job_id: str, hermes_root: Path | None = None) -> Path:
-    return _root(hermes_root) / f"{_validate_job_id(job_id)}.lock"
+    return _root(hermes_root) / f"{_storage_id(job_id)}.lock"
 
 
 def _cancel_path(job_id: str, hermes_root: Path | None = None) -> Path:
-    return _root(hermes_root) / f"{_validate_job_id(job_id)}.cancel.json"
+    return _root(hermes_root) / f"{_storage_id(job_id)}.cancel.json"
 
 
 def _atomic_json(path: Path, value: dict[str, Any]) -> None:

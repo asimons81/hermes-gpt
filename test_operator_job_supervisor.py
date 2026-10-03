@@ -364,3 +364,19 @@ def test_windows_cancel_uses_taskkill_only_after_identity_verification(monkeypat
     stored = jobs.get_job("task-win-cancel", hermes_root=tmp_path, reconcile=False)
     assert stored is not None
     assert stored["status"] == "cancelled"
+
+
+def test_windows_storage_preserves_ids_without_invalid_or_colliding_paths(monkeypatch, tmp_path):
+    monkeypatch.setattr(jobs, 'IS_WINDOWS', True)
+    original = 'autopilot:msn-sched:1'
+    first = jobs._record_path(original, tmp_path)
+    assert ':' not in first.name
+    assert first == jobs._record_path(original, tmp_path)
+    assert first != jobs._record_path('autopilot-msn-sched-1', tmp_path)
+    assert first.stem == jobs._lock_path(original, tmp_path).stem
+    assert jobs._cancel_path(original, tmp_path).name == first.stem + '.cancel.json'
+    assert jobs._record_path('CON', tmp_path).stem != 'CON'
+    assert jobs._record_path('task.', tmp_path).stem != 'task.'
+    assert jobs._record_path('normal-job', tmp_path).name == 'normal-job.json'
+    monkeypatch.setattr(jobs, 'IS_WINDOWS', False)
+    assert jobs._record_path(original, tmp_path).name == original + '.json'

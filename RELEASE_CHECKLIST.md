@@ -26,9 +26,10 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - Session-control gating, prompt non-persistence, fixed argv, concurrency bounds, timeout/result bounds, redaction, and restart orphan reconciliation must be green.
 - `python -m pytest test_operator_mission_runtime.py test_operator_delegations.py test_operator_live_events.py test_operator_finance.py test_operator_job_supervisor.py`
   - First-class Missions, unified delegation lineage, durable live-event delivery, bounded Finance bridge behavior, and restart-safe durable job supervision must all be green.
-- `python -m pytest test_operator_autopilot.py test_operator_autopilot_scheduler.py test_operator_autopilot_advance.py test_operator_autopilot_frontier.py test_operator_autopilot_recovery.py test_operator_autopilot_limits.py test_operator_autopilot_wakeup.py test_operator_autopilot_status.py test_operator_mission_supersede.py test_operator_plan_rework.py test_ui_autopilot.py test_operator_autopilot_acceptance.py`
+- `python -m pytest test_operator_autopilot.py test_operator_autopilot_scheduler.py test_operator_autopilot_advance.py test_operator_autopilot_frontier.py test_operator_autopilot_recovery.py test_operator_autopilot_limits.py test_operator_autopilot_wakeup.py test_operator_autopilot_status.py test_operator_mission_supersede.py test_operator_plan_rework.py test_ui_autopilot.py test_operator_autopilot_deliverables.py test_operator_autopilot_acceptance.py`
   - Autopilot must stay default off (tools registered only with `HERMES_GPT_AUTOPILOT=1`), must never dispatch or advance an approval or `high_impact` node, must never approve or complete a Mission, must complete nodes only on observed evidence, must hold new dispatch when the budget envelope is not verifiably within its limit, and must keep the same worker across an MCP server restart. The `superseded_by` marker tests (a forged or stale marker has no effect) must be green.
 - Run the Windows/Linux Python 3.10-3.12 CI matrix.
+- Run `npm ci`, `npm test`, and `npm run build` in `web/`; verify installed `/ui/ops/missions` navigation and read-only Autopilot supervision.
 
 ## 3. Release doctor
 
@@ -39,6 +40,7 @@ Use this checklist before publishing a Hermes GPT release artifact.
 
 ## 4. Package build and hygiene
 
+- Build the web UI first; confirm a clean wheel installation resolves the bundled Flight Deck index and assets.
 - `python -m build`
 - `python -m twine check dist/*`
 - Confirm wheel and sdist contain the current public docs expected by `pyproject.toml` / `MANIFEST.in`, including:

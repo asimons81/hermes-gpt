@@ -116,15 +116,25 @@ def _db_path(hermes_root: Path | None) -> Path:
     return _root(hermes_root) / "missions" / "missions.db"
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit/rollback normally, then release the database file immediately."""
+
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 def _connect(path: Path, *, write: bool) -> sqlite3.Connection:
     if write:
         path.parent.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(path)
+        db = sqlite3.connect(path, factory=_ClosingConnection)
         _init_db(db)
     else:
         if not path.is_file():
             raise FileNotFoundError(path)
-        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, factory=_ClosingConnection)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
     return db
