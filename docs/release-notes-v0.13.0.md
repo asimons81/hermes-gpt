@@ -30,7 +30,7 @@ Operational guide: [`docs/autopilot.md`](autopilot.md). Design and the findings 
 - An internal, narrow `apply_rework_patch` in the plan module (not a tool).
 - `operator_controller._l2_dispatch` gains an optional `delegation_id` (default unchanged).
 - Packaging: `operator_autopilot` and its operational guide are shipped; release wheels also include the compiled Flight Deck.
-- Windows job storage encodes colon-bearing and reserved job IDs without changing existing POSIX paths. Mission and live-event database operations close their handles immediately, preventing deferred checkpoints and locked-file cleanup failures.
+- Windows job storage encodes colon-bearing and reserved job IDs without changing existing POSIX paths. Mission, delegation, and live-event database operations close their handles immediately, preventing deferred checkpoints and locked-file cleanup failures.
 
 ## Upgrade notes
 
