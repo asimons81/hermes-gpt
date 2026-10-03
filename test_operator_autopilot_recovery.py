@@ -149,7 +149,7 @@ def test_only_transient_failures_are_ever_retried(env, error, expected_class):
     assert _states(root) == {"a": "failed", "b": "pending"} and len(backend.calls) == 1
 
 
-def test_failed_attempt_still_fails_the_mission_until_its_successor_exists(env, monkeypatch):
+def test_external_reconcile_during_backoff_preserves_the_mission_and_failed_evidence(env, monkeypatch):
     root, backend = env
     monkeypatch.setattr(autopilot, "RETRY_BACKOFF_BASE_SECONDS", 600.0)
     monkeypatch.setattr(autopilot, "RETRY_BACKOFF_CAP_SECONDS", 900.0)
@@ -158,7 +158,8 @@ def test_failed_attempt_still_fails_the_mission_until_its_successor_exists(env, 
     _fail(root, backend, 0, "timeout")
     _tick(root)  # retry scheduled but held by backoff: no successor delegation yet
     mission.hermes_mission_reconcile(MID, confirm=True, dry_run=False, hermes_root=root)
-    assert _mission_status(root) == "failed"  # fail closed: nothing was hidden
+    assert _mission_status(root) == "running"
+    assert any(a["state"] == "failed" for a in _j(mission.hermes_mission_get(MID, hermes_root=root))["attachments"])
 
 
 # ---------------------------------------------------------------------------

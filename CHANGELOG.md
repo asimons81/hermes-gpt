@@ -2,6 +2,9 @@
 
 ## 0.13.0 - 2026-09-29
 
+- Release hardening: enforce required nonempty node artifacts in isolated attempt workspaces; prevent plan replacement from orphaning unfinished work; preserve bounded, classifier-approved recovery during independent Mission reconciliation without hiding failed evidence.
+- Flight Deck now renders Autopilot progress, workers, budgets, recovery limits, and owner attention; release packages include the built browser assets. CI exercises the Python/MCP matrix on Windows and Linux.
+
 Autopilot: one durable, default-off runtime that drives a Mission through its MissionPlan without a human re-triggering every node, and never crosses an approval boundary. It is a caller of the existing Mission, plan, placement, Work Contract, delegation, budget, and live-event surfaces, not a new authority. See [docs/autopilot.md](docs/autopilot.md).
 
 - Added `hermes_autopilot_start` / `hermes_autopilot_status` / `hermes_autopilot_stop`, registered only when `HERMES_GPT_AUTOPILOT=1` (default off), so the default connector surface is unchanged at 137 tools and is 140 with the gate set. Start is dry-run first and needs `workspace` level, direct mode, and `confirm=true`; stop is never gated behind the machine gate. A detached worker process (via the durable job supervisor) owns one Mission at a time and survives an MCP server restart, with status re-verified on every read rather than trusted from a cache.

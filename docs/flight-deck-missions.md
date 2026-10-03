@@ -36,3 +36,7 @@ It follows the same rules as the rest of this screen:
 
 The view is a snapshot to re-read on a wake-up, never proof: Mission, plan, delegation, and evidence stores remain authoritative.
 
+
+The Mission detail screen includes an Autopilot panel for task progress, worker state, budget spend and holds, retry/replan counts, runtime remaining, and owner attention. It refreshes after Mission revisions and every five seconds without overlapping polling requests. Failed refreshes retain the last snapshot with a visible verification warning. Unverified or dead workers are never presented as healthy.
+
+Release wheels bundle the built Flight Deck. Set `HERMES_GPT_UI_ENABLED=1` to serve it under `/ui/`; the existing browser authentication and Operator gates still apply. Source checkouts use `web/dist` after `npm ci && npm run build`. `HERMES_GPT_UI_DIR` continues to override either location.

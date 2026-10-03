@@ -21,7 +21,6 @@ from test_operator_autopilot_scheduler import (
     _j,
     _mk,
     _node,
-    _put_plan,
     _states,
     _tick,
     make_env,
@@ -33,7 +32,7 @@ def env(tmp_path: Path, monkeypatch):
     return make_env(tmp_path, monkeypatch)
 
 
-def _observe(root: Path, task_id: str, *, state: str, outcome: str = "", error: str = "") -> None:
+def _observe(root: Path, task_id: str, *, state: str, outcome: str = "", error: str = "", artifacts: dict[str, str] | None = None) -> None:
     meta_path, _, _ = runners._job_paths(task_id, root)
     record = {
         "schema_version": runners.SCHEMA_VERSION, "task_id": task_id, "backend": "pi_rpc",
@@ -43,6 +42,11 @@ def _observe(root: Path, task_id: str, *, state: str, outcome: str = "", error: 
     if state in ("completed", "failed", "cancelled"):
         record["ended_at"] = "2026-08-21T00:00:02+00:00"
     runners._atomic_json(meta_path, record)
+    if state == "completed":
+        directory = root / "missions" / "artifacts" / task_id
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, content in (artifacts if artifacts is not None else {"work-contract.json": "{}"}).items():
+            (directory / name).write_text(content)
 
 
 def _task(backend, index: int = 0) -> str:
@@ -180,7 +184,7 @@ def test_crash_mid_walk_resumes_and_completes_without_redispatch(env, monkeypatc
     assert (autopilot._read_run(MID, root) or {}).get("walking") == {}
 
 
-def test_plan_replaced_during_advance_aborts_without_writing_the_new_plan(env, monkeypatch):
+def test_plan_replacement_during_advance_is_refused_without_losing_work(env, monkeypatch):
     root, backend = env
     _mk(root, [_node("a")])
     _tick(root)
@@ -188,13 +192,14 @@ def test_plan_replaced_during_advance_aborts_without_writing_the_new_plan(env, m
     real = deleg.hermes_delegation_reconcile
 
     def replace_then_reconcile(*args, **kwargs):
-        _put_plan(root, [_node("a")])
+        replacement = _j(plan.hermes_plan_create(MID, confirm=True, dry_run=False, hermes_root=root))
+        assert replacement["code"] == "PLAN_IN_FLIGHT"
         return real(*args, **kwargs)
 
     monkeypatch.setattr(deleg, "hermes_delegation_reconcile", replace_then_reconcile)
     out = _tick(root)
-    assert out["skipped"] == "plan_version_conflict" and out["completed"] == []
-    assert _states(root) == {"a": "pending"}
+    assert out["completed"] == ["a"]
+    assert _states(root) == {"a": "completed"}
 
 
 @pytest.mark.parametrize("result", [

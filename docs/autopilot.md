@@ -79,3 +79,11 @@ Run state lives under the Hermes data root in `autopilot/<mission_id>.json` (mod
 - `python -m pytest test_operator_autopilot.py test_operator_autopilot_scheduler.py test_operator_autopilot_advance.py test_operator_autopilot_frontier.py test_operator_autopilot_recovery.py test_operator_autopilot_limits.py test_operator_autopilot_wakeup.py test_operator_autopilot_status.py`
 - `python -m pytest test_operator_mission_supersede.py test_operator_plan_rework.py test_ui_autopilot.py`
 - `python -m pytest test_operator_autopilot_acceptance.py` runs the end-to-end scenario with a real detached worker, a killed peer, an approval stop and resume, and an MCP server restarted mid-Mission.
+
+## Deliverable acceptance and plan replacement
+
+Each node's `expected_artifacts` basenames are carried into its immutable Work Contract as required, nonempty files. Each attempt has a separate workspace under the Hermes data root at `missions/artifacts/<task_id>/`; earlier attempts and other nodes cannot satisfy its local artifact check. Remote artifacts still require the existing coordinator-verified admission and contract binding. A completed execution with missing or empty artifacts remains unverified and cannot advance the node. File presence and size are acceptance checks; they do not prove the semantic quality of a deliverable.
+
+Replacing a plan is refused with `PLAN_IN_FLIGHT` while a scheduler pass, unfinished nodes/delegations, or a nonterminal Autopilot run exists. The replacement uses the same per-Mission scheduler lease, including the dispatch-before-node-write window. Stop Autopilot and resolve unfinished work before replacing a plan. Dry runs report the unfinished-work refusal without writing.
+
+Independent Mission reconciliation preserves the current Mission status while all failed attachments belong to classifier-approved, bounded Autopilot recovery. It reports their references in `recovery_pending` and retains the failed observations. This covers the interval before scheduler observation and retry backoff; it never claims success. Stopped/dead workers, expired runtime, exhausted attempts, unknown failures, terminal failed nodes, and missing or inconsistent lineage do not defer failure.

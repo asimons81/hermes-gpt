@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
         python: ['3.10', '3.11', '3.12']
         sdk: ['mcp>=1.28.1,<2', 'mcp>=2,<3']
         include:
@@ -165,6 +165,10 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flight-deck
+          path: web/dist/
 
   windows-docs:
     runs-on: windows-latest
@@ -196,6 +200,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: flight-deck
+          path: web/dist/
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

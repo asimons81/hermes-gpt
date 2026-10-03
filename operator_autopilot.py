@@ -951,14 +951,15 @@ def _build_contract(
         "assigned_agent": agent,
         "assigned_profile": profile,
         "objective": f"autopilot dispatch: mission={mission_id} node={node_id} attempt={int(attempt)}",
-        "allowed_scope": {"workspaces": [str(_data_root(hermes_root) / "missions")], "profiles": [profile]},
+        "allowed_scope": {"workspaces": [str(_data_root(hermes_root) / "missions" / "artifacts" / _task_id(mission_id, node_id, key))], "profiles": [profile]},
         "forbidden_actions": [],
-        "expected_artifacts": [],
+        "expected_artifacts": [{"path": name, "must_exist": True, "min_bytes": 1}
+                               for name in mission_plan._clean_artifacts(node.get("expected_artifacts"))],
         "tests": [],
         "review_requirements": {},
         "completion_criteria": {
             "run_state": {"terminal": True, "outcome_ok": ["completed", "done"]},
-            "artifacts_present": False,
+            "artifacts_present": bool(node.get("expected_artifacts")),
             "tests_pass": False,
             "review_satisfied": False,
             "no_forbidden_actions": True,
@@ -1248,6 +1249,73 @@ def _load_recovery(run: dict[str, Any]) -> dict[str, Any]:
 
 def _save_recovery(mission_id: str, hermes_root: Path | None, recovery: dict[str, Any]) -> None:
     _write_run(mission_id, hermes_root, recovery=recovery)
+
+
+def recovery_pending(mission_id: str, delegation_id: str, hermes_root: Path | None) -> bool:
+    """A failed attempt still belongs to bounded, unfinished Autopilot work.
+
+    Used by Mission reconciliation *before* the scheduler has observed a
+    failure and during retry backoff. This never hides the failed observation,
+    claims success, or grants dispatch authority. Unknown/unrecoverable failures,
+    exhausted limits, stopped runs, and missing lineage never defer failure.
+    """
+    run = _read_run(mission_id, hermes_root)
+    if not run or run.get("state") not in LIVE_STATES or _runtime_exceeded(run):
+        return False
+    if run.get("job_id"):
+        job = job_supervisor.get_job(run["job_id"], hermes_root=hermes_root, reconcile=False)
+        if _worker_liveness(job) != "alive":
+            return False
+    review = json.loads(mission_plan.hermes_plan_review(mission_id, hermes_root=hermes_root))
+    if not review.get("success") or not review.get("nodes"):
+        return False
+    recovery = _load_recovery(run)
+    result = json.loads(deleg.hermes_delegation_reconcile(delegation_id, apply=False, hermes_root=hermes_root))
+    row = result.get("delegation") or {}
+    if not result.get("success") or row.get("mission_id") != mission_id or row.get("state") != "failed":
+        return False
+    nodes = {n["node_id"]: n for n in review["nodes"]}
+    for node_id, node in nodes.items():
+        if _is_owner_gated(node):
+            continue
+        pending = recovery["pending_supersede"].get(node_id) == delegation_id
+        replan = recovery["replan_pending"].get(node_id) == delegation_id
+        # Rework clones retain their predecessor only through the internal
+        # recovery bridge, never through a caller-supplied relationship.
+        if node["state"] == "failed" and not replan:
+            continue
+        attempt = int(node.get("retries", 0) or 0)
+        original = attempt - 1 if pending and attempt > 0 else attempt
+        source = next((old for old, clone in recovery["superseded_nodes"].items()
+                       if clone == node_id), node_id)
+        source_node = nodes.get(source)
+        if source_node is None:
+            continue
+        if source != node_id:
+            original = int(source_node.get("retries", 0) or 0)
+        key = dispatch_key(mission_id, int(review["version"]), source, original,
+                           str(source_node.get("contract_sha256", "")))
+        if row.get("task_id") != _task_id(mission_id, source, key) or delegation_id != _delegation_id(key):
+            continue
+        if node["state"] == "completed":
+            continue
+        if (pending and source == node_id
+                and attempt >= int(run.get("max_attempts_per_node") or MAX_NODE_ATTEMPTS)):
+            continue
+        if pending or replan:
+            return True
+        ctx = _load_mission(mission_id, hermes_root)
+        decision = _classify_failure(mission_id, node, _observation_env(
+            node, result, ctx["status"], bool(ctx.get("final_approval_required", True)),
+            max_attempts=int(run.get("max_attempts_per_node") or MAX_NODE_ATTEMPTS)))
+        if (decision.get("classification") == failure_semantics.CLASS_TRANSIENT
+                and decision.get("auto_retry") is True):
+            return True
+        if (decision.get("classification") == failure_semantics.CLASS_SEMANTIC
+                and (decision.get("replan_proposal") or {}).get("eligible") is True
+                and int(run.get("replans_used", 0)) + len(recovery["replan_pending"]) < int(run.get("max_replans", 0))):
+            return True
+    return False
 
 
 def _backoff_seconds(node_id: str, attempt: int) -> float:

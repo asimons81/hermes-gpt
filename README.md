@@ -30,7 +30,8 @@ v0.13.0 adds **Autopilot**: a durable, default-off runtime that drives one Missi
 2. **It never crosses an approval boundary** - approval nodes and `high_impact` nodes are never dispatched or advanced; Autopilot reports `waiting_for_owner` and dispatches nothing past them. It cannot approve or complete a Mission: it stops at `awaiting_approval`, and only `hermes_mission_approve` in Owner mode completes it.
 3. **Evidence, not claims** - a node completes only when its Work Contract validates against observed state; a worker's own success report is never accepted, and missing evidence fails closed.
 4. **Bounded everything** - concurrency, attempts per node, replans, and runtime are capped at start; new dispatch is held whenever the Mission's budget envelope is not verifiably within its limit; recovery is decided by the existing failure classifier and only transient failures are retried.
-5. **Additive elsewhere** - `hermes_autopilot_status` carries a derived summary without changing any earlier key, Flight Deck gets a read-only Autopilot view, and a failed delegation attempt can now be marked superseded by its successor (see [docs/missions.md](docs/missions.md)) without changing any approval rule.
+5. **Deliverables and supervision** - node artifact requirements are enforced in isolated attempt workspaces; unfinished work blocks plan replacement, and independent reconciliation preserves bounded recovery. Flight Deck includes an Autopilot panel and its built assets ship in release wheels.
+6. **Additive elsewhere** - `hermes_autopilot_status` carries a derived summary without changing any earlier key, Flight Deck gets a read-only Autopilot view, and a failed delegation attempt can now be marked superseded by its successor (see [docs/missions.md](docs/missions.md)) without changing any approval rule.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete v0.13.0 change list.
 
