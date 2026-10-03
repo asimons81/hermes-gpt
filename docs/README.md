@@ -16,7 +16,7 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.13.0**. The GitHub release target is `v0.13.0`; verify the public GitHub Releases and PyPI channels independently.
+Repository version: **0.14.0**. The GitHub release target is `v0.14.0`; verify the public GitHub Releases and PyPI channels independently. Declared artifact size/digest checks and validation recovery require v0.14.0 or newer.
 
 PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.13 Autopilot requires a published PyPI version of 0.13.0 or newer *and* `HERMES_GPT_AUTOPILOT=1`; v0.12 gated budget-enforcement and controller-L2 behavior requires a published PyPI version of 0.12.0 or newer *and* the corresponding machine gates armed; v0.11 Gemini Spark / Bot Chat / SDK 2 behavior requires a published PyPI version of 0.11.0 or newer; v0.10 vNext derived views / controller surfaces and v0.9 Mission/delegation/live-event behavior require 0.10.0 (or 0.9.0) or newer, respectively.
 
@@ -47,7 +47,8 @@ PyPI is an independent distribution channel. Check the PyPI badge in the root RE
 | [`session-control.md`](session-control.md) | current | gated asynchronous session continue/send jobs |
 | [`ui-security-boundary.md`](ui-security-boundary.md) | current | conversational UI browser security boundary and opt-in UI mount |
 | [`flight-deck-coverage.md`](flight-deck-coverage.md) | current | Flight Deck browser coverage and mutation safety decisions |
-| [`release-notes-v0.13.0.md`](release-notes-v0.13.0.md) | current release record | v0.13 Autopilot behavior, observed acceptance, supervision, upgrade gates, and known limitations |
+| [`release-notes-v0.14.0.md`](release-notes-v0.14.0.md) | current release record | declared acceptance checks, durable delivery grace, bounded artifact-failure recovery, and supervision |
+| [`release-notes-v0.13.0.md`](release-notes-v0.13.0.md) | historical release record | v0.13 Autopilot behavior and initial release verification |
 | [`release-notes-v0.8.0.md`](release-notes-v0.8.0.md) | historical release record | shipped v0.8 Fabric behavior, G6 acceptance boundary, and known limitation |
 | [`release-notes-v0.7.0.md`](release-notes-v0.7.0.md) | historical release record | shipped v0.7 behavior and gates |
 | [`release-notes-v0.6.0.md`](release-notes-v0.6.0.md) | current release record | shipped v0.6 behavior and known limitations |

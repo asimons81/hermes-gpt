@@ -648,7 +648,8 @@ def build_summary(
     }
 
     workers: list[dict[str, Any]] = []
-    for node in sorted((n for n in nodes if n["state"] in OBSERVED_NODE_STATES), key=lambda n: n["node_id"])[:SUMMARY_MAX_WORKERS]:
+    for node in sorted((n for n in nodes if n["state"] in OBSERVED_NODE_STATES | {"failed", "completed"}),
+                       key=lambda n: n["node_id"])[:SUMMARY_MAX_WORKERS]:
         attempt = int(node.get("retries", 0) or 0)
         key = dispatch_key(mission_id, plan_version or 0, node["node_id"], attempt, str(node.get("contract_sha256", "")))
         found = _existing_delegation(mission_id, node["node_id"], _task_id(mission_id, node["node_id"], key), hermes_root)
@@ -657,6 +658,8 @@ def build_summary(
             "peer": recovery["placements"].get(node["node_id"]),
             "delegation_id": found["delegation_id"] if found else None,
             "delegation_state": found["state"] if found else None,
+            "validation": found.get("validation", {}) if found else {},
+            "validation_failure_since": found.get("validation_failure_since", "") if found else "",
         })
 
     frontier = _frontier_view({"nodes": nodes, "ready_nodes": review.get("ready_nodes", [])}, mission_status)
@@ -675,6 +678,10 @@ def build_summary(
         attention.append({"code": "owner_gate_node", "nodes": frontier["nodes"]})
     if failed_nodes:
         attention.append({"code": "node_failed", "nodes": failed_nodes})
+    pending_validation = [w["node_id"] for w in workers if w["delegation_state"] == "reconciling"
+                          and (w.get("validation") or {}).get("verdict") in {"NOT_SATISFIED", "INCONCLUSIVE"}]
+    if pending_validation:
+        attention.append({"code": "validation_pending", "nodes": pending_validation})
     if budget_view.get("error"):
         attention.append({"code": "budget_check_failed", "nodes": []})
     elif budget_view.get("configured") and budget_view.get("status") != budget.STATUS_WITHIN:
@@ -947,6 +954,9 @@ def _build_contract(
     """
     node_id = node["node_id"]
     profile = str(requirement.get("profile", ""))
+    artifacts = mission_plan._clean_artifacts(node.get("expected_artifacts"))
+    requirements = {item["path"]: item for item in mission_plan._clean_artifact_requirements(
+        node.get("artifact_requirements"), artifacts)}
     return {
         "schema": contract_mod.CONTRACT_SCHEMA,
         "task_id": _task_id(mission_id, node_id, key),
@@ -955,8 +965,8 @@ def _build_contract(
         "objective": f"autopilot dispatch: mission={mission_id} node={node_id} attempt={int(attempt)}",
         "allowed_scope": {"workspaces": [str(_data_root(hermes_root) / "missions" / "artifacts" / _task_id(mission_id, node_id, key))], "profiles": [profile]},
         "forbidden_actions": [],
-        "expected_artifacts": [{"path": name, "must_exist": True, "min_bytes": 1}
-                               for name in mission_plan._clean_artifacts(node.get("expected_artifacts"))],
+        "expected_artifacts": [{"path": name, "must_exist": True, "min_bytes": 1, **requirements.get(name, {})}
+                               for name in artifacts],
         "tests": [],
         "review_requirements": {},
         "completion_criteria": {
@@ -992,7 +1002,7 @@ def _existing_delegation(mission_id: str, node_id: str, task_id: str, hermes_roo
     try:
         with deleg._connect(dbp, write=False) as db:
             rows = db.execute(
-                "SELECT delegation_id,task_id,state,dispatch_phase FROM delegations WHERE mission_id=? ORDER BY created_at",
+                "SELECT * FROM delegations WHERE mission_id=? ORDER BY created_at",
                 (mission_id,),
             ).fetchall()
     except (sqlite3.Error, OSError):
@@ -1003,8 +1013,8 @@ def _existing_delegation(mission_id: str, node_id: str, task_id: str, hermes_roo
     # Prefer a live/successful lineage over a dead one.
     for row in matches:
         if row["state"] not in ("failed", "cancelled"):
-            return row
-    return matches[-1]
+            return deleg._surface(row)
+    return deleg._surface(matches[-1])
 
 
 def _reached_backend(row: dict[str, Any]) -> bool:
@@ -1335,6 +1345,9 @@ def _observation_env(
     observed = result.get("observed") or {}
     retries = int(node.get("retries", 0) or 0)
     error = str(observed.get("error") or "")
+    checks = {c.get("kind"): c.get("status") for c in (delegation.get("validation") or {}).get("checks", [])}
+    artifact_defect = (delegation.get("outcome") == "validation_failed"
+                       and checks.get("run_state") == "PASS" and checks.get("artifacts") == "FAIL")
     return {
         "delegation": {
             "state": str(delegation.get("state") or ""),
@@ -1347,6 +1360,7 @@ def _observation_env(
             # semantic defect. Withheld for failed delegations; the error channel
             # then decides, and unflavored failures fail closed as unknown.
             "validation_verdict": "" if str(delegation.get("state") or "") == "failed"
+            and not artifact_defect
             else str(delegation.get("validation_verdict") or ""),
         },
         "runner": {

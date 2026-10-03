@@ -14,6 +14,23 @@ const running = {
 };
 
 describe('Autopilot supervision', () => {
+  it('explains failed acceptance and delivery grace without exposing controls', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ ...running, summary: { ...running.summary,
+      workers: [{ node_id: 'report', state: 'running', delegation_state: 'reconciling', attempt: 0,
+        validation_failure_since: '2026-10-03T12:00:00Z', validation: { verdict: 'NOT_SATISFIED', checks: [
+          { kind: 'run_state', status: 'PASS' },
+          { kind: 'artifacts', status: 'FAIL', failure_codes: ['artifact_hash_mismatch'] },
+          { kind: 'review', status: 'UNVERIFIED' }] } }],
+      attention: [{ code: 'validation_pending', severity: 'info', nodes: ['report'] }] } });
+    const post = vi.spyOn(api, 'post');
+    render(<AutopilotPanel missionId="msn-test" />);
+    expect(await screen.findByText('Execution: Passed')).toBeInTheDocument();
+    expect(screen.getByText(/Deliverables: Failed.*Content hash differs/)).toBeInTheDocument();
+    expect(screen.getByText('Review: Unverified')).toBeInTheDocument();
+    expect(screen.getByText(/Delivery grace period/)).toBeInTheDocument();
+    expect(screen.getByText('Completion remains unverified')).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
   it('shows progress, spend, limits, retries, and workers through GET only', async () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue(running);
     const post = vi.spyOn(api, 'post');

@@ -82,7 +82,24 @@ Run state lives under the Hermes data root in `autopilot/<mission_id>.json` (mod
 - `python -m pytest test_operator_mission_supersede.py test_operator_plan_rework.py test_ui_autopilot.py`
 - `python -m pytest test_operator_autopilot_acceptance.py` runs the end-to-end scenario with a real detached worker, a killed peer, an approval stop and resume, and an MCP server restarted mid-Mission.
 
-## Deliverable acceptance and plan replacement
+## Declared deliverable acceptance (v0.14)
+
+Nodes can add optional `artifact_requirements` for basenames already listed in `expected_artifacts`:
+
+```json
+"expected_artifacts": ["report.md"],
+"artifact_requirements": [{"path": "report.md", "min_bytes": 100, "max_bytes": 100000}]
+```
+
+An optional `sha256` must be a lowercase 64-character expected content digest. Unknown keys, duplicate requirement paths, paths absent from `expected_artifacts`, nonpositive minimums, and inconsistent size bounds are refused before dispatch. Requirements participate in the node signature and the Work Contract digest, and rework preserves them. Omitting the new field preserves legacy node signatures. Every declared artifact remains required and nonempty.
+
+The Work Contract validates size and optional expected digest from observed local files or contract-bound coordinator-verified remote artifact metadata. Local hash reads are bounded to 8 MiB and reject changing, unreadable, or nonregular files. Larger local files needing hashing remain unverified. No raw artifact content crosses the browser boundary. These checks prove declared size/integrity, not semantic quality.
+
+Once a backend is observed successful, confirmed artifact failures get a **durable 30-second delivery grace**. The interval starts on an authorized applied reconciliation and survives process restarts; read-only previews never start a durable timer. Late valid artifacts complete normally. If the interval expires with artifacts still failing and all other required checks passing, reconciliation records a failed delegation with `outcome="validation_failed"`. Autopilot can classify this as semantic failure and use its existing bounded replan allowance. Zero/exhausted allowance fails for human attention.
+
+Unreadable artifacts, missing backend observations, unresolved cancellation, denied authority, and unsatisfied required review never trigger this recovery. Validation verdict/check enums and fixed artifact failure codes are visible through delegation reads and Flight Deck; validation details, paths, bodies, and prompts are excluded from these receipts. Flight Deck remains read-only.
+
+## Deliverable isolation and plan replacement
 
 Each node's `expected_artifacts` basenames are carried into its immutable Work Contract as required, nonempty files. Each attempt has a separate workspace under the Hermes data root at `missions/artifacts/<task_id>/`; earlier attempts and other nodes cannot satisfy its local artifact check. Remote artifacts still require the existing coordinator-verified admission and contract binding. A completed execution with missing or empty artifacts remains unverified and cannot advance the node. File presence and size are acceptance checks; they do not prove the semantic quality of a deliverable.
 

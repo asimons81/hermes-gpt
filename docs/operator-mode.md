@@ -209,6 +209,8 @@ Live events are notifications, not proof. Mission, Swarm, Work Contract, runner,
 
 Work Contracts add a structured, verifiable work-order layer through `hermes_contract_*`.
 
+Since v0.14, `expected_artifacts` entries can include optional `max_bytes` and lowercase `sha256` acceptance checks in addition to `min_bytes`. Local hashing is bounded to 8 MiB and changing/unreadable content fails closed; remote evidence still requires coordinator verification and immutable contract binding. Size/digest checks do not replace semantic review. Autopilot nodes expose the same bounds through optional `artifact_requirements`; confirmed failed artifacts after successful execution use a durable delivery grace and existing bounded recovery. See [Autopilot](autopilot.md#declared-deliverable-acceptance-v014).
+
 | Tool | Authority | Purpose |
 | --- | --- | --- |
 | `hermes_contract_define(contract_json)` | read-only | Validate and canonicalize a contract. |
