@@ -3,6 +3,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -275,6 +276,39 @@ def test_hash_rejects_rewrite_even_when_file_metadata_is_unchanged(tmp_path, mon
     monkeypatch.setattr(type(artifact), "stat", lambda path, **kwargs: initial if path == artifact else path_stat(path, **kwargs))
     with pytest.raises(OSError, match="changed"):
         contracts._artifact_hash(artifact)
+
+
+def test_windows_hash_accepts_stable_file_with_different_stat_and_fstat_ctime(tmp_path, monkeypatch):
+    artifact = tmp_path / "report.md"
+    artifact.write_bytes(b"stable")
+    initial = artifact.stat()
+    fields = {name: getattr(initial, name) for name in
+              ("st_mode", "st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")}
+    birthtime = getattr(initial, "st_birthtime_ns", 0)
+    fd_stat = SimpleNamespace(**{**fields, "st_ctime_ns": initial.st_ctime_ns + 1000},
+                              st_birthtime_ns=birthtime)
+    monkeypatch.setattr(contracts.sys, "platform", "win32")
+    monkeypatch.setattr(contracts.os, "fstat", lambda fd: fd_stat)
+    assert contracts._artifact_hash(artifact) == hashlib.sha256(b"stable").hexdigest()
+    contract = {"allowed_scope": {"workspaces": [str(tmp_path)]}, "expected_artifacts": [
+        {"path": "report.md", "must_exist": True, "min_bytes": 1,
+         "sha256": hashlib.sha256(b"expected").hexdigest()}]}
+    monkeypatch.setattr(contracts, "_admitted_artifact_evidence", lambda *args: [])
+    result = contracts._check_artifacts(contract, "a" * 64, tmp_path)
+    assert result["status"] == "FAIL" and result["failure_codes"] == ["artifact_hash_mismatch"]
+    # A change observed through the same handle still invalidates the digest.
+    calls = iter([fd_stat, SimpleNamespace(**{**fields, "st_ctime_ns": initial.st_ctime_ns + 2000},
+                                          st_birthtime_ns=birthtime)])
+    monkeypatch.setattr(contracts.os, "fstat", lambda fd: next(calls))
+    with pytest.raises(OSError, match="changed"):
+        contracts._artifact_hash(artifact)
+
+
+def test_hash_accepts_stable_rewritten_file(tmp_path):
+    artifact = tmp_path / "report.md"
+    artifact.write_bytes(b"before")
+    artifact.write_bytes(b"after")
+    assert contracts._artifact_hash(artifact) == hashlib.sha256(b"after").hexdigest()
 
 
 @pytest.mark.parametrize("initial,replacement,requirements,code", [
