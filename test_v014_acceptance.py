@@ -166,6 +166,33 @@ def test_backend_cannot_forge_validation_failure_classification():
     assert ap._observation_env(_node("a"), forged, "running", True)["delegation"]["validation_verdict"] == ""
 
 
+@pytest.mark.parametrize("requirements", [
+    {"min_bytes": 5}, {"max_bytes": 2},
+    {"sha256": hashlib.sha256(b"good").hexdigest()},
+])
+def test_bad_candidate_cannot_override_an_unreadable_workspace(tmp_path, monkeypatch, requirements):
+    workspaces = [tmp_path / "first", tmp_path / "second"]
+    for workspace in workspaces:
+        workspace.mkdir()
+        (workspace / "report.md").write_bytes(b"bad")
+    unreadable = workspaces[1] / "report.md"
+    path_stat = Path.stat
+
+    def observe(path, **kwargs):
+        if path == unreadable:
+            raise PermissionError("private unreadable candidate")
+        return path_stat(path, **kwargs)
+
+    contract = {"allowed_scope": {"workspaces": [str(p) for p in workspaces]}, "expected_artifacts": [
+        {"path": "report.md", "must_exist": True, "min_bytes": 1, **requirements}]}
+    monkeypatch.setattr(Path, "stat", observe)
+    monkeypatch.setattr(contracts, "_admitted_artifact_evidence", lambda *args: [])
+    result = contracts._check_artifacts(contract, "a" * 64, tmp_path)
+    assert result["status"] == "UNVERIFIED"
+    assert result["failure_codes"] == ["artifact_unreadable"]
+    assert "private unreadable" not in json.dumps(result)
+
+
 def test_pending_human_review_never_becomes_automatic_artifact_rework(env, monkeypatch):
     root, backend = env
     original = ap._build_contract

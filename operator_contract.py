@@ -927,7 +927,9 @@ def _check_artifacts(
             )
         else:
             missing.append(art["path"])
-            if unreadable and not (reasons - {"artifact_missing"}):
+            # Any workspace may contain the required artifact. A confirmed bad
+            # candidate cannot rule out a valid candidate we could not read.
+            if unreadable:
                 unverified = True
                 failure_codes.add("artifact_unreadable")
             else:
