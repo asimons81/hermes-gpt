@@ -148,7 +148,7 @@ def test_unreadable_artifact_remains_unverified_and_never_auto_redispatches(env,
     _tick(root)
     ap._write_run(MID, root, max_replans=1)
     _observe(root, backend.calls[0]["task_id"], state="completed", artifacts={"report.md": "ok"})
-    def denied(path):
+    def denied(path, **kwargs):
         raise PermissionError("do not persist this private error")
     monkeypatch.setattr(contracts, "_artifact_hash", denied)
     _tick(root)
@@ -275,6 +275,30 @@ def test_hash_rejects_rewrite_even_when_file_metadata_is_unchanged(tmp_path, mon
     monkeypatch.setattr(type(artifact), "stat", lambda path, **kwargs: initial if path == artifact else path_stat(path, **kwargs))
     with pytest.raises(OSError, match="changed"):
         contracts._artifact_hash(artifact)
+
+
+@pytest.mark.parametrize("initial,replacement,requirements,code", [
+    (b"old", b"new content", {"max_bytes": 5}, "artifact_too_large"),
+    (b"old content", b"new", {"min_bytes": 5}, "artifact_too_small"),
+])
+def test_size_and_digest_checks_cannot_accept_different_file_versions(tmp_path, monkeypatch, initial, replacement, requirements, code):
+    artifact = tmp_path / "report.md"
+    artifact.write_bytes(initial)
+    observed_hash = contracts._artifact_hash
+
+    def rewrite_before_hash(path, **kwargs):
+        artifact.write_bytes(replacement)
+        return observed_hash(path, **kwargs)
+
+    contract = {"allowed_scope": {"workspaces": [str(tmp_path)]}, "expected_artifacts": [
+        {"path": "report.md", "must_exist": True, "min_bytes": 1, **requirements,
+         "sha256": hashlib.sha256(replacement).hexdigest()}]}
+    monkeypatch.setattr(contracts, "_artifact_hash", rewrite_before_hash)
+    monkeypatch.setattr(contracts, "_admitted_artifact_evidence", lambda *args: [])
+    assert contracts._check_artifacts(contract, "a" * 64, tmp_path)["status"] == "UNVERIFIED"
+    # Once stable, the same file is a positively observed size defect.
+    result = contracts._check_artifacts(contract, "a" * 64, tmp_path)
+    assert result["status"] == "FAIL" and result["failure_codes"] == [code]
 
 
 def test_validation_projection_excludes_raw_details_and_unknown_fields():
