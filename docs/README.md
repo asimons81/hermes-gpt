@@ -27,7 +27,7 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | Document | Authority | Use it for |
 | --- | --- | --- |
 | [`../README.md`](../README.md) | current | project overview, current release, quickstart, safety invariants, entry-point selection |
-| [`runtime-checkout.md`](runtime-checkout.md) | host deployment provenance | which checkout the live `hermes-gpt-server.service` serves, and a caution that it is not the branch you happened to inspect |
+| [`runtime-checkout.md`](runtime-checkout.md) | host deployment provenance | verify running-service provenance separately from source/package state; earlier checkout pin is historical |
 | [`oauth.md`](oauth.md) | current | static bearer and confidential-client OAuth configuration, token lifecycle, refresh rotation, and remote authentication limits |
 | [`gemini-spark.md`](gemini-spark.md) | current | opt-in Gemini Spark client profile: dedicated-instance or additional-client setup, exact callback discovery, verification, and rollback |
 | [`mcp-compatibility.md`](mcp-compatibility.md) | current | SDK 1/2 support, protocol regression checks, transport matrix, trusted-client auth metadata |

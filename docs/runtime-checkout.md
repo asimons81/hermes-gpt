@@ -1,4 +1,16 @@
-# Live runtime checkout pin (host deployment provenance)
+# Runtime deployment provenance
+
+A Git checkout, a published package, and a running service are separate sources of state. Inspect the service's effective command and working directory, then verify its authenticated MCP `serverInfo.version`; a branch or package metadata alone does not prove what the live service serves.
+
+The v0.14.0 deployment was installed from the verified published wheel and accepted through an authenticated MCP handshake and read-only UI checks on October 3, 2026. This supersedes the checkout pin recorded below. Current installation and acceptance receipts remain in the deployment's local release records; re-verify the running service before making a later update claim. An installed-package service should resolve its modules from that package rather than an older checkout on `PYTHONPATH`.
+
+Never reset or discard a historical runtime checkout merely because the service now uses a package. Local working-tree changes and untracked operational artifacts still require independent review.
+
+## Historical checkout snapshot — September 5, 2026
+
+**Historical only:** the paths, dependency family, branch, commit, start time, and working-tree inventory below describe the earlier deployment. They are not the current live-service pin.
+
+### Earlier live runtime checkout pin
 
 This note records **which checkout the live `hermes-gpt-server.service` actually
 serves**, so agents do not assume the live surface equals the branch they happened
