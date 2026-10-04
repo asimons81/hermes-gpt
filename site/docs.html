@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hermes GPT Docs | v0.14.0</title>
+  <meta name="description" content="Set up Hermes GPT v0.14.0, declare deliverable acceptance, supervise bounded recovery, and understand authentication and Owner approval gates.">
+  <meta name="theme-color" content="#030303">
+  <meta property="og:title" content="Hermes GPT Docs | v0.14.0">
+  <meta property="og:description" content="Canonical setup, acceptance, recovery, and safety guides for Hermes GPT v0.14.0.">
+  <meta property="og:image" content="https://hermes-gpt.tonysimons.dev/assets/hermes-gpt-v0.14.0-readme-hero.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Hermes GPT Docs | v0.14.0">
+  <meta name="twitter:description" content="Hermes GPT v0.14.0 documentation: setup, declared acceptance, bounded recovery, and Owner approval.">
+  <meta name="twitter:image" content="https://hermes-gpt.tonysimons.dev/assets/hermes-gpt-v0.14.0-readme-hero.jpg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="canonical" href="https://hermes-gpt.tonysimons.dev/docs.html">
+</head>
+<body>
+  <div class="toast" role="alert" aria-live="polite"></div>
+  <main class="page" id="top">
+    <header class="topbar reveal">
+      <a class="brand" href="./index.html" aria-label="Hermes GPT Home"><span class="brand-mark" aria-hidden="true">HG</span><span class="brand-copy"><strong>Hermes GPT</strong><small>v0.14.0 Docs</small></span></a>
+      <nav class="topnav" aria-label="Documentation navigation"><a href="./index.html">Home</a><a href="#setup">Setup</a><a href="#acceptance">Acceptance</a><a href="#safety">Safety</a></nav>
+      <a class="ghost-link" href="https://github.com/asimons81/hermes-gpt/blob/master/docs/README.md">All guides</a>
+    </header>
+    <section class="section section-pad reveal">
+      <div class="section-head"><p class="eyebrow">Documentation &bull; v0.14.0</p><h1>Work with evidence. <span>Keep approval in human hands.</span></h1><p>Install Hermes GPT, connect a trusted client, and supervise Mission work through declared checks and bounded recovery. These links open the canonical repository guides, which stay the source of truth for current behavior.</p></div>
+      <div class="cta-row"><a class="button button-primary" href="https://github.com/asimons81/hermes-gpt/blob/master/README.md#local-quickstart">Start with the quickstart</a><a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0">v0.14.0 release</a></div>
+    </section>
+    <section class="section reveal" id="setup"><div class="section-head"><h2>Get connected</h2></div><div class="bento-grid">
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/README.md#local-quickstart">Install and update</a></h3><p>Python 3.10+. Install hermes-gpt from PyPI; verify GitHub and PyPI independently when updating.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/openai-secure-mcp-tunnel.md">Private OpenAI access</a></h3><p>Use the outbound-only private tunnel path to reach loopback Hermes GPT from supported OpenAI products.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/codex.md">Codex as a client</a></h3><p>Configure Codex to use Hermes GPT. Client setup and delegated Codex CLI execution have separate authority gates.</p></article>
+    </div></section>
+    <section class="section reveal" id="acceptance"><div class="section-head"><h2>Declare, observe, recover</h2></div><div class="bento-grid">
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/autopilot.md#declared-deliverable-acceptance-v014">Autopilot and acceptance</a></h3><p>Declare artifact minimum/maximum sizes and optional expected SHA-256 values before dispatch. Requirements survive bounded rework unchanged.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/delegations.md">Delivery grace and recovery</a></h3><p>Confirmed artifact failures after successful execution get a durable 30-second grace. Recovery proceeds within existing bounds only when every other required check passes.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/flight-deck-missions.md">Flight Deck supervision</a></h3><p>Read-only completion checks, fixed failure reasons, delivery grace, and pending validation. Changing or unreadable evidence remains unverified.</p></article>
+    </div></section>
+    <section class="section reveal" id="safety"><div class="section-head"><h2>Understand the boundaries</h2></div><div class="bento-grid">
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/operator-mode.md">Operator and Owner policy</a></h3><p>Default read-only behavior, dry-run-first mutations, explicit authority, and secret-path protections. Autopilot remains default off.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/missions.md">Missions and approval</a></h3><p>Autopilot stops at approval frontiers. Final Mission approval remains Owner-only; size and integrity checks do not judge semantic quality.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/oauth.md">Authentication and compatibility</a></h3><p>Configure bearer or OAuth authentication for trusted clients. Public unauthenticated Operator hosting is unsupported.</p></article>
+    </div></section>
+    <footer class="footer reveal"><div><strong>HG Hermes GPT</strong><p>Current guides live in the repository. Historical design documents record intent; current code and operational guides define behavior.</p></div><div><a href="./index.html">Home</a> <a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/README.md">Documentation map</a></div></footer>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>
