@@ -25,6 +25,7 @@ include docs/flight-deck-coverage.md
 include docs/gemini-spark.md
 include docs/autopilot.md
 include docs/release-notes-v0.13.0.md
+include docs/release-notes-v0.14.0.md
 recursive-include web/dist *.html *.js *.css
 recursive-include examples *.ps1
 prune docs/design

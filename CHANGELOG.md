@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0 - 2026-10-03
+
+Acceptance and recovery: declare deliverable checks before dispatch and recover from positively observed artifact failures within existing limits.
+
+- MissionPlan nodes can specify optional `artifact_requirements` for existing artifact basenames: positive `min_bytes`, optional `max_bytes`, and optional lowercase `sha256`. Requirements participate in the node signature, survive bounded rework unchanged, and flow into each attempt's Work Contract. Existing nodes/contracts retain their prior canonical hashes when optional fields are absent.
+- Work Contracts enforce size bounds and expected hashes against local files or contract-bound coordinator-verified remote artifact metadata. Local hash reads are binary, bounded to 8 MiB, reject changing/nonregular files, and fail closed on unreadable evidence.
+- Delegations persist bounded validation check enums and a restart-safe 30-second artifact delivery grace. Successful execution with confirmed bad artifacts and all other required checks passing becomes `failed` with outcome `validation_failed` after grace; Autopilot can use its existing bounded semantic replan path. Missing run observations, pending review, denied authority, cancellation ambiguity, and unreadable artifacts never trigger this recovery.
+- Flight Deck explains per-attempt completion checks, artifact failure reasons, delivery grace, and pending validation without adding browser mutation actions. Completed/failed task evidence stays visible when its current lineage can be resolved.
+- No new MCP tools, no default gate changes, and no approval bypass. Autopilot remains default off and final Mission approval remains Owner-only.
+
 ## 0.13.0 - 2026-10-03
 
 - Release hardening: enforce required nonempty node artifacts in isolated attempt workspaces; prevent plan replacement from orphaning unfinished work; preserve bounded, classifier-approved recovery during independent Mission reconciliation without hiding failed evidence.

@@ -47,6 +47,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -83,6 +84,7 @@ _MAX_SCOPE_PROFILES = 16
 _MAX_REVIEW_EVIDENCE_SCAN = 500
 _MAX_CAPABILITY_SKILLS = 32
 _MAX_SKILL_NAME = 128
+MAX_ARTIFACT_HASH_BYTES = 8 * 1024 * 1024
 
 _VERDICT_SATISFIED = "SATISFIED"
 _VERDICT_NOT_SATISFIED = "NOT_SATISFIED"
@@ -298,6 +300,22 @@ def _resolve_artifact_paths(path: str, workspaces: list[Path]) -> list[Path]:
     return resolved
 
 
+def artifact_constraints(item: dict[str, Any], min_bytes: int) -> dict[str, Any]:
+    """Optional deterministic acceptance checks; absent fields preserve old hashes."""
+    out: dict[str, Any] = {}
+    if "max_bytes" in item:
+        maximum = item["max_bytes"]
+        if isinstance(maximum, bool) or not isinstance(maximum, int) or not min_bytes <= maximum <= 2**63 - 1:
+            raise ValueError("max_bytes must be an integer >= min_bytes and <= 2**63-1")
+        out["max_bytes"] = maximum
+    if "sha256" in item:
+        digest = item["sha256"]
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("artifact sha256 must be lowercase SHA-256")
+        out["sha256"] = digest
+    return out
+
+
 def _artifact_list(value: Any, workspaces: list[Path]) -> list[dict[str, Any]]:
     if not isinstance(value, list) or len(value) > _MAX_ARTIFACTS:
         raise ValueError(f"expected_artifacts must be a list (<= {_MAX_ARTIFACTS})")
@@ -311,7 +329,8 @@ def _artifact_list(value: Any, workspaces: list[Path]) -> list[dict[str, Any]]:
         min_bytes = int(item.get("min_bytes", 0))
         if min_bytes < 0:
             raise ValueError("min_bytes must be >= 0")
-        out.append({"path": path, "must_exist": must_exist, "min_bytes": min_bytes})
+        out.append({"path": path, "must_exist": must_exist, "min_bytes": min_bytes,
+                    **artifact_constraints(item, min_bytes)})
     return out
 
 
@@ -596,6 +615,7 @@ def _surface_contract(contract: dict[str, Any]) -> dict[str, Any]:
             "path": a["path"],
             "must_exist": a["must_exist"],
             "min_bytes": a["min_bytes"],
+            **{key: a[key] for key in ("max_bytes", "sha256") if key in a},
         }
         for a in contract.get("expected_artifacts", [])
     ]
@@ -780,6 +800,45 @@ def _admitted_artifact_evidence(
     return [item for item in value if isinstance(item, dict)]
 
 
+def _artifact_hash(path: Path) -> str:
+    """Bounded observed hash; reject nonfiles, sharing failures and changing bytes."""
+    def identity(s):
+        return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+
+    def observe():
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_ARTIFACT_HASH_BYTES:
+                raise OSError("artifact cannot be hashed within the verification limit")
+            digest = hashlib.sha256()
+            size = 0
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_ARTIFACT_HASH_BYTES:
+                    raise OSError("artifact exceeded the verification limit")
+                digest.update(chunk)
+            after = os.fstat(fd)
+            if identity(before) != identity(after) or size != after.st_size:
+                raise OSError("artifact changed during verification")
+        finally:
+            os.close(fd)
+        if identity(after) != identity(path.stat()):
+            raise OSError("artifact changed during verification")
+        return digest.hexdigest(), identity(after)
+
+    # Windows may defer write timestamps until outstanding handles close. A
+    # fresh bounded content observation detects rewrites that metadata misses.
+    first = observe()
+    second = observe()
+    if first != second:
+        raise OSError("artifact changed during verification")
+    return second[0]
+
+
 def _check_artifacts(
     contract: dict[str, Any],
     contract_sha256: str,
@@ -800,6 +859,8 @@ def _check_artifacts(
             admitted_by_name.setdefault(name, []).append(item)
 
     missing: list[str] = []
+    failure_codes: set[str] = set()
+    unverified = False
     evidence: list[dict[str, Any]] = []
     for art in artifacts:
         if not art["must_exist"]:
@@ -809,17 +870,38 @@ def _check_artifacts(
             candidates = _resolve_artifact_paths(art["path"], workspaces)
         except (ValueError, PermissionError):
             missing.append(art["path"])
+            unverified = True
+            failure_codes.add("artifact_unreadable")
             continue
         found = None
+        digest = ""
+        reasons: set[str] = set()
+        unreadable = False
         for cand in candidates:
             try:
-                if cand.is_file() and cand.stat().st_size >= art["min_bytes"]:
-                    found = cand
-                    break
+                info = cand.stat()
+                if not stat.S_ISREG(info.st_mode):
+                    reasons.add("artifact_not_file")
+                    continue
+                if info.st_size < art["min_bytes"]:
+                    reasons.add("artifact_too_small")
+                    continue
+                if "max_bytes" in art and info.st_size > art["max_bytes"]:
+                    reasons.add("artifact_too_large")
+                    continue
+                digest = _artifact_hash(cand) if art.get("sha256") else ""
+                if art.get("sha256") and digest != art["sha256"]:
+                    reasons.add("artifact_hash_mismatch")
+                    continue
+                found = cand
+                break
+            except FileNotFoundError:
+                reasons.add("artifact_missing")
             except OSError:
-                continue
+                unreadable = True
         if found is not None:
-            evidence.append({"basename": found.name, "size": found.stat().st_size})
+            evidence.append({"basename": found.name, "size": info.st_size,
+                             **({"sha256": digest} if digest else {})})
             continue
 
         remote = next(
@@ -828,6 +910,8 @@ def _check_artifacts(
                 for item in admitted_by_name.get(art["path"], [])
                 if isinstance(item.get("size_bytes"), int)
                 and item["size_bytes"] >= art["min_bytes"]
+                and ("max_bytes" not in art or item["size_bytes"] <= art["max_bytes"])
+                and ("sha256" not in art or item.get("sha256") == art["sha256"])
                 and item.get("provenance") == "coordinator_verified_artifact"
             ),
             None,
@@ -843,12 +927,23 @@ def _check_artifacts(
             )
         else:
             missing.append(art["path"])
+            # Any workspace may contain the required artifact. A confirmed bad
+            # candidate cannot rule out a valid candidate we could not read.
+            if unreadable:
+                unverified = True
+                failure_codes.add("artifact_unreadable")
+            else:
+                remote_items = admitted_by_name.get(art["path"], [])
+                if remote_items:
+                    reasons.add("artifact_remote_mismatch")
+                failure_codes.update(reasons or {"artifact_missing"})
     if missing:
         return {
             "kind": "artifacts",
-            "status": "FAIL",
+            "status": "UNVERIFIED" if unverified else "FAIL",
             "detail": f"missing artifacts: {', '.join(missing)}",
             "evidence": evidence,
+            "failure_codes": sorted(failure_codes),
         }
     return {
         "kind": "artifacts",
@@ -1457,6 +1552,7 @@ def _validate_impl(contract: dict[str, Any], sha: str, runner: Callable[..., tup
                 "kind": c["kind"],
                 "status": c["status"],
                 "detail": c.get("detail", ""),
+                **({"failure_codes": c["failure_codes"]} if "failure_codes" in c else {}),
             }
             for c in checks
         ],

@@ -3,6 +3,7 @@ import { ApiError, api } from '../api/client';
 import { EmptyState, ErrorState, LoadingState, PanelCard, StatusChip, safeText } from './ui';
 
 interface Attention { code: string; severity?: string; nodes?: string[] }
+interface Validation { verdict?: string; checks?: Array<{ kind: string; status: string; failure_codes?: string[] }> }
 interface AutopilotView {
   found: boolean;
   effective_state?: string;
@@ -15,7 +16,8 @@ interface AutopilotView {
     budget?: { configured?: boolean; error?: boolean; status?: string; spend?: number; quota?: number; unit?: string };
     recovery?: { retries?: number; replans_used?: number; max_replans?: number; failed_nodes?: string[] };
     limits?: { runtime_remaining_seconds?: number; max_concurrency?: number };
-    workers?: Array<{ node_id: string; state?: string; delegation_state?: string; attempt?: number }>;
+    workers?: Array<{ node_id: string; state?: string; delegation_state?: string; attempt?: number;
+      validation?: Validation; validation_failure_since?: string }>;
     attention?: Attention[];
   };
 }
@@ -29,7 +31,14 @@ const ATTENTION: Record<string, string> = {
   budget_check_failed: 'The budget is unavailable. New work is on hold.',
   runtime_exceeded: 'The runtime limit was reached. New work has stopped.',
   worker_silent: 'The worker has not reported recently. Check its status.',
+  validation_pending: 'Execution finished but completion evidence is not yet verified. Check the task’s acceptance results.',
 };
+const CHECKS: Record<string, string> = { run_state: 'Execution', artifacts: 'Deliverables', tests: 'Tests',
+  review: 'Review', forbidden: 'Scope', authorization: 'Authorization' };
+const ARTIFACT_REASONS: Record<string, string> = { artifact_missing: 'Required file missing',
+  artifact_too_small: 'File below minimum size', artifact_too_large: 'File exceeds maximum size',
+  artifact_hash_mismatch: 'Content hash differs from requirement', artifact_remote_mismatch: 'Remote artifact differs from requirement',
+  artifact_not_file: 'Deliverable is not a regular file', artifact_unreadable: 'File cannot be verified' };
 
 export function AutopilotPanel({ missionId, revision }: { missionId: string; revision?: number }) {
   const [view, setView] = useState<AutopilotView | null>(null);
@@ -96,6 +105,15 @@ export function AutopilotPanel({ missionId, revision }: { missionId: string; rev
       </li>)}</ul></div> : null}
       {summary?.workers?.length ? <ul className="fd-list">{summary.workers.map((worker) => <li className="fd-list-item" key={worker.node_id}>
         <div className="fd-row"><strong>{safeText(worker.node_id, 64)}</strong><span>{safeText(worker.state || 'unknown', 40)}</span><span>attempt {(worker.attempt ?? 0) + 1}</span><span>execution {safeText(worker.delegation_state || 'unverified', 40)}</span></div>
+        {worker.validation?.verdict ? <div aria-label={`Acceptance checks for ${safeText(worker.node_id, 64)}`}>
+          <p>{worker.validation.verdict === 'SATISFIED' ? 'Completion checks passed' : 'Completion remains unverified'}</p>
+          <ul>{worker.validation.checks?.map((check) => <li key={check.kind}>
+            {CHECKS[check.kind] || safeText(check.kind, 32)}: {check.status === 'PASS' ? 'Passed' : check.status === 'FAIL' ? 'Failed' : 'Unverified'}
+            {check.failure_codes?.length ? ` — ${check.failure_codes.map((code) => ARTIFACT_REASONS[code] || safeText(code, 64)).join('; ')}` : ''}
+          </li>)}</ul>
+          {worker.validation_failure_since && worker.delegation_state === 'reconciling'
+            ? <p className="fd-hint">Delivery grace period: a confirmed artifact failure enters bounded recovery after 30 seconds.</p> : null}
+        </div> : <p className="fd-hint">Acceptance evidence unavailable.</p>}
       </li>)}</ul> : null}
       <p className="fd-hint">Approvals, budget changes, and recovery actions use the existing Operator tools. Final Mission approval requires Owner mode.</p>
     </> : null}

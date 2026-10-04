@@ -9,8 +9,8 @@
 
 ## Current status
 
-- **Repository version:** 0.13.0
-- **GitHub release target:** v0.13.0
+- **Repository version:** 0.14.0
+- **GitHub release target:** v0.14.0
 - **Latest PyPI release:** check the badge above; PyPI is published independently from GitHub
 - **Python requirement:** 3.10+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
@@ -21,6 +21,16 @@
 > GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Do not assume a PyPI install contains v0.13 (Autopilot) features unless the badge reports 0.13.0 or newer, or v0.12 features unless it reports 0.12.0 or newer.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.14.0 adds
+
+**Acceptance and recovery** strengthens Autopilot's completion checks and handles confirmed deliverable failures after successful execution.
+
+1. **Declare checks before dispatch.** Optional node `artifact_requirements` set minimum/maximum file sizes and expected SHA-256 values. Each attempt's immutable Work Contract carries these checks, and rework preserves them.
+2. **Recover confirmed failures.** Successfully executed work with bad required artifacts gets a durable 30-second delivery grace. If the artifacts still fail and every other required check passes, the delegation fails with `validation_failed`; Autopilot can use its existing bounded semantic replan. Unreadable evidence, pending review, and ambiguous execution never trigger automatic redispatch.
+3. **Explain completion.** Flight Deck shows check results, fixed artifact failure reasons, delivery grace, and unverified evidence through its read-only supervision panel. No new tools or browser mutation controls are introduced.
+
+Size and digest checks prove the declared requirements; semantic quality still requires review. Autopilot remains default off and final Mission approval remains Owner-only. See [v0.14 release notes](docs/release-notes-v0.14.0.md) and [Autopilot](docs/autopilot.md). Verify PyPI separately before relying on v0.14 features in an installed package.
 
 ## What v0.13.0 adds
 
