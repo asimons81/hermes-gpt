@@ -40,6 +40,9 @@ from typing import Any
 import operator_policy as op
 
 
+OPERATOR_FILE_BACKUPS_ENV = "HERMES_GPT_OPERATOR_FILE_BACKUPS"
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -54,6 +57,9 @@ def _atomic_write_text(path: Path, content: str) -> None:
 
 
 def _backup_file(path: Path) -> Path | None:
+    raw = os.environ.get(OPERATOR_FILE_BACKUPS_ENV)
+    if raw is not None and not op.is_truthy(raw):
+        return None
     if not path.exists():
         return None
     ts = time.strftime("%Y%m%d-%H%M%S")

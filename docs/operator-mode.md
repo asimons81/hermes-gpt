@@ -126,6 +126,12 @@ Tools that create or dispatch external work also require `confirm=true` when the
 
 A refusal caused by a missing gate is expected behavior, not a failure to execute the request.
 
+### Optional file backups
+
+`hermes_workspace_patch`, `hermes_workspace_write_file`, `hermes_owner_patch`, and `hermes_owner_write_file` create timestamped sibling backups (`<name>.bak.<timestamp>`) before replacing an existing file. This remains enabled by default.
+
+Set `HERMES_GPT_OPERATOR_FILE_BACKUPS=0` (or another recognized false value such as `false`, `off`, or `disabled`) to skip those backup copies when the target workspace already has an appropriate version-control or rollback strategy. Disabling backups does **not** change Operator authorization, dry-run/confirmation gates, denied-path policy, or atomic replace writes; successful tool results report `"backup": null` when no copy is created.
+
 ## Mission Control
 
 Mission Control is the read-only `hermes_mission_*` operational view of the Hermes deployment.
