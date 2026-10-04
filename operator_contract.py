@@ -48,6 +48,7 @@ import json
 import os
 import re
 import stat
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -800,8 +801,13 @@ def _admitted_artifact_evidence(
     return [item for item in value if isinstance(item, dict)]
 
 
-def _artifact_identity(s: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+def _artifact_identity(s: os.stat_result, *, cross_api: bool = False) -> tuple[int, int, int, int, int]:
+    # CPython on Windows can expose creation time through stat() and change
+    # time through fstat(). Compare birth time across those APIs when available;
+    # retain ctime for observations made through the same API.
+    timestamp = (getattr(s, "st_birthtime_ns", 0)
+                 if cross_api and sys.platform == "win32" else s.st_ctime_ns)
+    return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, timestamp)
 
 
 def _artifact_hash(path: Path, *, min_bytes: int = 0, max_bytes: int | None = None) -> str:
@@ -829,7 +835,7 @@ def _artifact_hash(path: Path, *, min_bytes: int = 0, max_bytes: int | None = No
                 raise OSError("artifact changed during verification")
         finally:
             os.close(fd)
-        if _artifact_identity(after) != _artifact_identity(path.stat()):
+        if _artifact_identity(after, cross_api=True) != _artifact_identity(path.stat(), cross_api=True):
             raise OSError("artifact changed during verification")
         return digest.hexdigest(), _artifact_identity(after)
 
