@@ -800,17 +800,20 @@ def _admitted_artifact_evidence(
     return [item for item in value if isinstance(item, dict)]
 
 
-def _artifact_hash(path: Path) -> str:
-    """Bounded observed hash; reject nonfiles, sharing failures and changing bytes."""
-    def identity(s):
-        return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+def _artifact_identity(s: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
 
+
+def _artifact_hash(path: Path, *, min_bytes: int = 0, max_bytes: int | None = None) -> str:
+    """Bounded observed hash; reject nonfiles, sharing failures and changing bytes."""
     def observe():
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
         try:
             before = os.fstat(fd)
             if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_ARTIFACT_HASH_BYTES:
                 raise OSError("artifact cannot be hashed within the verification limit")
+            if before.st_size < min_bytes or (max_bytes is not None and before.st_size > max_bytes):
+                raise OSError("artifact size changed during verification")
             digest = hashlib.sha256()
             size = 0
             while True:
@@ -822,13 +825,13 @@ def _artifact_hash(path: Path) -> str:
                     raise OSError("artifact exceeded the verification limit")
                 digest.update(chunk)
             after = os.fstat(fd)
-            if identity(before) != identity(after) or size != after.st_size:
+            if _artifact_identity(before) != _artifact_identity(after) or size != after.st_size:
                 raise OSError("artifact changed during verification")
         finally:
             os.close(fd)
-        if identity(after) != identity(path.stat()):
+        if _artifact_identity(after) != _artifact_identity(path.stat()):
             raise OSError("artifact changed during verification")
-        return digest.hexdigest(), identity(after)
+        return digest.hexdigest(), _artifact_identity(after)
 
     # Windows may defer write timestamps until outstanding handles close. A
     # fresh bounded content observation detects rewrites that metadata misses.
@@ -889,7 +892,9 @@ def _check_artifacts(
                 if "max_bytes" in art and info.st_size > art["max_bytes"]:
                     reasons.add("artifact_too_large")
                     continue
-                digest = _artifact_hash(cand) if art.get("sha256") else ""
+                digest = _artifact_hash(cand, min_bytes=art["min_bytes"], max_bytes=art.get("max_bytes")) if art.get("sha256") else ""
+                if art.get("sha256") and _artifact_identity(info) != _artifact_identity(cand.stat()):
+                    raise OSError("artifact changed between size and digest verification")
                 if art.get("sha256") and digest != art["sha256"]:
                     reasons.add("artifact_hash_mismatch")
                     continue
