@@ -1162,9 +1162,22 @@ def hermes_delegation_reconcile(
             outcome = ""
             dispatch_phase = "reserved"
         elif observed is None:
-            observed_desired = "reconciling" if stored["state"] not in TERMINAL_STATES else stored["state"]
-            backend_state = "unobserved"
-            outcome = stored.get("outcome") or ""
+            # Item 252 (2026-10-11): a row already recovered to PURE reserved
+            # (state=reserved, phase=reserved, zero observations) is the
+            # legitimate pre-invocation resting state the dispatch CAS claims
+            # from — flipping it back to 'reconciling' on every reconcile made
+            # the stale-invocation recovery self-erasing (live oscillation
+            # observed on dlg-c51c61e4: recover -> re-freeze, twice). Only a
+            # row whose invocation MIGHT have reached a backend (invoking
+            # phase, or already-reconciling state) stays reconciling.
+            if stored["state"] == "reserved" and str(stored.get("dispatch_phase") or "") == "reserved":
+                observed_desired = "reserved"
+                backend_state = "not_invoked"
+                outcome = ""
+            else:
+                observed_desired = "reconciling" if stored["state"] not in TERMINAL_STATES else stored["state"]
+                backend_state = "unobserved"
+                outcome = stored.get("outcome") or ""
         else:
             backend_state = str(observed.get("status") or observed.get("state") or observed.get("outcome") or "unknown")
             outcome = str(observed.get("outcome") or observed.get("state") or backend_state)
@@ -1221,8 +1234,10 @@ def hermes_delegation_reconcile(
         elif observed is None or (observed_desired == "succeeded" and verdict != "SATISFIED"):
             # Item 252: a stale-invocation row already chose its desired state
             # above (pure reserved — re-drivable); only a row whose invocation
-            # MIGHT have reached a backend stays reconciling.
-            if not (stale_invocation and observed_desired == "reserved"):
+            # MIGHT have reached a backend stays reconciling. A row ALREADY at
+            # pure reserved (the recovered resting state) keeps it — see the
+            # observed-is-None branch above (self-erasing-recovery fix).
+            if not (stale_invocation and observed_desired == "reserved") and observed_desired != "reserved":
                 desired = "reconciling"
         # A successful backend with positively observed bad artifacts is a work
         # defect, not an ambiguous submission. Allow a durable 30s delivery grace,
@@ -1361,6 +1376,25 @@ def hermes_delegation_reconcile(
         mission_synced = True
         if row.get("mission_id"):
             evidence_ref = f"contract:{row['contract_sha256']}" if verified_success else f"delegation:{delegation_id}"
+            if not verified_success:
+                # Item 252 (2026-10-11): a pending/blocked sync must never
+                # clobber the dispatch reservation's evidence_ref — the
+                # reservation bridge (reserve_delegation_attachment) rejects
+                # any re-drive whose evidence_ref differs, so rewriting
+                # 'contract:<sha>' to 'delegation:<id>' on every reconcile
+                # poisoned the row against its own retry (live: re-drive of
+                # dlg-c51c61e4 refused with 'Mission delegation reservation
+                # was rejected'). Preserve a non-empty existing reservation.
+                try:
+                    with mission_runtime._connect(mission_runtime._db_path(root), write=False) as mdb:
+                        att = mdb.execute(
+                            "SELECT evidence_ref FROM attachments WHERE mission_id=? AND kind='delegation' AND ref=?",
+                            (row["mission_id"], delegation_id),
+                        ).fetchone()
+                    if att is not None and str(att[0] or "").startswith("contract:"):
+                        evidence_ref = str(att[0])
+                except (OSError, sqlite3.Error):
+                    pass  # read-only probe; the write below stays authoritative
             mission_synced = _sync_mission_attachment(
                 row,
                 _mission_state(desired),

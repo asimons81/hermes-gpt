@@ -111,6 +111,10 @@ MIN_IDLE_POLL_SECONDS = 0.5
 MAX_IDLE_POLL_SECONDS = 60.0
 # Never tick faster than this, whatever the event rate (flood / self-echo guard).
 MIN_TICK_INTERVAL_SECONDS = 0.25
+# Item 252: how long a possibly-submitted-but-unobserved dispatch stays held
+# before its ambiguity is considered STALE (a landed submission would have
+# been observed). Deliberately long: double execution is worse than latency.
+AMBIGUOUS_GRACE_SECONDS = 30 * 60
 # Longest single block inside the wait; a cancel is noticed between slices.
 WAIT_SLICE_SECONDS = 1.0
 IS_WINDOWS = os.name == "nt"
@@ -930,6 +934,90 @@ def _task_id(mission_id: str, node_id: str, key: str) -> str:
     return f"ap-{mission_id[:40]}-{node_id[:32]}-{key[:16]}"
 
 
+def _invocation_possibly_submitted(delegation_id: str, hermes_root: Path | None) -> bool:
+    """True when a backend submission may have STARTED for this delegation.
+
+    Item 252 double-execution guard. ``delegation.dispatched`` and
+    ``delegation.dispatch_ambiguous`` events are written only after (or at)
+    the backend call; their presence means the invocation possibly landed, so
+    a re-drive must wait until the ambiguity is STALE — zero observations
+    persisted past the grace window (a submission that landed would have been
+    observed). A row with no such event provably never invoked (crash before
+    the backend call — the reconciling/reserved shape) and is safe to
+    re-drive immediately.
+    """
+    dbp = deleg._db_path(hermes_root)
+    if not dbp.is_file():
+        return False
+    try:
+        with deleg._connect(dbp, write=False) as db:
+            rows = db.execute(
+                "SELECT created_at FROM delegation_events WHERE delegation_id=? "
+                "AND event_type IN ('delegation.dispatched','delegation.dispatch_ambiguous')",
+                (delegation_id,),
+            ).fetchall()
+    except (sqlite3.Error, OSError):
+        return True  # unreadable history: fail closed, hold the node
+    if not rows:
+        return False  # the invocation provably never started
+    first = str(rows[0]["created_at"] or "")
+    try:
+        started = datetime.fromisoformat(first)
+    except (ValueError, TypeError):
+        return True  # unparseable timestamp: fail closed
+    age = (datetime.now(timezone.utc) - started).total_seconds()
+    return age < AMBIGUOUS_GRACE_SECONDS
+
+
+def _rebuild_dispatch_contract(
+    mission_id: str, node: dict[str, Any], key: str, hermes_root: Path | None,
+    recovery: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Rebuild the EXACT dispatch contract for a never-invoked delegation retry.
+
+    Item 252 (2026-10-11): re-driving a dispatch whose submission died before
+    invoking requires the original Work Contract document. The validation
+    manifest carries the canonical contract minus the fields the plan store
+    keeps private (INV-9: objective is hashed there) — those are rebuilt
+    deterministically from the node and the idempotency key, exactly as
+    ``_build_contract`` derived them. Returns None when the manifest cannot be
+    read or the rebuilt document does not canonicalize to the stored lineage
+    digest (fail closed: never re-drive under a different contract).
+    """
+    node_id = node["node_id"]
+    attempt = int(node.get("retries", 0) or 0)
+    task_id = _task_id(mission_id, node_id, key)
+    delegation_id = _delegation_id(key)
+    dbp = deleg._db_path(hermes_root)
+    if not dbp.is_file():
+        return None
+    try:
+        with deleg._connect(dbp, write=False) as db:
+            manifest = deleg._manifest_row(db, delegation_id)
+            row = deleg._get_row(db, delegation_id)
+    except (sqlite3.Error, OSError, LookupError, KeyError):
+        return None
+    if manifest is None or row["task_id"] != task_id:
+        return None
+    try:
+        ctx, _manifest_sha = deleg.contract_mod._contract_from_validation_manifest(manifest)
+    except (ValueError, PermissionError, LookupError):
+        return None
+    contract = dict(ctx)
+    contract["schema"] = deleg.contract_mod.CONTRACT_SCHEMA
+    contract["objective"] = (
+        f"autopilot dispatch: mission={mission_id} node={node_id} attempt={attempt}"
+    )
+    try:
+        canonical, parsed = deleg.contract_mod._canonical_contract(contract)
+    except (ValueError, PermissionError, TypeError):
+        return None
+    import hashlib as _hashlib
+    if _hashlib.sha256(canonical.encode("utf-8")).hexdigest() != row["contract_sha256"]:
+        return None  # lineage mismatch: fail closed
+    return parsed
+
+
 def _delegation_id(key: str) -> str:
     """Deterministic delegation id.
 
@@ -1199,8 +1287,56 @@ def _advance_one(
     key = dispatch_key(mission_id, plan_version, node_id, int(node.get("retries", 0) or 0),
                        str(node.get("contract_sha256", "")))
     existing = _existing_delegation(mission_id, node_id, _task_id(mission_id, node_id, key), hermes_root)
-    if existing is None or not _reached_backend(existing):
+    if existing is None:
         return "held", "no_delegation"
+    if not _reached_backend(existing):
+        # Item 252 (2026-10-11): a dispatched node whose delegation never
+        # reached a backend (dispatch_phase 'reserved' — the submission died
+        # ambiguously before invoking, e.g. a restarting fleet unit) wedged
+        # forever: this gate returned 'no_delegation' BEFORE the reconcile
+        # call below, so the stale-invocation recovery in
+        # hermes_delegation_reconcile (which resets the row to pure reserved)
+        # was unreachable from the worker, and a 'dispatched' node is never a
+        # dispatch candidate again. Recover here: reconcile first (post item
+        # 252 it resets the never-invoked row to reserved/reserved), then
+        # re-drive the SAME deterministic delegation id through the L2
+        # authority surface — the exact retry the idempotency key exists for.
+        rec = json.loads(deleg.hermes_delegation_reconcile(
+            existing["delegation_id"], apply=True, hermes_root=hermes_root))
+        if not rec.get("success"):
+            return "held", "reconcile_failed"
+        rrow = rec.get("delegation") or {}
+        if rrow.get("state") == "cancelled":
+            return _walk_to_failed(mission_id, node_id, plan_version, hermes_root, "cancelled")
+        if rrow.get("state") != "reserved" or rrow.get("dispatch_phase") != "reserved":
+            # Still not re-drivable (e.g. an observation appeared); fall
+            # through to the normal observe path below via a fresh read.
+            existing = _existing_delegation(mission_id, node_id, _task_id(mission_id, node_id, key), hermes_root)
+            if existing is None or not _reached_backend(existing):
+                return "held", "no_delegation"
+        else:
+            # Item 252 double-execution guard: re-driving is safe only when the
+            # backend was provably never called (no dispatched/ambiguous
+            # events — a crash before the invocation), or when the ambiguity
+            # is STALE: zero observations persisted past the grace window, so
+            # a submission that actually landed would have been observed (the
+            # sibling invariant `never redispatch ambiguous` holds for FRESH
+            # ambiguity — see
+            # test_backend_ambiguous_result_is_in_flight_and_never_redispatched).
+            if _invocation_possibly_submitted(existing["delegation_id"], hermes_root):
+                return "held", "ambiguous_dispatch_grace"
+            contract_doc = _rebuild_dispatch_contract(mission_id, node, key, hermes_root, recovery)
+            if contract_doc is None:
+                return "held", "contract_unavailable"
+            executed, result, reason, _linkage = controller._l2_dispatch(
+                contract_doc, mission_id, hermes_root,
+                delegation_id=existing["delegation_id"],
+            )
+            if not executed and reason == "ambiguous":
+                return "held", "ambiguous_dispatch"  # row exists; next tick reconciles it
+            if not executed:
+                return "held", (reason or "re-drive refused") + ":re-drive"
+            return "dispatched", existing["delegation_id"] + ":re-driven"
 
     result = json.loads(deleg.hermes_delegation_reconcile(existing["delegation_id"], apply=True, hermes_root=hermes_root))
     if not result.get("success"):
@@ -1828,6 +1964,23 @@ def _schedule_locked(
             if summary["mission_status"] == "awaiting_approval":
                 summary["frontier"] = _frontier_view(final, "awaiting_approval")
             summary["mission_reconciled"] = bool(reconciled.get("success"))
+        elif remaining and all(n["state"] in ("completed", "failed", "cancelled", "skipped") for n in remaining):
+            # Item 252 (2026-10-11): a mission whose nodes are ALL terminal but
+            # NOT all completed (failed-only, e.g. a cancelled never-invoked
+            # delegation) never reached the reconcile above — the worker idled
+            # forever on a dead mission whose record stayed draft (live:
+            # msn-promote-verify-f633e95d, 4h). Reconcile once so the record
+            # reflects its children; a failed derivation terminalizes failed,
+            # an all-cancelled derivation intentionally does not (owner may
+            # re-dispatch), which is why the loop's own exit handles it.
+            try:
+                reconciled = json.loads(mission_runtime.hermes_mission_reconcile(
+                    mission_id, confirm=True, dry_run=False, hermes_root=hermes_root))
+                current = _load_mission(mission_id, hermes_root)
+                summary["mission_status"] = str(current.get("status") or "")
+                summary["mission_reconciled"] = bool(reconciled.get("success"))
+            except (ValueError, TypeError, LookupError, OSError, sqlite3.Error, PermissionError, json.JSONDecodeError):
+                pass  # observation never blocks the loop; next tick retries
     return summary
 
 

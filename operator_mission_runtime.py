@@ -811,7 +811,23 @@ def reserve_delegation_attachment(
                 db.rollback()
                 return False
             if existing is not None:
-                if str(existing["evidence_ref"] or "") not in {"", evidence_ref}:
+                existing_ref = str(existing["evidence_ref"] or "")
+                if existing_ref not in {"", evidence_ref}:
+                    # Item 252 (2026-10-11): a legacy-format reservation for
+                    # the SAME delegation row ('delegation:<id>', written by
+                    # pre-contract-bridge reconcile/cancel syncs) is the
+                    # idempotent reservation this call repeats — rejecting it
+                    # poisoned every re-drive of rows the old syncs touched
+                    # (live: dlg-c51c61e4 refused 'Mission delegation
+                    # reservation was rejected'). Upgrade it to the canonical
+                    # contract: form instead of refusing.
+                    if existing_ref == f"delegation:{delegation_id}":
+                        db.execute(
+                            "UPDATE attachments SET evidence_ref=?,updated_at=? WHERE mission_id=? AND kind='delegation' AND ref=?",
+                            (evidence_ref, _now(), mission_id, delegation_id),
+                        )
+                        db.commit()
+                        return True
                     db.rollback()
                     return False
                 db.commit()
