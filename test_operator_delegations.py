@@ -1978,3 +1978,101 @@ def test_in_place_database_migration_adds_dispatch_phase_and_manifest_table(tmp_
         tables = {row[0] for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "dispatch_phase" in columns
     assert "delegation_validation_manifests" in tables
+
+
+# ---------------------------------------------------------------------------
+# Fleet cancel latch release + reconciling/invoking crash-window recovery
+# (live defect 2026-10-11: verify-mission workers killed mid-dispatch left a
+# reconciling+invoking delegation that could never be cancelled — the fleet
+# backend's cancel never returned an explicit ``changed: false``, so the
+# cancellation latch held forever and mission cancellation was blocked).
+# ---------------------------------------------------------------------------
+
+def test_fleet_cancel_latch_releases_on_proven_terminal_peer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A fleet delegation whose peer is provably terminal must not latch."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    task_id = "fleet-terminal-peer"
+    delegation_id = "dlg-fleet-terminal-peer"
+
+    def fake_dispatch(contract_json, **kwargs):
+        contract = json.loads(contract_json)
+        return json.dumps({"success": True, "changed": True, "state": "running",
+                           "backend": "fleet", "task_id": contract["task_id"]})
+
+    monkeypatch.setattr(delegations.contract_mod, "hermes_contract_dispatch", fake_dispatch)
+    assert json.loads(delegations.hermes_delegation_dispatch(
+        json.dumps(_contract(workspace, task_id=task_id, backend="fleet")),
+        delegation_id=delegation_id, confirm=True, dry_run=False, hermes_root=root,
+    ))["success"]
+
+    # Peer observation proves the task completed: explicit changed=false.
+    monkeypatch.setattr(
+        delegations.runners, "hermes_runner_cancel",
+        lambda *a, **k: json.dumps({"success": False, "changed": False,
+                                    "proven_terminal": True, "state": "completed"}),
+    )
+    # Watermark needs a latest observation to hash (absence -> watermark "").
+    meta_path, _, _ = runners._job_paths(task_id, root)
+    runners._atomic_json(meta_path, {
+        "schema_version": runners.SCHEMA_VERSION, "task_id": task_id, "backend": "fleet",
+        "state": "completed", "outcome": "completed",
+        "created_at": "2026-10-11T00:00:00+00:00", "started_at": "2026-10-11T00:00:01+00:00",
+        "ended_at": "2026-10-11T00:00:02+00:00", "error": "",
+    })
+    out = json.loads(delegations.hermes_delegation_cancel(
+        delegation_id, confirm=True, dry_run=False, hermes_root=root,
+    ))
+    with delegations._connect(delegations._db_path(root), write=False) as db:
+        row = delegations._get_row(db, delegation_id)
+    assert not row["cancellation_in_progress"], "latch must release on explicit changed=false"
+
+
+def test_fleet_cancel_latch_releases_on_proven_never_invoked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A fleet delegation whose invocation provably never reached the peer
+    (no kanban row, no runner job, no observation at all) must recover from
+    BOTH crash shapes: reserved+invoking and reconciling+invoking."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+
+    for shape in ("reserved", "reconciling"):
+        task_id = f"fleet-never-invoked-{shape}"
+        delegation_id = f"dlg-{task_id}"
+
+        def fake_dispatch(contract_json, **kwargs):
+            contract = json.loads(contract_json)
+            return json.dumps({"success": True, "changed": True, "state": "running",
+                               "backend": "fleet", "task_id": contract["task_id"]})
+
+        monkeypatch.setattr(delegations.contract_mod, "hermes_contract_dispatch", fake_dispatch)
+        assert json.loads(delegations.hermes_delegation_dispatch(
+            json.dumps(_contract(workspace, task_id=task_id, backend="fleet")),
+            delegation_id=delegation_id, confirm=True, dry_run=False, hermes_root=root,
+        ))["success"]
+
+        # Strand the row in the crash shape: invoking + <shape>, zero observation.
+        with delegations._connect(delegations._db_path(root), write=True) as db:
+            delegations._init(db)
+            db.execute(
+                "UPDATE delegations SET state=?, dispatch_phase='invoking', "
+                "cancel_requested=0, cancellation_in_progress=0 WHERE delegation_id=?",
+                (shape, delegation_id),
+            )
+            db.commit()
+
+        out = json.loads(delegations.hermes_delegation_cancel(
+            delegation_id, confirm=True, dry_run=False, hermes_root=root,
+        ))
+        assert out["success"], f"{shape}: crash-window recovery must cancel cleanly"
+        assert out["delegation"]["state"] == "cancelled"
+        assert out["delegation"]["backend_state"] == "not_invoked"

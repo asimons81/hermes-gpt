@@ -670,8 +670,17 @@ def _invocation_unreached_backend(row: dict[str, Any], root: Path) -> bool:
     state) is authoritative proof that the invocation never reached a backend,
     making recovery to ``reserved`` safe.  Any backend observation instead
     retains the submission ambiguity.
+
+    A crash can also strand the row one step later — ``reconciling + invoking``
+    (dispatch committed, reconcile loop never ran): the same authoritative
+    absence of every observed run record proves the invocation never reached a
+    backend there too, so recovery applies to both shapes.  (Live: verify-mission
+    workers killed mid-dispatch left exactly this shape; mission cancellation
+    was blocked on the un-cancellable delegation indefinitely.)
     """
-    if str(row.get("dispatch_phase") or "") != "invoking" or str(row.get("state") or "") != "reserved":
+    phase = str(row.get("dispatch_phase") or "")
+    state = str(row.get("state") or "")
+    if phase != "invoking" or state not in {"reserved", "reconciling"}:
         return False
     return _latest_observation(str(row.get("task_id") or ""), root) is None
 
@@ -1115,7 +1124,7 @@ def hermes_delegation_reconcile(
         observed = _latest_observation(stored["task_id"], root)
         stale_invocation = (
             str(stored.get("dispatch_phase") or "") == "invoking"
-            and str(stored.get("state") or "") == "reserved"
+            and str(stored.get("state") or "") in ("reserved", "reconciling")
             and observed is None
         )
         if observed is None:
@@ -1278,9 +1287,10 @@ def hermes_delegation_reconcile(
                     "VALUES(?,?,?,?,?,?) ON CONFLICT(delegation_id) DO UPDATE SET schema=excluded.schema,context_sha256=excluded.context_sha256,manifest_json=excluded.manifest_json,updated_at=excluded.updated_at",
                     (delegation_id, manifest["schema"], manifest["context_sha256"], json.dumps(manifest, sort_keys=True, separators=(",", ":")), now, now),
                 )
-            if stale_invocation and current.get("dispatch_phase") == "invoking" and current.get("state") == "reserved":
+            if stale_invocation and current.get("dispatch_phase") == "invoking" and current.get("state") in ("reserved", "reconciling"):
                 # Fork hardening: stale-invocation recovery persists the v0.14
-                # validation columns so the surface stays coherent.
+                # validation columns so the surface stays coherent. Covers both
+                # crash shapes: reserved+invoking and reconciling+invoking.
                 db.execute(
                     "UPDATE delegations SET state=?,backend_state=?,outcome=?,validation_verdict=?,"
                     "validation_summary_json=?,validation_failure_since=?,"
@@ -1288,7 +1298,7 @@ def hermes_delegation_reconcile(
                     (desired, _bounded(backend_state, 128), _bounded(outcome, 128), _bounded(verdict, 64),
                      summary_json, failure_since, 1 if changed else 0, now, terminal_at, delegation_id),
                 )
-                _event(db, delegation_id, "delegation.invocation_recovered", from_state="reserved", to_state="reserved")
+                _event(db, delegation_id, "delegation.invocation_recovered", from_state="reconciling", to_state="reserved")
             else:
                 db.execute(
                     "UPDATE delegations SET state=?,backend_state=?,outcome=?,validation_verdict=?,"
@@ -1352,10 +1362,12 @@ def hermes_delegation_cancel(
                 current = dict(_get_row(db, delegation_id))
                 if _invocation_unreached_backend(current, root):
                     db.execute(
-                        "UPDATE delegations SET dispatch_phase='reserved',updated_at=? WHERE delegation_id=? AND dispatch_phase='invoking' AND state='reserved'",
+                        "UPDATE delegations SET dispatch_phase='reserved',"
+                        "state='reserved',backend_state='not_invoked',updated_at=? "
+                        "WHERE delegation_id=? AND dispatch_phase='invoking' AND state IN ('reserved','reconciling')",
                         (_now(), delegation_id),
                     )
-                    _event(db, delegation_id, "delegation.invocation_recovered", from_state="reserved", to_state="reserved")
+                    _event(db, delegation_id, "delegation.invocation_recovered", from_state="reconciling", to_state="reserved")
                     db.commit()
                     with _connect(path, write=False) as rdb:
                         stored = dict(_get_row(rdb, delegation_id))

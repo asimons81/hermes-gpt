@@ -685,7 +685,54 @@ class FleetBackend:
         return []  # Fleet observations remain sourced from Mission Control.
 
     def cancel(self, task_id: str, *, hermes_root: Path | None = None) -> dict[str, Any]:
+        # Fleet work orders cannot be revoked in flight (no A2A cancel verb is
+        # universally available), but cancellation MUST be able to terminate:
+        # the delegation cancel latch treats a missing ``changed`` key as
+        # ambiguous and holds forever, deadlocking every fleet delegation
+        # cancel (live: dlg stuck cancellation_in_progress=1 for 4h+ while
+        # mission cancellation was blocked on the non-terminal delegation).
+        #
+        # Authoritative peer observation resolves the ambiguity safely:
+        #   * peer terminal           -> nothing left to cancel: explicit
+        #                                 changed=false + proven_terminal so the
+        #                                 latch releases and reconcile
+        #                                 settles the delegation from the
+        #                                 observed terminal record;
+        #   * peer has no such task   -> the invocation provably never reached
+        #                                 the backend: explicit changed=false
+        #                                 + never_invoked (crash-window case);
+        #   * peer reachable + task live, or peer unreachable -> the honest
+        #                                 unknown: keep the old shape (no
+        #                                 ``changed``) so the latch stays
+        #                                 held until observation establishes
+        #                                 authority.
+        try:
+            payload = json.loads(op_fleet.hermes_fleet_task(self._peer_for_task(task_id), task_id, hermes_root=hermes_root))
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "code": "RUNNER_CANCEL_UNOBSERVABLE", "backend": self.name, "reason": _bounded_text(exc, 200)}
+        if not payload.get("success"):
+            code = str(payload.get("code") or "")
+            if code in {"UNKNOWN_AGENT", "FLEET_TASK_ERROR"}:
+                return {"success": False, "code": "RUNNER_CANCEL_UNOBSERVABLE", "backend": self.name}
+            return {"success": False, "code": "RUNNER_CANCEL_UNSUPPORTED", "backend": self.name}
+        state = str(payload.get("state") or "")
+        if state in {"completed", "failed", "canceled", "cancelled", "done"}:
+            # Nothing left to cancel: the peer's terminal record is authority.
+            # Explicit changed=false releases the delegation's provisional
+            # cancellation latch (delegations.py treats missing ``changed`` as
+            # ambiguous and would hold it forever); reconcile then settles the
+            # delegation from the observed terminal record.
+            return {"success": False, "changed": False, "proven_terminal": True, "state": state, "backend": self.name}
+        if state == "":  # peer answered without a state: not authoritative
+            return {"success": False, "code": "RUNNER_CANCEL_UNOBSERVABLE", "backend": self.name}
         return {"success": False, "code": "RUNNER_CANCEL_UNSUPPORTED", "backend": self.name}
+
+    def _peer_for_task(self, task_id: str) -> str:
+        # Work orders carry the assigned agent in the contract; the runner
+        # layer does not pass it here, so resolve via the dispatch registry
+        # recorded by hermes_fleet_dispatch_work_order.
+        agent = op_fleet._task_agent(task_id)
+        return agent or ""
 
 
 class _LocalProcessBackend:

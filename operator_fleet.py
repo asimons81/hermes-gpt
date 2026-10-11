@@ -958,6 +958,7 @@ def hermes_fleet_dispatch_work_order(agent: str, task_id: str, target_profile: s
         remote_id = remote.get("id")
         if not isinstance(remote_id, str) or not _TASK_ID_RE.fullmatch(remote_id):
             return _error("FLEET_DISPATCH_ERROR", "A2A submission returned no valid task id", "Check the peer's A2A service.")
+        _record_task_agent(remote_id, peer)
         status = remote.get("status") if isinstance(remote.get("status"), dict) else {}
         op.audit_record(tool="hermes_fleet_dispatch_work_order", level=policy.level, apply_mode=policy.apply_mode, dry_run=False,
                         success=True, changed=True, summary=f"fleet work-order submitted to {peer}", prompt=canonical,
@@ -994,6 +995,45 @@ def hermes_fleet_dispatch_work_order(agent: str, task_id: str, target_profile: s
                       "Verify the peer identity and host role before retrying.")
     except Exception as exc:
         return _error("FLEET_DISPATCH_ERROR", op.redact_output(str(exc)), "Check local authority, registry, and peer service.")
+
+
+def _task_agent_registry_path(hermes_root: Path | None) -> Path:
+    root = hermes_root or Path(os.environ.get("HERMES_HOME") or op.default_home())
+    return root / "fleet-task-agents.json"
+
+
+def _record_task_agent(task_id: str, agent: str, hermes_root: Path | None = None) -> None:
+    """Durable task_id -> agent map so backend cancel can observe the peer.
+
+    Written only on confirmed dispatch (a remote task id exists); best-effort —
+    cancellation degrades to unobservable, never fails dispatch."""
+    try:
+        path = _task_agent_registry_path(hermes_root)
+        data: dict[str, str] = {}
+        try:
+            data = json.loads(path.read_text("utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except Exception:
+            data = {}
+        data[str(task_id)] = str(agent)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=1), "utf-8")
+        tmp.replace(path)
+    except Exception:
+        pass
+
+
+def _task_agent(task_id: str, hermes_root: Path | None = None) -> str:
+    try:
+        data = json.loads(_task_agent_registry_path(hermes_root).read_text("utf-8"))
+        if isinstance(data, dict):
+            agent = data.get(str(task_id))
+            if isinstance(agent, str):
+                return agent
+    except Exception:
+        pass
+    return ""
 
 
 def _fetch_task(agent: str, task_id: str, timeout: int, runner: Runner | None, hermes_bin: str | None) -> tuple[str, dict[str, Any]]:
