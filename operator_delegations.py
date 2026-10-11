@@ -1145,7 +1145,23 @@ def hermes_delegation_reconcile(
                     and str(stored.get("state") or "") == "reconciling")
             )
         )
-        if observed is None:
+        if stale_invocation and not (
+            stored.get("cancel_requested") or stored.get("cancellation_in_progress")
+        ):
+            # Item 252: the invocation provably never reached a backend
+            # (authoritative absence of every observed run record), so the
+            # row must return to PURE reserved — state AND phase — or the
+            # dispatch re-drive CAS (state='reserved' AND
+            # dispatch_phase='reserved') can never re-claim it. PR #33/#34
+            # recovered only the phase, writing desired='reconciling' back
+            # with phase='reserved': a no-op that re-froze the exact live
+            # shape (dlg-8b392eac 9h, dlg-c51c61e4 1h+; both promote-verify
+            # missions of 2026-10-11).
+            observed_desired = "reserved"
+            backend_state = "not_invoked"
+            outcome = ""
+            dispatch_phase = "reserved"
+        elif observed is None:
             observed_desired = "reconciling" if stored["state"] not in TERMINAL_STATES else stored["state"]
             backend_state = "unobserved"
             outcome = stored.get("outcome") or ""
@@ -1203,7 +1219,11 @@ def hermes_delegation_reconcile(
             desired = "reconciling"
             outcome = ""
         elif observed is None or (observed_desired == "succeeded" and verdict != "SATISFIED"):
-            desired = "reconciling"
+            # Item 252: a stale-invocation row already chose its desired state
+            # above (pure reserved — re-drivable); only a row whose invocation
+            # MIGHT have reached a backend stays reconciling.
+            if not (stale_invocation and observed_desired == "reserved"):
+                desired = "reconciling"
         # A successful backend with positively observed bad artifacts is a work
         # defect, not an ambiguous submission. Allow a durable 30s delivery grace,
         # then let the existing bounded semantic recovery handle the failure.

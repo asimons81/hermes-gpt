@@ -2076,3 +2076,115 @@ def test_fleet_cancel_latch_releases_on_proven_never_invoked(
         assert out["success"], f"{shape}: crash-window recovery must cancel cleanly"
         assert out["delegation"]["state"] == "cancelled"
         assert out["delegation"]["backend_state"] == "not_invoked"
+
+
+# ---------------------------------------------------------------------------
+# Item 252: reconcile-path stale-invocation recovery must RESET the row to
+# pure reserved (live defect 2026-10-11: PR #33/#34 fired
+# delegation.invocation_recovered for the reconciling+reserved shape but wrote
+# desired='reconciling' back with phase='reserved' — a no-op that re-froze the
+# exact frozen shape. Both promote-verify missions of 2026-10-11
+# (dlg-8b392eac, dlg-c51c61e4) wedged 9h/1h+ on it).
+# ---------------------------------------------------------------------------
+
+def test_reconcile_recovers_reconciling_reserved_to_pure_reserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A delegating+reserved row with zero backend observations must recover
+    to state='reserved'/backend_state='not_invoked' so the dispatch CAS can
+    re-drive it; it must NOT be rewritten as reconciling+reserved."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    task_id = "reconcile-recover-shape3"
+    delegation_id = f"dlg-{task_id}"
+
+    def fake_dispatch(contract_json, **kwargs):
+        contract = json.loads(contract_json)
+        return json.dumps({"success": True, "changed": True, "state": "running",
+                           "backend": "fleet", "task_id": contract["task_id"]})
+
+    monkeypatch.setattr(delegations.contract_mod, "hermes_contract_dispatch", fake_dispatch)
+    assert json.loads(delegations.hermes_delegation_dispatch(
+        json.dumps(_contract(workspace, task_id=task_id, backend="fleet")),
+        delegation_id=delegation_id, confirm=True, dry_run=False, hermes_root=root,
+    ))["success"]
+
+    # Strand the row in the item-252 live shape: reconciling + reserved, zero observation.
+    with delegations._connect(delegations._db_path(root), write=True) as db:
+        delegations._init(db)
+        db.execute(
+            "UPDATE delegations SET state='reconciling', dispatch_phase='reserved', "
+            "backend_state='unobserved', cancel_requested=0, cancellation_in_progress=0 "
+            "WHERE delegation_id=?",
+            (delegation_id,),
+        )
+        db.commit()
+
+    out = json.loads(delegations.hermes_delegation_reconcile(
+        delegation_id, apply=True, hermes_root=root,
+    ))
+    assert out["success"], "reconcile must succeed"
+    row = out["delegation"]
+    assert row["state"] == "reserved", (
+        "stale-invocation recovery must reset state to reserved so the "
+        f"dispatch CAS can re-drive; got {row['state']!r}"
+    )
+    assert row["backend_state"] == "not_invoked", (
+        f"recovery must mark backend_state not_invoked; got {row['backend_state']!r}"
+    )
+    assert row["dispatch_phase"] == "reserved"
+
+
+def test_reconcile_recovered_row_is_redispatchable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """End-to-end: after recovery, a re-dispatch with the same deterministic
+    delegation_id must re-enter invoking and complete (the live worker's
+    re-drive path). This is the acceptance criterion of the recovery."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    task_id = "reconcile-recover-redispatch"
+    delegation_id = f"dlg-{task_id}"
+
+    def fake_dispatch(contract_json, **kwargs):
+        contract = json.loads(contract_json)
+        return json.dumps({"success": True, "changed": True, "state": "running",
+                           "backend": "fleet", "task_id": contract["task_id"]})
+
+    monkeypatch.setattr(delegations.contract_mod, "hermes_contract_dispatch", fake_dispatch)
+    assert json.loads(delegations.hermes_delegation_dispatch(
+        json.dumps(_contract(workspace, task_id=task_id, backend="fleet")),
+        delegation_id=delegation_id, confirm=True, dry_run=False, hermes_root=root,
+    ))["success"]
+
+    with delegations._connect(delegations._db_path(root), write=True) as db:
+        delegations._init(db)
+        db.execute(
+            "UPDATE delegations SET state='reconciling', dispatch_phase='reserved', "
+            "backend_state='unobserved', cancel_requested=0, cancellation_in_progress=0 "
+            "WHERE delegation_id=?",
+            (delegation_id,),
+        )
+        db.commit()
+
+    out = json.loads(delegations.hermes_delegation_reconcile(
+        delegation_id, apply=True, hermes_root=root,
+    ))
+    assert out["success"]
+    assert out["delegation"]["state"] == "reserved"
+
+    # The worker's re-drive: dispatch again with the SAME delegation id.
+    again = json.loads(delegations.hermes_delegation_dispatch(
+        json.dumps(_contract(workspace, task_id=task_id, backend="fleet")),
+        delegation_id=delegation_id, confirm=True, dry_run=False, hermes_root=root,
+    ))
+    assert again.get("success") is True, f"re-dispatch must re-drive: {again}"
+    assert again.get("changed") is True, "re-dispatch must not be an idempotent no-op"
+    assert again["delegation"]["dispatch_phase"] == "dispatched"
+    assert again["delegation"]["state"] in ("queued", "reconciling", "running")
