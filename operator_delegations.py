@@ -677,12 +677,26 @@ def _invocation_unreached_backend(row: dict[str, Any], root: Path) -> bool:
     backend there too, so recovery applies to both shapes.  (Live: verify-mission
     workers killed mid-dispatch left exactly this shape; mission cancellation
     was blocked on the un-cancellable delegation indefinitely.)
+
+    Third shape (2026-10-11, dlg-c51c61e4d8): a worker crash between the
+    durable ``state='reconciling'`` commit and the first dispatcher tick
+    strands ``reconciling + reserved`` — the reconciler loop began polling a
+    dispatch that never even entered ``invoking``.  With phase ``reserved``
+    the dispatcher never durably started, so the same authoritative absence
+    of every observed run record proves the invocation never reached a
+    backend; recovery resets the row to pure ``reserved`` so a live worker
+    re-drives the dispatch.  (Live: the promote-verify lane's f633e95d
+    mission wedged 45+ minutes in exactly this shape while its healthy
+    worker polled ``hermes_delegation_reconcile``, which had no recovery
+    path for it.)
     """
     phase = str(row.get("dispatch_phase") or "")
     state = str(row.get("state") or "")
-    if phase != "invoking" or state not in {"reserved", "reconciling"}:
-        return False
-    return _latest_observation(str(row.get("task_id") or ""), root) is None
+    if phase == "invoking" and state in {"reserved", "reconciling"}:
+        return _latest_observation(str(row.get("task_id") or ""), root) is None
+    if phase == "reserved" and state == "reconciling":
+        return _latest_observation(str(row.get("task_id") or ""), root) is None
+    return False
 
 
 _VALIDATION_VERDICT_CACHE: dict[tuple[str, str, str, str], str] = {}
@@ -1123,9 +1137,13 @@ def hermes_delegation_reconcile(
 
         observed = _latest_observation(stored["task_id"], root)
         stale_invocation = (
-            str(stored.get("dispatch_phase") or "") == "invoking"
-            and str(stored.get("state") or "") in ("reserved", "reconciling")
-            and observed is None
+            observed is None
+            and (
+                (str(stored.get("dispatch_phase") or "") == "invoking"
+                 and str(stored.get("state") or "") in ("reserved", "reconciling"))
+                or (str(stored.get("dispatch_phase") or "") == "reserved"
+                    and str(stored.get("state") or "") == "reconciling")
+            )
         )
         if observed is None:
             observed_desired = "reconciling" if stored["state"] not in TERMINAL_STATES else stored["state"]
@@ -1287,10 +1305,16 @@ def hermes_delegation_reconcile(
                     "VALUES(?,?,?,?,?,?) ON CONFLICT(delegation_id) DO UPDATE SET schema=excluded.schema,context_sha256=excluded.context_sha256,manifest_json=excluded.manifest_json,updated_at=excluded.updated_at",
                     (delegation_id, manifest["schema"], manifest["context_sha256"], json.dumps(manifest, sort_keys=True, separators=(",", ":")), now, now),
                 )
-            if stale_invocation and current.get("dispatch_phase") == "invoking" and current.get("state") in ("reserved", "reconciling"):
+            if stale_invocation and (
+                (current.get("dispatch_phase") == "invoking" and current.get("state") in ("reserved", "reconciling"))
+                or (current.get("dispatch_phase") == "reserved" and current.get("state") == "reconciling")
+            ):
                 # Fork hardening: stale-invocation recovery persists the v0.14
-                # validation columns so the surface stays coherent. Covers both
-                # crash shapes: reserved+invoking and reconciling+invoking.
+                # validation columns so the surface stays coherent. Covers all
+                # three crash shapes: reserved+invoking, reconciling+invoking,
+                # and reconciling+reserved (2026-10-11: the dispatcher never
+                # durably started — reconcile began polling a dispatch that
+                # never entered invoking).
                 db.execute(
                     "UPDATE delegations SET state=?,backend_state=?,outcome=?,validation_verdict=?,"
                     "validation_summary_json=?,validation_failure_since=?,"
@@ -1364,7 +1388,9 @@ def hermes_delegation_cancel(
                     db.execute(
                         "UPDATE delegations SET dispatch_phase='reserved',"
                         "state='reserved',backend_state='not_invoked',updated_at=? "
-                        "WHERE delegation_id=? AND dispatch_phase='invoking' AND state IN ('reserved','reconciling')",
+                        "WHERE delegation_id=? AND ("
+                        "(dispatch_phase='invoking' AND state IN ('reserved','reconciling')) OR "
+                        "(dispatch_phase='reserved' AND state='reconciling'))",
                         (_now(), delegation_id),
                     )
                     _event(db, delegation_id, "delegation.invocation_recovered", from_state="reconciling", to_state="reserved")
