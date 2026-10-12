@@ -789,3 +789,26 @@ def test_authority_drift_skips_role_check_when_card_attests_no_role(monkeypatch,
     }, calls)
     out = json.loads(fleet.hermes_fleet_authority_drift(runner=runner, hermes_bin=HERMES, authority_manifest=authority_manifest(tmp_path)))
     assert out["findings"] == [{"agent": "nous-girl", "code": "HOST_ROLE_MISMATCH", "severity": "error"}]
+
+
+def test_fleet_backend_cancel_peer_observation_call_signature(monkeypatch):
+    """Regression (live dlg-3ff244d38509): the cancel-time peer observation
+    passed hermes_root= to hermes_fleet_task(), which does not accept it —
+    every fleet-delegation cancel returned RUNNER_CANCEL_UNOBSERVABLE with
+    'unexpected keyword argument', deadlocking the cancellation latch."""
+    from unittest import mock
+    import operator_runners as runners
+
+    backend = runners.FleetBackend()
+    calls = {}
+
+    def fake_task(agent, task_id, timeout=15, *, runner=None, hermes_bin=None):
+        calls["kwargs"] = {"agent": agent, "task_id": task_id}
+        return json.dumps({"success": True, "agent": agent, "task_id": task_id, "state": "working"})
+
+    monkeypatch.setattr(fleet, "hermes_fleet_task", fake_task)
+    monkeypatch.setattr(backend, "_peer_for_task", lambda task_id: "stage3-pilot-peer")
+    result = backend.cancel("a2a-regression123", hermes_root=None)
+    # the observation call must not raise; a live task yields UNSUPPORTED (not UNOBSERVABLE)
+    assert result["code"] == "RUNNER_CANCEL_UNSUPPORTED"
+    assert calls["kwargs"] == {"agent": "stage3-pilot-peer", "task_id": "a2a-regression123"}

@@ -707,7 +707,7 @@ class FleetBackend:
         #                                 held until observation establishes
         #                                 authority.
         try:
-            payload = json.loads(op_fleet.hermes_fleet_task(self._peer_for_task(task_id), task_id, hermes_root=hermes_root))
+            payload = json.loads(op_fleet.hermes_fleet_task(self._peer_for_task(task_id), task_id))
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "code": "RUNNER_CANCEL_UNOBSERVABLE", "backend": self.name, "reason": _bounded_text(exc, 200)}
         if not payload.get("success"):
