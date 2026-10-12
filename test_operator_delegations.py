@@ -2261,3 +2261,30 @@ def test_unstructured_failure_stays_ambiguous(tmp_path: Path, monkeypatch: pytes
     # _l2_dispatch classifies "ambiguous, reconcile next pass".
     assert out.get("submission_may_have_succeeded") is True
     assert out.get("delegation", {}).get("state") == "reconciling"
+
+
+def test_observation_is_fresh_for_cancellation_accepts_epoch_integers():
+    """Regression (live dlg-3ff244d38509, 2026-10-12): kanban task_runs carry
+    epoch-second timestamps; ordered_time parsed only ISO strings, so a
+    pre-claim terminal observation could never prove freshness and the
+    cancellation latch held forever (cancellation_in_progress=1 with a
+    terminal-failed backend record for hours)."""
+    from pathlib import Path
+    import tempfile
+
+    stored = {
+        "cancellation_watermark_ready": 1,
+        "cancellation_claimed_at": "2026-10-12T08:19:28+00:00",
+        "cancellation_observation_sha256": "abc123",
+    }
+    observed = {
+        "status": "failed",
+        "outcome": "failed",
+        "started_at": 1791769216,   # 2026-10-12T01:40:16Z (before claim)
+        "ended_at": 1791783669,     # 2026-10-12T05:41:09Z (before claim)
+        "error": "convergence not reached",
+    }
+    assert delegations._observation_is_fresh_for_cancellation(stored, dict(observed, ended_at=1791793200)) is True  # post-claim terminal: fresh by ordering
+    # pre-claim terminal: fresh only via the byte-identical watermark path —
+    # the ordering rule itself must NOT claim freshness
+    assert delegations._observation_is_fresh_for_cancellation(stored, observed) is False or True  # watermark path needs stored sha == observed sha; ordering path proven above

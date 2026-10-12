@@ -619,6 +619,18 @@ def _observation_is_fresh_for_cancellation(stored: dict[str, Any], observed: dic
         return False
 
     def ordered_time(value: Any) -> datetime | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            # Kanban task_runs carry epoch-second timestamps (live:
+            # started_at=1791769216, ended_at=1791783669). An integer that
+            # parses as a plausible epoch is ordering-authoritative; without
+            # this branch every kanban observation is unreadable to this
+            # check and a pre-claim terminal record can never prove
+            # freshness, latching cancellation_in_progress forever.
+            if value <= 0 or value > 4102444800:  # sane range: 1970..2100
+                return None
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
         if not isinstance(value, str) or not value.strip():
             return None
         try:
