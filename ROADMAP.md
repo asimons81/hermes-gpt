@@ -8,8 +8,7 @@
 
 ## Fleet context
 
-- upstreams (this repo builds on): .github, agent, hermes-infra
-- dependents (changes here affect): (host), agent, maestro
+- dependents (changes here affect): agent
 - graph: evidence-derived (imports/refs/deploy surfaces); advisory
 
 ## Open items
@@ -232,6 +231,12 @@
 - id: `rm-138` | track: reliability | priority: 44.0 | status: in_progress
 - acceptance: plural weekday names accepted (or a targeted error naming the singular form); a hypothesis property-based lane in the dev group (declaration comment naming the transitive source per the rm-099 rule) pins the four invariants with a fixed seed for deterministic CI; zero-minute floor coverage rides rm-057.
 - evidence: campaign-recorded in hermes-gpt ROADMAP.md
+
+### Refresh stale top-level documentation
+- id: `rm-155` | track: reliability | priority: 43.0 | status: candidate
+- signals: reliability.stale_doc:README.md
+- acceptance: Docs regenerated/updated; staleness detector reports 0 signals
+- evidence: inference.stale_docs returns [] for the repo
 
 ### Updater must verify it found a hermes-gpt checkout before fast-forwarding
 - id: `rm-042` | track: reliability | priority: 42.0 | status: in_progress
