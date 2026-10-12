@@ -28,6 +28,31 @@ import operator_runners as runners
 
 SCHEMA_VERSION = "0.9-delegation.2"
 DELEGATION_SCHEMA = "hermes.delegation/v1"
+
+# Refusal codes that provably fire BEFORE any backend submission (registry,
+# authority, policy, and contract-shape gates evaluated ahead of the A2A /
+# runner call). A dispatch failing with one of these never invoked the
+# backend, so the delegation resets to reserved instead of reconciling as
+# ambiguous (item 254: UNKNOWN_AGENT re-drives looped forever otherwise).
+_PRE_BACKEND_REFUSAL_CODES = frozenset({
+    "UNKNOWN_AGENT",
+    "CONFIRMATION_REQUIRED",
+    "AUTHORITY_MANIFEST_MISSING",
+    "FLEET_POLICY_DENIED",
+    "FLEET_AUTHORITY_ERROR",
+    "FLEET_PEER_VERIFICATION_FAILED",
+    "FLEET_REGISTRY_ERROR",
+    "INVALID_WORK_ORDER",
+    "INVALID_CONTRACT",
+    "INVALID_TASK_ID",
+    "INVALID_MESSAGE",
+    "SKILL_REQUIREMENTS_REJECTED",
+    "CONTRACT_ALREADY_DISPATCHED",
+    "CONTRACT_DENIED",
+    "RUNNER_BACKEND_UNKNOWN",
+    "RUNNER_BACKEND_NOT_ALLOWED",
+    "RUNNER_UNAVAILABLE",
+})
 DELEGATION_ID_RE = re.compile(r"^dlg-[A-Za-z0-9][A-Za-z0-9._-]{0,59}$")
 STATES = frozenset({"reserved", "queued", "running", "reconciling", "succeeded", "failed", "cancelled"})
 DISPATCH_PHASES = frozenset({"reserved", "invoking", "dispatched", "cancelled"})
@@ -930,6 +955,28 @@ def hermes_delegation_dispatch(
         # Fail closed (fc8a1b3): a failed dispatch whose `changed` is anything
         # other than an explicit False is ambiguous — a malformed/missing
         # container must never license a backend re-invocation.
+        # A typed refusal from the fleet/contract layer (success=false with a
+        # structured error envelope: an explicit `code` and no
+        # `submission_may_have_succeeded` flag) is a DETERMINISTIC refusal —
+        # the backend was never invoked, so `changed` is False and the
+        # delegation must reset to reserved with a typed rejection, never be
+        # classified ambiguous. Misclassifying UNKNOWN_AGENT /
+        # CONFIRMATION_REQUIRED / AUTHORITY_MANIFEST_MISSING as ambiguous
+        # wedged the delegation in a reserved/invoking recovery loop where
+        # every re-drive re-failed the same way forever (promote-verify lane,
+        # 2026-10-11). Only a CLOSED SET of pre-backend refusal codes counts
+        # — failures raised before the A2A/runner submission can exist
+        # (registry/authority/gate rejections). Arbitrary backend failures
+        # with a code but no explicit changed:false stay ambiguous so the
+        # fc8a1b3 never-reinvoke invariant holds for them.
+        typed_refusal = (
+            not dispatch.get("success")
+            and dispatch.get("code") in _PRE_BACKEND_REFUSAL_CODES
+            and not dispatch.get("submission_may_have_succeeded")
+        )
+        if typed_refusal and dispatch.get("changed") is None:
+            dispatch = dict(dispatch)
+            dispatch["changed"] = False
         ambiguous = bool(dispatch.get("submission_may_have_succeeded")) or (
             not dispatch.get("success") and dispatch.get("changed") is not False
         )
@@ -950,7 +997,7 @@ def hermes_delegation_dispatch(
                 invocation_claimed = False
                 return _dispatch_cas_lost(row)
             invocation_claimed = False
-            return json.dumps({"success": False, "schema_version": SCHEMA_VERSION, "delegation_id": delegation_id, "task_id": task_id, "backend": backend, "changed": False, "dispatch": dispatch}, ensure_ascii=False, indent=2)
+            return json.dumps({"success": False, "schema_version": SCHEMA_VERSION, "delegation_id": delegation_id, "task_id": task_id, "backend": backend, "changed": False, "delegation": _surface(row), "dispatch": dispatch}, ensure_ascii=False, indent=2)
 
         now = _now()
         backend_state = str(dispatch.get("state") or dispatch.get("status") or ("ambiguous" if ambiguous else "queued"))

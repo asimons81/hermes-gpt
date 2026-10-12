@@ -2188,3 +2188,76 @@ def test_reconcile_recovered_row_is_redispatchable(
     assert again.get("changed") is True, "re-dispatch must not be an idempotent no-op"
     assert again["delegation"]["dispatch_phase"] == "dispatched"
     assert again["delegation"]["state"] in ("queued", "reconciling", "running")
+
+
+def test_typed_refusal_resets_reserved_never_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A typed refusal envelope (success=false, explicit code, no
+    submission_may_have_succeeded) is a deterministic rejection: the
+    delegation resets to reserved with the typed code — it must never be
+    classified ambiguous, which wedged re-drives in a reserved/invoking
+    loop (promote-verify lane, 2026-10-11)."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    mission_id = _mission(root)
+    delegation_id = "dlg-typed-refusal"
+
+    def refuse(*a, **k):
+        return json.dumps({
+            "success": False, "ok": False,
+            "error": "agent is not a registered fleet peer",
+            "layer": "operator", "code": "UNKNOWN_AGENT",
+            "safe_message": "agent is not a registered fleet peer",
+            "suggested_action": "Call hermes_fleet_list and use one returned name.",
+            "trace_id": "tt-test",
+        })
+
+    monkeypatch.setattr(delegations.contract_mod, "hermes_contract_dispatch", refuse)
+    out = json.loads(delegations.hermes_delegation_dispatch(
+        json.dumps(_contract(workspace, task_id="typed-refusal-task", backend="fleet")),
+        mission_id=mission_id, delegation_id=delegation_id,
+        confirm=True, dry_run=False, hermes_root=root,
+    ))
+    assert out.get("success") is False
+    assert out.get("submission_may_have_succeeded") is not True
+    assert out.get("delegation", {}).get("state") == "reserved"
+    assert out.get("delegation", {}).get("dispatch_phase") == "reserved"
+    # The typed code rides along for the caller to classify.
+    assert out.get("dispatch", {}).get("code") == "UNKNOWN_AGENT"
+
+    # A second dispatch attempt must CAS cleanly (the row is pure reserved,
+    # not stuck invoking), proving no wedge.
+    again = json.loads(delegations.hermes_delegation_dispatch(
+        json.dumps(_contract(workspace, task_id="typed-refusal-task", backend="fleet")),
+        mission_id=mission_id, delegation_id=delegation_id,
+        confirm=True, dry_run=False, hermes_root=root,
+    ))
+    assert again.get("success") is False
+    assert again.get("delegation", {}).get("dispatch_phase") == "reserved"
+
+
+def test_unstructured_failure_stays_ambiguous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A failure with NO typed code (malformed container, missing envelope)
+    keeps the fail-closed ambiguous classification — the fc8a1b3 invariant."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    root = tmp_path / "hermes"
+    _enable_workspace(monkeypatch, workspace)
+    mission_id = _mission(root)
+    delegation_id = "dlg-unstructured-failure"
+
+    def malformed(*a, **k):
+        return json.dumps({"success": False})
+
+    monkeypatch.setattr(delegations.contract_mod, "hermes_contract_dispatch", malformed)
+    out = json.loads(delegations.hermes_delegation_dispatch(
+        json.dumps(_contract(workspace, task_id="unstructured-task", backend="fleet")),
+        mission_id=mission_id, delegation_id=delegation_id,
+        confirm=True, dry_run=False, hermes_root=root,
+    ))
+    # The ambiguous envelope (fc8a1b3) is success:True with the
+    # submission_may_have_succeeded flag — that flag is exactly how
+    # _l2_dispatch classifies "ambiguous, reconcile next pass".
+    assert out.get("submission_may_have_succeeded") is True
+    assert out.get("delegation", {}).get("state") == "reconciling"

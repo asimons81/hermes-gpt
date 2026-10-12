@@ -175,12 +175,38 @@ def _run(argv: list[str], *, timeout: int, runner: Runner | None) -> tuple[int, 
 # ---------------------------------------------------------------------------
 
 def _load_hermes_config() -> dict[str, Any]:
-    """Load Hermes config.yaml, best-effort, without importing heavy internals."""
+    """Load Hermes config.yaml, best-effort, without importing heavy internals.
+
+    Two resolution paths, first-wins:
+
+    1. ``hermes_cli.config.load_config`` when the hermes-agent CLI package is
+       importable in this interpreter (console-script contexts).
+    2. Direct YAML read of the canonical config location when it is not —
+       standalone worker processes (Autopilot workers spawned as
+       ``python operator_autopilot.py``) do not inherit the hermes-agent
+       install on ``sys.path``, and silently resolving ``a2a_agents`` to an
+       empty mapping made every fleet dispatch fail UNKNOWN_AGENT
+       (item: the promote-verify lane's reserved/invoking loop, 2026-10-11).
+
+    The fallback reads the same default config the CLI would; profile
+    overlays are not applied (the fallback exists so a *configured peer* is
+    visible, not to reproduce full profile semantics).
+    """
     try:
         from hermes_cli.config import load_config
         return load_config() or {}
     except Exception:
-        return {}
+        pass
+    try:
+        import yaml
+
+        path = Path.home() / ".hermes" / "config.yaml"
+        if path.is_file():
+            data = yaml.safe_load(path.read_text())
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
 
 
 def _a2a_peers() -> dict[str, dict[str, Any]]:

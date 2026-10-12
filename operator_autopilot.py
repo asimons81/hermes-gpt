@@ -490,12 +490,28 @@ def hermes_autopilot_start(
 
         preview = _read_run(mission_id, hermes_root)
         if preview is not None and preview.get("state") not in TERMINAL_STATES:
-            _audit("hermes_autopilot_start", policy, dry_run=effective_dry, success=True, changed=False,
-                   mission_id=mission_id, extra={"idempotent": True})
-            return json.dumps({
-                "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start",
-                "dry_run": effective_dry, "mission_id": mission_id, "idempotent": True, "run": preview,
-            })
+            # Item 254: the run record alone can be stale — the detached
+            # worker may have died without anyone terminalizing the job
+            # (zombie under the spawner). Reconcile the owning job BEFORE
+            # honoring the idempotent early-return, so a dead worker is
+            # respawned instead of the start call no-oping forever.
+            _job_id = preview.get("job_id")
+            if _job_id:
+                try:
+                    _job = job_supervisor.get_job(_job_id, hermes_root=hermes_root, reconcile=True)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    _job = None
+                if _job is not None:
+                    _mapped = _JOB_STATUS_TO_RUN_STATE.get(str(_job.get("status") or ""))
+                    if _mapped and _mapped != preview.get("state"):
+                        preview = _write_run(mission_id, hermes_root, state=_mapped)
+            if preview is not None and preview.get("state") not in TERMINAL_STATES:
+                _audit("hermes_autopilot_start", policy, dry_run=effective_dry, success=True, changed=False,
+                       mission_id=mission_id, extra={"idempotent": True})
+                return json.dumps({
+                    "success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_autopilot_start",
+                    "dry_run": effective_dry, "mission_id": mission_id, "idempotent": True, "run": preview,
+                })
 
         config = {"max_concurrency": max_concurrency, "max_replans": max_replans,
                   "max_attempts_per_node": max_attempts_per_node, "max_runtime_seconds": max_runtime_seconds}

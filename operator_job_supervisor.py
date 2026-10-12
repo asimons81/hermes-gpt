@@ -201,6 +201,20 @@ def _cmdline_hash(raw: bytes | str) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _procfs_state(pid: int) -> str | None:
+    """Return the procfs process state letter (e.g. 'Z'), or None."""
+    stat_path = Path("/proc") / str(pid) / "stat"
+    try:
+        stat = stat_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    right = stat.rfind(")")
+    if right < 0:
+        return None
+    tail = stat[right + 2 :].split()
+    return tail[0] if tail else None
+
+
 def _procfs_identity(pid: int) -> dict[str, str] | None:
     stat_path = Path("/proc") / str(pid) / "stat"
     cmd_path = Path("/proc") / str(pid) / "cmdline"
@@ -524,6 +538,21 @@ def reconcile_job(job_id: str, *, hermes_root: Path | None = None) -> dict[str, 
             return record
         if verified is True:
             record["process_verification"] = "verified"
+        elif _pid_exists(pid) and _procfs_state(pid) == "Z":
+            # A zombie has provably exited (it cannot run, signal, or publish
+            # a terminal result ever again); only its reap is pending. Classify
+            # it exited-unfinalized so the job terminalizes instead of reading
+            # as an unverifiable live worker forever — the spawner detached the
+            # process (start_new_session) and never waitpid()s it, so the
+            # zombie can persist indefinitely (fix-queue item 254: a SIGTERM'd
+            # autopilot worker wedged hermes_autopilot_start's idempotent
+            # early-return for hours because identity verification on an empty
+            # zombie cmdline returned None/unverifiable).
+            record["process_verification"] = "exited-unfinalized"
+            record["status"] = "failed"
+            record["ended_at"] = record.get("ended_at") or _now()
+            record["result_summary"] = "durable worker exited before publishing terminal state (zombie)"
+            record["finalization_version"] = int(record.get("finalization_version") or 0) + 1
         elif verified is False:
             # PID reuse or command identity drift. Do not signal and do not
             # invent a terminal outcome.
