@@ -28,7 +28,6 @@ def test_load_hermes_config_falls_back_to_yaml_when_cli_unimportable(monkeypatch
     loader must fall back to reading ~/.hermes/config.yaml directly so
     a2a_agents never silently resolves to {} (UNKNOWN_AGENT wedge,
     2026-10-11)."""
-    import json as _json
 
     fake_home = tmp_path
     cfg_dir = fake_home / ".hermes"

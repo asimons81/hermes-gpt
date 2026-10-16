@@ -796,7 +796,6 @@ def test_fleet_backend_cancel_peer_observation_call_signature(monkeypatch):
     passed hermes_root= to hermes_fleet_task(), which does not accept it —
     every fleet-delegation cancel returned RUNNER_CANCEL_UNOBSERVABLE with
     'unexpected keyword argument', deadlocking the cancellation latch."""
-    from unittest import mock
     import operator_runners as runners
 
     backend = runners.FleetBackend()

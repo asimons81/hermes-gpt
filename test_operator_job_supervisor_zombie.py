@@ -16,9 +16,7 @@ outcome.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest import mock
 
 import operator_job_supervisor as job_supervisor
 

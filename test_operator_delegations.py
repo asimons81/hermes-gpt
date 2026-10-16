@@ -2025,7 +2025,7 @@ def test_fleet_cancel_latch_releases_on_proven_terminal_peer(
         "created_at": "2026-10-11T00:00:00+00:00", "started_at": "2026-10-11T00:00:01+00:00",
         "ended_at": "2026-10-11T00:00:02+00:00", "error": "",
     })
-    out = json.loads(delegations.hermes_delegation_cancel(
+    json.loads(delegations.hermes_delegation_cancel(
         delegation_id, confirm=True, dry_run=False, hermes_root=root,
     ))
     with delegations._connect(delegations._db_path(root), write=False) as db:
@@ -2269,8 +2269,6 @@ def test_observation_is_fresh_for_cancellation_accepts_epoch_integers():
     pre-claim terminal observation could never prove freshness and the
     cancellation latch held forever (cancellation_in_progress=1 with a
     terminal-failed backend record for hours)."""
-    from pathlib import Path
-    import tempfile
 
     stored = {
         "cancellation_watermark_ready": 1,

@@ -62,7 +62,10 @@ TAILSCALE_RE = re.compile(
 )
 MACHINE_HOSTNAMES_RE = re.compile(r"\b(?:TONY-GAMING-TOP|Hermex)\b")
 OPERATIONAL_METRIC_RE = re.compile(
-    r"(?<![0-9.])[0-9][\d,]{0,6}\s+"
+    # Leading lookbehind also excludes '-'/'+/#'-prefixed numbers so issue
+    # references (rm-207, #207, v2-207) never read as operational counts —
+    # "rm-207 profile gate" in a docstring tripped this (2026-10-16 CI).
+    r"(?<![-+#.])(?<![0-9.])[0-9][\d,]{0,6}\s+"
     r"(?:profiles?|actions?|records?|dispatches?|sessions?|messages?|"
     r"executions?|credentials?|fleet|work\s+orders?|system\s+prompts?|"
     r"usage\s+rows?|async\s+delegations?)\b",

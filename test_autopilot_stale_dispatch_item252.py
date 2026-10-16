@@ -19,11 +19,10 @@ from pathlib import Path
 import pytest
 
 import operator_autopilot as autopilot
-import operator_contract as contract_mod
 import operator_delegations as deleg
 import operator_mission_plan as plan
 import operator_mission_runtime as mission
-from test_operator_autopilot_scheduler import Backend, _j, _mk, _node, _states, _tick, make_env
+from test_operator_autopilot_scheduler import _j, _mk, _node, _states, _tick, make_env
 
 MID = "msn-item252-redrive"
 
@@ -118,7 +117,7 @@ def test_failed_only_mission_reconciles_record(env, monkeypatch):
                                        if (runs_path / f"{tid}.json").is_file() else []),
     )
 
-    summary2 = _tick(root, mid=MID)
+    _tick(root, mid=MID)
     assert _states(root, mid=MID)["n1"] == "failed", _states(root, mid=MID)
     got = _j(mission.hermes_mission_get(MID, hermes_root=root))
     status = (got.get("mission") or got).get("status")

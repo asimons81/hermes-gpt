@@ -143,7 +143,7 @@ def test_reconcile_preserves_contract_evidence_ref(tmp_path: Path, monkeypatch: 
     ))["success"]
 
     with delegations._connect(delegations._db_path(root), write=False) as db:
-        stored_sha = dict(delegations._get_row(db, delegation_id))["contract_sha256"]
+        assert "contract_sha256" in dict(delegations._get_row(db, delegation_id))
     with missions._connect(missions._db_path(root), write=False) as db:
         att = db.execute(
             "SELECT evidence_ref FROM attachments WHERE mission_id=? AND kind='delegation' AND ref=?",
