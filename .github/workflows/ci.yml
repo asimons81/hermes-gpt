@@ -25,7 +25,10 @@ jobs:
     # Immutable pin for supply-chain integrity (repo is public with no branch protection).
     # Tracks codeo1io/.github@main; rotate deliberately:
     #   gh api repos/codeo1io/.github/commits/main --jq .sha   # review the commit, then update the ref below
-    uses: codeo1io/.github/.github/workflows/private-leak-sentinel.yaml@cf3a0fe167fff4855da0fca3f4c392f408ef325b # cycle-5 hardened sentinel (ubuntu-latest, pinned gitleaks)
+    permissions:
+      contents: read
+      pull-requests: read  # gitleaks ScanPullRequest lists PR commits via the pulls API
+    uses: codeo1io/.github/.github/workflows/private-leak-sentinel.yaml@fd802b9e9dfdf20beac23ab8ad519911119854dc  # runner-labels input + PR-scan perms + stale gitleaks.tmp cleanup (2026-10-16)
 
   test:
     # PR fast lane: on pull_request only python 3.11 runs, but BOTH SDK
