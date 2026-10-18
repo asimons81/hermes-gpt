@@ -327,3 +327,36 @@ def test_rejected_validation_mutates_nothing(tmp_path: Path):
 
     after = {p: p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
     assert after == before
+
+
+class _RenamedSkillsTool:
+    """Upstream-HEAD-shaped stub: only the public ``find_all_skills``."""
+
+    def find_all_skills(self, *, skip_disabled: bool = False):
+        return [{"name": "renamed-skill", "description": "d", "category": None}]
+
+    def skill_view(self, name, file_path=None, task_id=None, preprocess=True):
+        return json.dumps({"success": False, "error": "not found"})
+
+    def skill_matches_platform(self, frontmatter):
+        return True
+
+    def _is_skill_disabled(self, name):
+        return False
+
+
+def test_loader_accepts_renamed_public_catalog_entrypoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Item 327 rider: upstream renamed ``_find_all_skills`` -> ``find_all_skills``.
+
+    The loader must accept either generation. Pre-fix, a stub exposing only
+    the public name made ``_require_agent_modules`` treat the module as a
+    non-loader (agent-loader CI lane failure against upstream HEAD).
+    """
+    root = tmp_path / "hermes"
+    monkeypatch.setattr(resolution, "_skill_loader_override", None)
+    stub = _RenamedSkillsTool()
+    monkeypatch.setattr(resolution, "_require_agent_modules", lambda: (stub, object()))
+    fn = resolution._find_all_skills_fn(stub)
+    assert callable(fn) and fn.__name__ == "find_all_skills"
+    entries = resolution.profile_skill_entries("default", root)
+    assert [entry.name for entry in entries] == ["renamed-skill"]

@@ -682,11 +682,27 @@ def record_attachment_state(
     try:
         with _connect(path, write=True) as db:
             _begin_write(db)
-            row = db.execute("SELECT 1 FROM attachments WHERE mission_id=? AND kind=? AND ref=?", (mission_id, kind, ref)).fetchone()
+            row = db.execute(
+                "SELECT state,evidence_ref,verified FROM attachments WHERE mission_id=? AND kind=? AND ref=?",
+                (mission_id, kind, ref),
+            ).fetchone()
             if row is None:
                 return False
             now = _now()
             verified_value = 1 if verified and state == "succeeded" else 0
+            # Item 327: the delegation reconcile bridge re-drives this on every
+            # ~1s poll. An unchanged (state, evidence_ref, verified) tuple is a
+            # heartbeat, not a transition — skip the UPDATE, the missions.version
+            # bump, the mission.attachment_state event row, and the live-event
+            # publish. Live shape pre-fix: 392,134 of 395,581 event rows were
+            # state-unchanged spam (~15-21k per 4h promote-verify mission).
+            if (
+                str(row["state"]) == state
+                and str(row["evidence_ref"] or "") == evidence_ref
+                and int(row["verified"] or 0) == verified_value
+            ):
+                db.rollback()
+                return True
             db.execute("UPDATE attachments SET state=?,evidence_ref=?,verified=?,updated_at=? WHERE mission_id=? AND kind=? AND ref=?", (state, evidence_ref, verified_value, now, mission_id, kind, ref))
             db.execute("UPDATE missions SET version=version+1,updated_at=? WHERE mission_id=?", (now, mission_id))
             live_notice = _event(db, mission_id, "mission.attachment_state", details={"kind": kind, "ref": ref, "state": state, "verified": bool(verified_value)})
