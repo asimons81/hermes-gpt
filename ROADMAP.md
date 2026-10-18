@@ -8,7 +8,8 @@
 
 ## Fleet context
 
-- dependents (changes here affect): agent
+- upstreams (this repo builds on): .github, agent, hermes-infra
+- dependents (changes here affect): (host), agent, maestro
 - graph: evidence-derived (imports/refs/deploy surfaces); advisory
 
 ## Open items
