@@ -44,3 +44,12 @@ tunnel-url.txt
 
 # Local Vercel project linkage (machine/account-specific identifiers)
 site/.vercel/
+
+# BASE-07 2026-10-18: one-off scratch probe litter (drift<N>.txt /
+# pass<N>.txt, contents = own index) from an Oct-16 scratch loop; producer
+# not live anywhere. Ignored so dirty-tree ship gates stay meaningful; safe
+# to delete the files outright.
+drift*.txt
+pass*.txt
+sub*.txt
+
