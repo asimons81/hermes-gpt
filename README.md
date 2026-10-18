@@ -413,10 +413,12 @@ Historical release notes and pre-release design / risk / planning artifacts rema
 ## Development and verification
 
 ```bash
-python -m pip install -r requirements-dev.txt
+python -m pip install -e ".[dev]"
 python -m pytest
 python tools/check_package_hygiene.py dist/*
 ```
+
+Development dependencies are declared in `pyproject.toml` under `[project.optional-dependencies].dev` (mirrored as the PEP 735 `[dependency-groups]` dev group), so `uv run python -m pytest` also works in a bare checkout.
 
 Release-specific checks are listed in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
