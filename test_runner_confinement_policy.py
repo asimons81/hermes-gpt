@@ -121,7 +121,7 @@ def test_worker_pi_wraps_argv_under_confinement(tmp_path: Path, monkeypatch: pyt
     _confinement_active(monkeypatch, True)
     captured: dict = {}
 
-    def fake_wrap(argv, workspace, *, writable=True):
+    def fake_wrap(argv, workspace, *, writable=True, extra_ro_paths=None, extra_rw_paths=None):
         captured["workspace"] = workspace
         captured["writable"] = writable
         return ["/usr/bin/bwrap", *argv]
@@ -152,7 +152,7 @@ def test_worker_pi_read_only_uses_read_only_workspace_confinement(
     _confinement_active(monkeypatch, True)
     captured: dict = {}
 
-    def fake_wrap(argv, workspace, *, writable=True):
+    def fake_wrap(argv, workspace, *, writable=True, extra_ro_paths=None, extra_rw_paths=None):
         captured["workspace"] = workspace
         captured["writable"] = writable
         captured["inner_argv"] = list(argv)

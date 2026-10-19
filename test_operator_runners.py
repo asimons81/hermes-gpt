@@ -11,6 +11,7 @@ import pytest
 import operator_contract as contract_mod
 import operator_policy as op
 import operator_runners as runners
+import runner_confinement as confinement
 
 
 def _contract(ws: Path, *, backend: str | None = None, options: dict | None = None) -> dict:
@@ -63,7 +64,7 @@ def _enable_pi_confinement(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         runners.confinement,
         "wrap_argv",
-        lambda argv, workspace, *, writable=True, expose_proc=False: list(argv),
+        lambda argv, workspace, *, writable=True, expose_proc=False, extra_ro_paths=None, extra_rw_paths=None: list(argv),
     )
 
 
@@ -1084,3 +1085,48 @@ def test_stale_request_envelope_cleanup_removes_old_prompt(tmp_path: Path):
     _os.utime(request_path, (old, old))
     assert runners._cleanup_stale_request_envelopes(hermes_root=tmp_path, ttl_seconds=3600) == 1
     assert not request_path.exists()
+
+
+def test_stage_ephemeral_pi_agent_dir_copies_nonsecret_and_trims_packages(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    agent = tmp_path / "agent"
+    agent.mkdir()
+    (agent / "models.json").write_text(json.dumps({"providers": {"p": {"apiKey": "$P_KEY"}}}), encoding="utf-8")
+    (agent / "models-store.json").write_text("{}", encoding="utf-8")
+    (agent / "settings.json").write_text(json.dumps({"packages": ["npm:x"], "theme": "dark"}), encoding="utf-8")
+    (agent / "extensions").mkdir()
+    (agent / "extensions" / "ext.js").write_text("// ext", encoding="utf-8")
+    (agent / "auth.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent))
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
+    (tmp_path / "tmp").mkdir()
+
+    stage = runners._stage_ephemeral_pi_agent_dir()
+    assert stage is not None and stage.is_dir()
+    assert json.loads((stage / "models.json").read_text(encoding="utf-8"))["providers"]["p"]["apiKey"] == "$P_KEY"
+    staged_settings = json.loads((stage / "settings.json").read_text(encoding="utf-8"))
+    assert "packages" not in staged_settings and staged_settings["theme"] == "dark"
+    assert (stage / "models-store.json").is_file()
+    assert (stage / "extensions" / "ext.js").is_file()
+
+
+def test_stage_ephemeral_pi_agent_dir_requires_models_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    agent = tmp_path / "agent-empty"
+    agent.mkdir()
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    assert runners._stage_ephemeral_pi_agent_dir() is None
+
+
+def test_wrap_argv_rejects_workspace_intersecting_and_relative_extras(tmp_path: Path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    inside = ws / "nested"
+    inside.mkdir()
+    with pytest.raises(ValueError, match="inside workspace"):
+        confinement.wrap_argv(["/bin/true"], ws, extra_ro_paths=[inside])
+    with pytest.raises(ValueError, match="must be absolute"):
+        confinement.wrap_argv(["/bin/true"], ws, extra_ro_paths=[Path("relative/path")])
+    with pytest.raises(ValueError, match="overlap"):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        confinement.wrap_argv(["/bin/true"], ws, extra_ro_paths=[shared], extra_rw_paths=[shared])

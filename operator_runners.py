@@ -32,6 +32,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -384,6 +385,65 @@ def _pi_tools(contract: dict[str, Any]) -> str:
 def _pi_agent_dir() -> Path:
     configured = os.environ.get("PI_CODING_AGENT_DIR", "").strip()
     return Path(configured).expanduser() if configured else Path.home() / ".pi" / "agent"
+
+
+_PI_AGENT_STAGE_FILES = ("models.json", "models-store.json", "settings.json")
+_PI_AGENT_STAGE_DIRS = ("extensions",)
+_PI_AGENT_STAGE_TTL_SECONDS = 6 * 3600
+
+
+def _stage_ephemeral_pi_agent_dir() -> Path | None:
+    """Stage an ephemeral writable copy of the non-secret Pi agent config.
+
+    The confined Pi child must point PI_CODING_AGENT_DIR at a writable tree
+    because its auth/settings resolvers take lock files (``auth.json.lock``,
+    ``settings.json.lock``) beside the config they read, even when the real
+    credential arrives via the provider apiKey env-ref through _pi_child_env.
+    Only non-secret topology files are staged (models.json, models-store.json
+    availability cache, settings.json); credential delivery stays env-only.
+    The staged settings.json drops the ``packages`` list: package
+    verification against a cold stage costs ~2 minutes of sandbox startup and
+    extensions are already disabled for read-only toolsets (--no-extensions).
+    Returns ``None`` when there is nothing to stage.
+    """
+    agent_dir = _pi_agent_dir()
+    if not agent_dir.is_dir():
+        return None
+    if not (agent_dir / "models.json").is_file():
+        return None
+    base = Path(tempfile.gettempdir()) / "hermes-gpt-pi-agent-stages"
+    base.mkdir(parents=True, exist_ok=True)
+    _reap_stale_pi_agent_stages(base)
+    stage = Path(tempfile.mkdtemp(prefix="pi-agent-", dir=base))
+    for name in _PI_AGENT_STAGE_FILES:
+        source = agent_dir / name
+        if source.is_file():
+            shutil.copy2(source, stage / name)
+    settings_path = stage / "settings.json"
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            settings.pop("packages", None)
+            settings_path.write_text(json.dumps(settings), encoding="utf-8")
+        except (OSError, json.JSONDecodeError):
+            # Staged settings are best-effort; a locked-down copy without the
+            # packages trim is still functional (only slower to boot).
+            shutil.copy2(agent_dir / "settings.json", stage / "settings.json")
+    for name in _PI_AGENT_STAGE_DIRS:
+        source = agent_dir / name
+        if source.is_dir():
+            shutil.copytree(source, stage / name)
+    return stage
+
+
+def _reap_stale_pi_agent_stages(base: Path) -> None:
+    cutoff = time.time() - _PI_AGENT_STAGE_TTL_SECONDS
+    for entry in base.iterdir():
+        try:
+            if entry.is_dir() and entry.stat().st_mtime < cutoff:
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            continue
 
 
 def _pi_selection(contract: dict[str, Any]) -> tuple[str, str]:
@@ -910,9 +970,17 @@ class PiRpcBackend(_LocalProcessBackend):
 
     def executable(self) -> str | None:
         configured = os.environ.get("HERMES_GPT_PI_EXE")
-        candidates = [configured, shutil.which("pi"), str(Path.home() / ".local" / "bin" / "pi")]
+        # The package CLI is preferred over the interactive host wrapper:
+        # every pi_rpc dispatch is OS-confined (wrap_argv in _worker_pi), and
+        # the wrapper's nested `#!/usr/bin/env` interpreter chain (bash ->
+        # pi-real -> env node) cannot exec inside the sandbox bind set. The
+        # package cli.js is self-contained and its env-shebang interpreter tree
+        # is bound automatically by _wrap_argv_with_tool. The wrapper's
+        # CLIProxyAPI-only policy is preserved on this path through
+        # PI_CODING_AGENT_DIR (agent-cliproxy-only), the provider/model
+        # allowlists, and _pi_child_env's single-credential delivery.
         package_cli = Path.home() / ".local" / "lib" / "node_modules" / "@earendil-works" / "pi-coding-agent" / "dist" / "cli.js"
-        candidates.append(str(package_cli))
+        candidates = [configured, str(package_cli), shutil.which("pi"), str(Path.home() / ".local" / "bin" / "pi")]
         for candidate in candidates:
             if candidate and Path(candidate).is_file():
                 return str(Path(candidate).resolve())
@@ -1327,7 +1395,7 @@ def _worker_pi(
     if model:
         argv += ["--model", model]
     if options.get("thinking"):
-        argv += ["--thinking", str(options["thinking"])]
+        argv += ["--thinking", str(options.get("thinking"))]
     child_env = _pi_child_env(contract, hermes_root, provider)
     workspaces = contract.get("allowed_scope", {}).get("workspaces") or []
     if not workspaces:
@@ -1337,7 +1405,23 @@ def _worker_pi(
     # toolsets receive a read-only workspace mount/profile; write-capable
     # toolsets receive a writable workspace only after _pi_tools() has enforced
     # the independent authorization + sandbox gates.
-    argv = confinement.wrap_argv(argv, workspace, writable=writable)
+    # Pi's auth resolver unconditionally locks its agent-dir file stores
+    # (auth.json.lock / settings.json.lock) before consulting the provider
+    # apiKey env-ref, so a read-only agent-dir bind fails closed with EROFS.
+    # Stage an ephemeral per-dispatch agent dir with the NON-SECRET config
+    # files only (models.json/settings.json/extensions), bind it writable, and
+    # point the child at it via PI_CODING_AGENT_DIR. Credential delivery stays
+    # env-only: exactly the single key from _pi_child_env.
+    staged_agent_dir = _stage_ephemeral_pi_agent_dir()
+    if staged_agent_dir is not None:
+        child_env = dict(child_env)
+        child_env["PI_CODING_AGENT_DIR"] = str(staged_agent_dir)
+    argv = confinement.wrap_argv(
+        argv,
+        workspace,
+        writable=writable,
+        extra_rw_paths=[staged_agent_dir] if staged_agent_dir is not None else None,
+    )
     proc = _popen_process_group(
         argv,
         stdin=subprocess.PIPE,

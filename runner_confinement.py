@@ -138,6 +138,8 @@ def _macos_sandbox_profile(
     *,
     writable: bool,
     runtime_root: Path | None = None,
+    extra_ro_paths: list[Path] | None = None,
+    extra_rw_paths: list[Path] | None = None,
 ) -> str:
     """Return a sandbox-exec profile for the requested workspace posture."""
     escaped_workspace = _macos_quote(workspace)
@@ -153,6 +155,8 @@ def _macos_sandbox_profile(
     for source in _MACOS_RO_FILES:
         rules.append(f'(allow file-read* (literal "{_macos_quote(source)}"))')
     runtime_roots = [runtime_root, _macos_node_runtime_root()]
+    for source in extra_ro_paths or []:
+        runtime_roots.append(Path(source))
     seen_runtime_roots: set[str] = set()
     for root in runtime_roots:
         if root is None:
@@ -163,6 +167,9 @@ def _macos_sandbox_profile(
         seen_runtime_roots.add(root_value)
         rules.append(f'(allow file-read* (subpath "{_macos_quote(root_value)}"))')
     rules.append(f'(allow file-read* (subpath "{escaped_workspace}"))')
+    for source in extra_rw_paths or []:
+        rules.append(f'(allow file-read* (subpath "{_macos_quote(str(source))}"))')
+        rules.append(f'(allow file-write* (subpath "{_macos_quote(str(source))}"))')
     if writable:
         rules.append(f'(allow file-write* (subpath "{escaped_workspace}"))')
     return "".join(rules)
@@ -295,10 +302,14 @@ def _wrap_argv_with_tool(
     *,
     writable: bool = True,
     expose_proc: bool = False,
+    extra_ro_paths: list[Path] | None = None,
+    extra_rw_paths: list[Path] | None = None,
 ) -> list[str]:
     """Build the platform confinement argv with an already-resolved tool."""
     workspace_path = Path(workspace).expanduser().resolve()
     workspace_resolved = str(workspace_path)
+    extra_ro_resolved = [Path(p).resolve() for p in (extra_ro_paths or [])]
+    extra_rw_resolved = [Path(p).resolve() for p in (extra_rw_paths or [])]
     runtime_root = _runtime_readonly_root(argv, workspace_path)
     runtime_roots: list[Path] = []
     if runtime_root is not None:
@@ -336,6 +347,15 @@ def _wrap_argv_with_tool(
         for root in runtime_roots:
             runtime = str(root)
             wrapped += ["--ro-bind", runtime, runtime]
+        # Caller-authorized read-only trees (e.g. the Pi agent config dir with
+        # models.json/settings.json). Bound read-only after the runtime roots;
+        # wrap_argv has already rejected entries intersecting the workspace.
+        for extra in extra_ro_resolved:
+            wrapped += ["--ro-bind-try", str(extra), str(extra)]
+        # Caller-authorized writable trees (e.g. an ephemeral staged agent dir
+        # whose lock files the child runtime creates at startup).
+        for extra in extra_rw_resolved:
+            wrapped += ["--bind", str(extra), str(extra)]
         workspace_bind = "--bind" if writable else "--ro-bind"
         wrapped += [
             workspace_bind, workspace_resolved, workspace_resolved,
@@ -352,6 +372,8 @@ def _wrap_argv_with_tool(
             workspace_resolved,
             writable=writable,
             runtime_root=runtime_roots[0] if runtime_roots else None,
+            extra_ro_paths=extra_ro_resolved,
+            extra_rw_paths=extra_rw_resolved,
         )
         return [tool, "-p", profile, *argv]
     raise RuntimeError(f"confinement unsupported on platform {sys.platform!r}")
@@ -548,6 +570,8 @@ def wrap_argv(
     *,
     writable: bool = True,
     expose_proc: bool = False,
+    extra_ro_paths: list[Path] | None = None,
+    extra_rw_paths: list[Path] | None = None,
 ) -> list[str]:
     """Wrap ``argv`` so the child process is confined to ``workspace``.
 
@@ -559,15 +583,46 @@ def wrap_argv(
     ``RuntimeError`` when no confinement tool is installed; callers that need a
     trust-boundary decision must gate on :func:`confinement_available` for the
     same posture.
+
+    ``extra_ro_paths`` adds caller-authorized read-only trees (for example a
+    shared agent config dir). ``extra_rw_paths`` adds caller-authorized
+    writable trees (for example an ephemeral staged agent dir whose lock files
+    a runtime insists on creating). Paths must be absolute and are resolved
+    before binding; neither kind may intersect the workspace.
     """
+    validated_workspace = validate_workspace_boundary(workspace)
+
+    def _resolve_extras(raw_paths: list[Path] | None, kind: str) -> list[Path]:
+        resolved: list[Path] = []
+        for raw in raw_paths or []:
+            p = Path(raw).expanduser()
+            if not p.is_absolute():
+                raise ValueError(f"{kind} entries must be absolute: {raw}")
+            entry = p.resolve()
+            try:
+                entry.relative_to(validated_workspace)
+            except ValueError:
+                pass
+            else:
+                raise ValueError(f"{kind} entry inside workspace is redundant/unsafe: {raw}")
+            if entry not in resolved:
+                resolved.append(entry)
+        return resolved
+
+    resolved_ro = _resolve_extras(extra_ro_paths, "extra_ro_paths")
+    resolved_rw = _resolve_extras(extra_rw_paths, "extra_rw_paths")
+    overlap = {str(p) for p in resolved_ro} & {str(p) for p in resolved_rw}
+    if overlap:
+        raise ValueError(f"extra_ro_paths and extra_rw_paths overlap: {sorted(overlap)}")
     tool = confinement_tool()
     if tool is None:
         raise RuntimeError("no OS confinement tool available (install bubblewrap or sandbox-exec)")
-    validated_workspace = validate_workspace_boundary(workspace)
     return _wrap_argv_with_tool(
         argv,
         validated_workspace,
         tool,
         writable=writable,
         expose_proc=expose_proc,
+        extra_ro_paths=resolved_ro,
+        extra_rw_paths=resolved_rw,
     )
