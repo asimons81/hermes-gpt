@@ -173,7 +173,7 @@ def _require_agent_modules() -> tuple[Any, Any]:
         try:
             skills_tool = importlib.import_module("tools.skills_tool")
             constants = importlib.import_module("hermes_constants")
-            if callable(getattr(skills_tool, "_find_all_skills", None)):
+            if _find_all_skills_fn(skills_tool) is not None:
                 return skills_tool, constants
         except Exception as exc:  # noqa: BLE001 - optional Agent runtime
             last_error = exc
@@ -182,6 +182,22 @@ def _require_agent_modules() -> tuple[Any, Any]:
         "Hermes Agent loader is unavailable; refusing to validate skills"
         + (f": {last_error}" if last_error is not None else "")
     )
+
+
+def _find_all_skills_fn(skills_tool: Any) -> Any:
+    """Resolve the catalog entrypoint across Agent generations.
+
+    Upstream renamed the private ``_find_all_skills`` to the public
+    ``find_all_skills`` (same keyword-only ``skip_disabled`` contract); older
+    forks still ship only the private name. Accept either so the loader
+    tracks Agent updates without a fork-side chase (item 327: the
+    agent-loader CI lane installs upstream HEAD and broke on the rename).
+    """
+    for name in ("find_all_skills", "_find_all_skills"):
+        fn = getattr(skills_tool, name, None)
+        if callable(fn):
+            return fn
+    return None
 
 
 def _agent_modules() -> tuple[Any, Any] | None:
@@ -254,7 +270,7 @@ def _discovery_entries(profile: str, hermes_root: Path) -> list[dict[str, Any]]:
     profile_home = op.resolve_profile_home(profile, hermes_root)
     try:
         with _profile_scope(profile_home, constants):
-            raw = skills_tool._find_all_skills()
+            raw = _find_all_skills_fn(skills_tool)()
             plugin_raw = _plugin_entries(skills_tool)
     except Exception as exc:
         raise _LoaderUnavailable(
