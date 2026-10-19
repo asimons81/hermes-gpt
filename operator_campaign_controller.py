@@ -53,6 +53,7 @@ import operator_campaign_compiler as compiler
 import operator_mission_plan as mission_plan
 import operator_mission_runtime as mission_runtime
 import operator_policy as op
+import operator_work_class
 
 SCHEMA_VERSION = "hermes.campaign-controller/v1"
 MANIFEST_SCHEMA = "hermes.campaign-manifest/v1"
@@ -527,9 +528,11 @@ def _mint_mission(seg: dict[str, Any], hermes_root: Path | None) -> dict[str, An
 
     Always ``final_approval_required=True``: mission completion parks at the
     Owner gate (``hermes_mission_approve`` is owner-only by design), and a
-    workspace-level controller must never forge that approval. Preauthorized
-    completion classes are AUTO-04's policy-table work, not a mint-time
-    shortcut here.
+    workspace-level controller must never forge that approval. AUTO-04's
+    work-class policy table may DECLARE ``approval_policy`` at mint time
+    (the documented native MissionSpec field); completion still parks at
+    the Owner gate — preauthorization is a declaration for the owner-side
+    resolver, never a mint-time shortcut here.
     """
     campaign = json.loads(seg["campaign_json"])
     spec = {
@@ -545,6 +548,19 @@ def _mint_mission(seg: dict[str, Any], hermes_root: Path | None) -> dict[str, An
         "skills": [],
         "final_approval_required": True,
     }
+    try:
+        # AUTO-04 work-class policy table (BOUNDARY.md reuse-first):
+        # approval_policy is the documented native MissionSpec feature —
+        # the controller only SETS it at mint. The compile here is pure and
+        # deterministic (the plan store is written later, untouched); any
+        # error fails closed to the owner policy. final_approval_required
+        # stays True: preauthorized missions still park at the Owner gate.
+        compiled = compiler.compile_campaign(seg["campaign_json"])
+        spec["approval_policy"] = operator_work_class.effective_approval_policy(
+            seg["campaign_json"], compiled["nodes"]
+        )
+    except Exception:
+        spec["approval_policy"] = {"policy": "owner"}
     payload = json.loads(mission_runtime.hermes_mission_create(
         json.dumps(spec), confirm=True, dry_run=False, hermes_root=hermes_root
     ))
