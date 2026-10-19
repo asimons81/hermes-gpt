@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+Everything in this section lives on repository master only. The published package has not moved: `pip install hermes-gpt` still resolves 0.14.0 and contains none of the modules or fixes below. Check the PyPI badge in the root README before relying on any of them from an installed package; run from a repository checkout to use them.
+
+Campaign orchestration series — master-only library modules; no MCP tools, no `server.py` wiring, and absent from the packaged module list. See [docs/campaigns.md](docs/campaigns.md).
+
+- Campaign → MissionPlan compiler (`operator_campaign_compiler`): deterministic, additive compile of a `hermes.campaign/v1` campaign document into a canonical `hermes.mission-plan/v1` plan accepted verbatim by `hermes_plan_create`, with typed evidence gates (one validation node per track over the closed `EVIDENCE_TYPES` set), bounded tracks/tasks/budgets, hashed objectives, and fail-closed `CampaignSpecError` validation (#43).
+- Persistent campaign controller (`operator_campaign_controller`): drives a campaign declared as a `hermes.campaign-manifest/v1` manifest (sha256-pinned, acyclic segment check, 24-segment/256 KiB caps) as a sequence of finite Missions, not one immortal Mission; durable per-campaign state under `<data_root>/campaigns/<campaign_id>/state.json`; restart-safe read-then-adopt reconciliation that re-derives every segment phase from the authoritative mission/plan/autopilot stores before acting; owner gates park segments (`parked_owner_gate`) and are never forged or bypassed, and the Autopilot machine gate (default OFF) likewise parks rather than bypasses (#44).
+- Durable campaign adoption lane (`operator_campaign_lane`): owns exactly one durable artifact, the ordered manifest registry `<data_root>/campaigns/lane.json`; registration validates a manifest through one dry-run controller tick and fails closed; unregistration is containment only; `campaign_lane_run` ticks every registered campaign through the existing controller and persists per-campaign event cursors; wakeups are event-cursor based with a safe high-water mark and degrade to the timer when the event store is unavailable, so campaigns stay adopted across restarts without manual re-adoption (#47).
+- Owner-approval work-class policy (`operator_work_class`): a thin fail-closed classifier over `operator_mission_plan.AUTH_CLASSES` — routine classes (`read_only`, `reversible_write`) may resolve the final Owner gate without a human click only when the campaign explicitly declares preauthorization and every plan node classifies as routine; high-impact, approval-kind, and unknown or malformed nodes always stay owner-gated, and the only write path in the whole series remains the existing owner-only `hermes_mission_approve`.
+
+Delegation/fleet recovery wave on master — user-visible fixes since 0.14.0:
+
+- Fleet task cancellation can terminate: the cancellation latch is released explicitly instead of staying latched on `RUNNER_CANCEL_UNOBSERVABLE`, and the reconciling/invoking crash windows are recovered (#32).
+- The third delegation crash-window shape (reconciling+reserved) is recovered on reconcile (#33; #34 landed the same change with zero delta).
+- Stale-invocation recovery resets the delegation's durable state, not just its phase (#35).
+- Never-invoked dispatches are recovered instead of wedging Autopilot and the delegation chain (#36).
+- The promote-verify dispatch chain no longer wedges across fleet, delegations, supervisor, and Autopilot (#37).
+- Cancel-time peer observation no longer passes a kwarg `hermes_fleet_task` never accepted (#38).
+- The cancellation freshness check reads epoch-integer timestamps (#39).
+- `record_attachment_state` no longer spams on unchanged polls (#41).
+
+Runtime and infrastructure:
+
+- The SDK-1 `add_tool` offload wrapper is dropped from `mcp_compat`: supported deployments run MCP SDK 2, whose FastMCP offloads sync tools natively, and the kept server-side async-semantics regressions are unaffected (#30).
+- MissionSpec gains a typed mint-time `approval_policy` field (`owner` or `auto_when_evidence_verified` with `max_wait_seconds` bounded 0–86400); absent keeps exactly the previous park-at-`awaiting_approval` behavior (#31).
+- CI: the public fork runs on GitHub-hosted runners only, and the lint plus package-hygiene regex false-positive that left master red after a CI-less merge is fixed.
+
+Known issue, recorded under roadmap item rm-164 with the fix deferred there: the fleet peer-version fallback literal `'0.20.5'` (`server.py:3075`/`:3117`, `HERMES_GPT_FLEET_PEER_VERSION`) disagrees with the package version 0.14.0.
+
 ## 0.14.0 - 2026-10-03
 
 Acceptance and recovery: declare deliverable checks before dispatch and recover from positively observed artifact failures within existing limits.
