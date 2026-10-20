@@ -24,6 +24,15 @@
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
 
+## Development on master (unreleased)
+
+Repository master has moved ahead of the published 0.14.0 package. Everything in this section exists and is exercised by tests on repository master only; none of it is in the published package.
+
+- **Campaign orchestration series** - a campaign-to-MissionPlan compiler; a persistent campaign controller that drives one campaign as a sequence of finite Missions; a durable adoption lane with read-then-adopt reconciliation and event-cursor wakeups; and an owner-approval work-class policy in which routine authorization classes auto-resolve while high-impact work stays owner-gated. Guide: [docs/campaigns.md](docs/campaigns.md).
+- **Repository-only boundary** - the campaign modules are present in the repository but not in the 0.14.0 wheel or PyPI package: they are absent from the packaged module list, register no MCP tools, and change no default behavior for installed packages.
+- **Delegation/fleet recovery wave (#32-#41)** - user-visible recovery fixes for delegation crash windows, cancellation observation, and stale-state recovery, plus the master-red lint/hygiene fix and GitHub-hosted CI runners for the public fork; summarized with PR references in the [CHANGELOG](CHANGELOG.md) `Unreleased` section.
+- **Known flagged issue (cited, not fixed)** - the fleet peer-version fallback literal `'0.20.5'` (`server.py:3075`/`:3117`, `HERMES_GPT_FLEET_PEER_VERSION`) disagrees with package version 0.14.0; it is recorded under roadmap item rm-164 with the fix deferred there.
+
 ## What v0.14.0 adds
 
 **Acceptance and recovery** strengthens Autopilot's completion checks and handles confirmed deliverable failures after successful execution.
