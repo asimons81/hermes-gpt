@@ -68,6 +68,7 @@ import operator_live_events as live_events
 import operator_mission_budget as budget
 import operator_mission_plan as mission_plan
 import operator_mission_runtime as mission_runtime
+import operator_runners as op_runners
 import operator_placement as placement
 import operator_policy as op
 import operator_skill_resolution as skill_resolution
@@ -1061,7 +1062,7 @@ def _build_contract(
     artifacts = mission_plan._clean_artifacts(node.get("expected_artifacts"))
     requirements = {item["path"]: item for item in mission_plan._clean_artifact_requirements(
         node.get("artifact_requirements"), artifacts)}
-    return {
+    contract: dict[str, Any] = {
         "schema": contract_mod.CONTRACT_SCHEMA,
         "task_id": _task_id(mission_id, node_id, key),
         "assigned_agent": agent,
@@ -1089,6 +1090,16 @@ def _build_contract(
             "approval_reference": f"mission:{mission_id}",
         },
     }
+    # Runner selection (item: autopilot dropped the node's execution selector):
+    # when the plan node pins an execution backend (e.g. pi_rpc for real dev
+    # campaigns), it MUST reach the work contract — otherwise the default
+    # fleet selector wins every dispatch and runner-pinned missions silently
+    # execute on the fleet peer. normalize_execution validates (backend name,
+    # options shape, no secrets); an absent selector keeps the legacy default
+    # (execution block omitted) so pre-existing contract hashes are stable.
+    if node.get("execution") is not None:
+        contract["execution"] = op_runners.normalize_execution(node.get("execution"))
+    return contract
 
 
 def _existing_delegation(mission_id: str, node_id: str, task_id: str, hermes_root: Path | None) -> dict[str, Any] | None:
