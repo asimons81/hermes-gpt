@@ -99,6 +99,7 @@ py-modules = [
   "operator_delegations",
   "operator_job_supervisor",
   "operator_runners",
+  "operator_hermes_agent_runner",
   "runner_confinement",
   "operator_review",
   "operator_events",
