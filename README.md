@@ -30,8 +30,8 @@ Repository master has moved ahead of the published 0.14.0 package. Everything in
 
 - **Campaign orchestration series** - a campaign-to-MissionPlan compiler; a persistent campaign controller that drives one campaign as a sequence of finite Missions; a durable adoption lane with read-then-adopt reconciliation and event-cursor wakeups; and an owner-approval work-class policy in which routine authorization classes auto-resolve while high-impact work stays owner-gated. Guide: [docs/campaigns.md](docs/campaigns.md).
 - **Repository-only boundary** - the campaign modules are present in the repository but not in the 0.14.0 wheel or PyPI package: they are absent from the packaged module list, register no MCP tools, and change no default behavior for installed packages.
-- **Delegation/fleet recovery wave (#32-#41)** - user-visible recovery fixes for delegation crash windows, cancellation observation, and stale-state recovery, plus the master-red lint/hygiene fix and GitHub-hosted CI runners for the public fork; summarized with PR references in the [CHANGELOG](CHANGELOG.md) `Unreleased` section.
-- **Known flagged issue (cited, not fixed)** - the fleet peer-version fallback literal `'0.20.5'` (`server.py:3075`/`:3117`, `HERMES_GPT_FLEET_PEER_VERSION`) disagrees with package version 0.14.0; it is recorded under roadmap item rm-164 with the fix deferred there.
+- **Delegation/fleet recovery wave (#32-#39, #41)** - user-visible recovery fixes for delegation crash windows, cancellation observation, and stale-state recovery, plus the master-red lint/hygiene fix and GitHub-hosted CI runners for the public fork; summarized with PR references in the [CHANGELOG](CHANGELOG.md) `Unreleased` section.
+- **Known flagged issue (cited, not fixed)** - the fleet peer-version fallback literal `'0.20.5'` (`server.py:3075`/`:3117`, `HERMES_GPT_FLEET_PEER_VERSION`) disagrees with package version 0.14.0; it is to be tracked under the pending roadmap ledger item rm-164 (the on-disk ROADMAP does not list it yet) with the fix deferred there.
 
 ## What v0.14.0 adds
 

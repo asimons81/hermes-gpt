@@ -18,7 +18,7 @@ The series is four library modules. None of them is an MCP tool, a server wiring
 `compile_campaign(campaign_json) -> dict` deterministically compiles one `hermes.campaign/v1` campaign document (tracks of tasks with typed evidence gates) into a canonical `hermes.mission-plan/v1` plan document that the existing `hermes_plan_create` accepts verbatim after canonicalization. There is no LLM, no new store, and no Mission-lifecycle or dispatch access in this module: the output is a plan document only.
 
 - Typed evidence gates: every campaign task declares its required evidence classes from the closed tuple `EVIDENCE_TYPES` (`implementation`, `ci`, `merge`, `deployment`, `runtime`, `sustained`); the compiler maps them onto the plan node's `capability_req` and inserts one validation node per track, so completion can only be claimed with the declared typed evidence.
-- Validation is fail-closed: malformed specs raise `CampaignSpecError` (a `ValueError`); ids are regex-checked, budgets are bounded (`est_minutes` 0–10,000 and `est_tokens` 0–10,000,000), artifacts must be existing basenames, and cross-task `depends_on` must resolve inside the campaign.
+- Validation is fail-closed: malformed specs raise `CampaignSpecError` (a `ValueError`); ids are regex-checked, budgets are bounded (`est_minutes` 0–10,000 and `est_tokens` 0–10,000,000), artifacts must be unique path-free basenames, and cross-task `depends_on` must resolve inside the campaign.
 - Bounds: at most 8 tracks, 24 tasks per track, and 48 tasks total; work beyond the cap fails closed instead of truncating.
 - INV-9 data containment: task titles and objectives are hashed, never stored raw.
 
@@ -43,7 +43,7 @@ Real campaigns are bigger than one Mission and must survive restarts, so `operat
 
 ## AUTO-04 — owner-approval work-class policy
 
-`operator_work_class.py` is a thin, fail-closed classifier over the native authorization axis `operator_mission_plan.AUTH_CLASSES` (`read_only`, `reversible_write`, `high_impact`). It is a caller of mission-runtime primitives only: no new store, and **the only write path in the whole series is the existing owner-only `hermes_mission_approve`.**
+`operator_work_class.py` is a thin, fail-closed classifier over the native authorization axis `operator_mission_plan.AUTH_CLASSES` (`read_only`, `reversible_write`, `high_impact`). It is a caller of mission-runtime primitives only: no new store, and **the series adds no new authority-bearing write path** — mission approval still flows only through the existing owner-only `hermes_mission_approve`; the series' own writes are its durable campaign/lane state files and plan/mission mints through the existing gated primitives.
 
 - `classify_plan_node` and `mission_approval_policy_for_nodes` classify plan nodes. **Invariant:** routine work classes — the closed tuple `ROUTINE_AUTH_CLASSES` (`read_only`, `reversible_write`) — auto-resolve; everything else (`high_impact`, approval-kind nodes, missing or unknown `authorization_class`, malformed nodes) is owner-gated and can never be preauthorized.
 - `campaign_preauthorized` and `effective_approval_policy`: a Mission may resolve its final Owner gate without a human click only when BOTH hold — the campaign document explicitly declares `"preauthorized": true` (or the equivalent closed `work_class` object) AND every plan node classifies as routine. A declaration can never elevate: any approval-kind or high-impact node forces the `owner` policy regardless of the declaration.
@@ -55,7 +55,7 @@ Real campaigns are bigger than one Mission and must survive restarts, so `operat
 - **No MCP tools.** None of the four modules registers a tool, and `server.py` does not import them.
 - **Not in published packages.** The modules are absent from `pyproject.toml` `py-modules`, so they are not in the 0.14.0 wheel or sdist; `pip install hermes-gpt` at 0.14.0 does not contain them. Run from a repository checkout to use this series, and do not assume GitHub releases and PyPI are synchronized.
 - **No new authority.** Every mutation reuses existing mission/plan/approval primitives through their existing gates (Operator policy, dry-run-first, Owner-only approval). The default surface for installed packages is unchanged.
-- **Known flagged issue (cited, not fixed here):** the fleet peer-version fallback literal `'0.20.5'` (`server.py:3075`/`:3117`, `HERMES_GPT_FLEET_PEER_VERSION`) disagrees with package version 0.14.0; it is recorded under roadmap item rm-164.
+- **Known flagged issue (cited, not fixed here):** the fleet peer-version fallback literal `'0.20.5'` (`server.py:3075`/`:3117`, `HERMES_GPT_FLEET_PEER_VERSION`) disagrees with package version 0.14.0; it is to be tracked under the pending roadmap ledger item rm-164 (the on-disk ROADMAP does not list it yet).
 
 ## Verification
 
