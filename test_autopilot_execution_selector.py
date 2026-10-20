@@ -7,7 +7,7 @@ in <1s with trivial artifacts. The selector must survive into the contract;
 an absent selector must keep the legacy shape (no execution key) so
 pre-existing contract hashes stay stable.
 """
-import sys, types, pathlib
+import sys, pathlib
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
