@@ -487,6 +487,26 @@ def _canonical_node(raw: Any) -> dict[str, Any]:
     if contract_sha and not SHA_RE.fullmatch(contract_sha):
         raise ValueError(f"node {node_id!r} contract_sha256 must be lowercase SHA-256")
 
+    # P0 architectural correction: the node may pin its execution selector
+    # (which backend rail executes this node's Work Contract — e.g. the
+    # hermes_agent delegate_session rail for real dev campaigns). The block
+    # is validated by operator_runners.normalize_execution at contract build;
+    # here it is carried through canonicalization so the autopilot's
+    # _build_contract can honor it. An absent selector keeps the legacy
+    # default (fleet) and the contract signature is unchanged, so
+    # pre-existing plans keep their hashes (selector excluded from the
+    # signature — it routes execution, it does not define the work).
+    execution = raw.get("execution")
+    if execution is not None:
+        if not isinstance(execution, dict):
+            raise ValueError(f"node {node_id!r} execution must be an object")
+        import operator_runners as _op_runners
+
+        try:
+            execution = _op_runners.normalize_execution(execution)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"node {node_id!r} execution invalid: {exc}") from exc
+
     node: dict[str, Any] = {
         "schema": NODE_SCHEMA,
         "node_id": node_id,
@@ -514,6 +534,8 @@ def _canonical_node(raw: Any) -> dict[str, Any]:
     }
     if requirements:
         node["artifact_requirements"] = requirements
+    if execution is not None:
+        node["execution"] = execution
     return node
 
 

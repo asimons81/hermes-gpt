@@ -573,7 +573,7 @@ def load_entrypoint_backends() -> list[str]:
     except Exception as exc:
         logger.debug("runner entry-point discovery failed", exc_info=exc)
         return loaded
-    builtin_names = {"fleet", "pi_rpc", "omx", "opencode", "codex"}
+    builtin_names = {"fleet", "pi_rpc", "omx", "opencode", "codex", "hermes_agent"}
     for ep in selected:
         try:
             candidate = ep.load()
@@ -1834,6 +1834,15 @@ def hermes_runner_cancel(task_id: str, backend: str = "", confirm: bool = False,
 
 
 def _register_builtins() -> None:
+    # P0 architectural correction (2026-10-20): the corrected execution rail.
+    # hermes_agent executes delegations through Hermes Agent's native
+    # delegate_session (persistent Pi RPC / OpenCode sessions) via the durable
+    # delegate-spool transport; the supervisor on the Hermes side owns session
+    # supervision, recovery, and question handling. Registered FIRST so the
+    # module stays import-light even if the conductor path is absent.
+    from operator_hermes_agent_runner import HermesAgentBackend
+
+    register_backend(HermesAgentBackend(), replace=True)
     for backend in (FleetBackend(), PiRpcBackend(), OpenCodeBackend(), OmxBackend(), CodexBackend()):
         register_backend(backend, replace=True)
 
