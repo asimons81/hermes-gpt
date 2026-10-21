@@ -21,7 +21,10 @@ from __future__ import annotations
 
 import pathlib
 import sys
-import tomllib
+try:
+    import tomllib  # Python >= 3.11
+except ImportError:  # pragma: no cover - exercised on the 3.10 floor legs
+    import tomli as tomllib  # declared runtime shim: tomli; python_version < '3.11'
 
 import pytest
 
