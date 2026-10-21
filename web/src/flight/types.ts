@@ -131,3 +131,28 @@ export function isStale(state: Pick<FetchState<unknown>, 'fetchedAt' | 'ttl'>): 
   if (state.fetchedAt == null || state.ttl == null || state.ttl <= 0) return false;
   return Date.now() - state.fetchedAt > state.ttl * 1000;
 }
+
+/** Owner inbox item (GET /api/ops/owner-inbox). Read-only projection. */
+export interface OwnerInboxItem {
+  kind: string;
+  mission_id: string;
+  summary: string;
+  since: string | null;
+  suggested_tool: string | null;
+  requires: 'owner' | 'workspace' | 'review';
+}
+
+export type OwnerInboxSourceState = 'ok' | 'unavailable' | 'empty';
+
+/** Owner inbox payload (the `data` of the `{ok, data}` envelope). */
+export interface OwnerInboxPayload {
+  items: OwnerInboxItem[];
+  count: number;
+  truncated: boolean;
+  limit: number;
+  sources: Record<string, OwnerInboxSourceState>;
+  complete: boolean;
+  skipped_sources: string[];
+  read_only: true;
+  generated_at: string;
+}

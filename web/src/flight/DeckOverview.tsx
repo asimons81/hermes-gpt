@@ -50,6 +50,9 @@ export function DeckOverview() {
         <Link className="fd-btn fd-btn--ghost" to="/ops/missions">
           Missions
         </Link>
+        <Link className="fd-btn fd-btn--ghost" to="/ops/owner-inbox">
+          Owner inbox
+        </Link>
         <Link className="fd-btn fd-btn--ghost" to="/events">
           Event History
         </Link>
