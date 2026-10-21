@@ -83,7 +83,7 @@ The source reads existing records only, with no fresh validation. A delegation r
 5. The validation manifest (`delegation_validation_manifests`) matches the row's `contract_sha256` and `task_id`, and its `review_requirements.required` is `true`.
 6. No acceptance record in `review-evidence/review-acceptances.jsonl` has the same `contract_sha256`, `verdict = SATISFIED`, and a `reviewer` outside the contract's attributable identities (`assigned_profile` and `assigned_agent`). This is the same evidence rule the validator applies to review-evidence records.
 
-Reading a delegation the review source cannot classify makes the source `unavailable`, not silently empty. The triggers are a corrupt or unreadable delegation store, a corrupt summary, a missing or mismatched manifest, more than 200 `reconciling` rows, or a review-evidence store with more than 5000 records. A missing delegation store is `empty`.
+Reading a delegation the review source cannot classify makes the source `unavailable`, not silently empty. The triggers are a corrupt or unreadable delegation store, a corrupt summary, a missing or mismatched manifest, more than 200 `reconciling` rows, or a review-evidence store with more than 5,000 acceptance lines. A missing delegation store is `empty`.
 
 Two consequences follow from using persisted records:
 
@@ -175,6 +175,6 @@ The inbox never calls these tools.
 
 - `limit` above 200 is rejected, not clamped.
 - The acknowledgement read window is the last 1 MiB. An acknowledgement older than that window no longer hides its item. A long-lived store needs compaction or a larger window before it reaches that size; this is a known limit.
-- Review evidence is read with a 5000-record bound and the validator's own reader skips non-JSON lines. A corrupt review-acceptance line is ignored by both, so it cannot count as an acceptance.
+- Review evidence is read with a bound of 5,000 acceptance lines and the validator's own reader skips non-JSON lines. A corrupt review-acceptance line is ignored by both, so it cannot count as an acceptance.
 
 Historical context: the Autopilot `waiting_for_owner` state and the Mission `awaiting_approval` state are described in [autopilot.md](autopilot.md) and [missions.md](missions.md). The Flight Deck Mission views are in [flight-deck-missions.md](flight-deck-missions.md). The review-acceptance record is described in the Work Contract and review docs.
