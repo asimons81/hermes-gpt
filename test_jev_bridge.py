@@ -154,7 +154,8 @@ globalThis.fetch = async (url, init) => {
   return Response.json({model:'jev-test',answers:{decision:answer},usage:{input_tokens:10,output_tokens:2}});
 };
 """.replace("OBSERVED", json.dumps(str(observed))))
-    launch = dataclasses.replace(adapter, argv=(adapter.argv[0], "--import", str(preload), adapter.argv[1]))
+    # Node's ESM loader requires a file URL for absolute Windows preload paths.
+    launch = dataclasses.replace(adapter, argv=(adapter.argv[0], "--import", preload.as_uri(), adapter.argv[1]))
     monkeypatch.setattr(bridge, "_launch_config", lambda: launch)
     children = track_children(monkeypatch)
     for name, args, kind in [
