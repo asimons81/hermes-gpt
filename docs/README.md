@@ -18,6 +18,8 @@ A design document describes intended architecture. It does not override implemen
 
 Repository version: **0.14.0**. The [GitHub v0.14.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0) and [PyPI 0.14.0 package](https://pypi.org/project/hermes-gpt/0.14.0/) are published; verify both channels independently when updating. Declared artifact size/digest checks and validation recovery require v0.14.0 or newer.
 
+Unreleased changes on `master` can retain the same package version. In particular, the Jev bridge is merged source after the v0.14.0 release; the version string alone does not prove it is installed or active. Verify the artifact/source revision and tool inventory using [runtime provenance](runtime-checkout.md).
+
 PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.13 Autopilot requires a published PyPI version of 0.13.0 or newer *and* `HERMES_GPT_AUTOPILOT=1`; v0.12 gated budget-enforcement and controller-L2 behavior requires a published PyPI version of 0.12.0 or newer *and* the corresponding machine gates armed; v0.11 Gemini Spark / Bot Chat / SDK 2 behavior requires a published PyPI version of 0.11.0 or newer; v0.10 vNext derived views / controller surfaces and v0.9 Mission/delegation/live-event behavior require 0.10.0 (or 0.9.0) or newer, respectively.
 
 The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to these canonical guides.
@@ -27,8 +29,9 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | Document | Authority | Use it for |
 | --- | --- | --- |
 | [`../README.md`](../README.md) | current | project overview, current release, quickstart, safety invariants, entry-point selection |
-| [`runtime-checkout.md`](runtime-checkout.md) | host deployment provenance | verify running-service provenance separately from source/package state; earlier checkout pin is historical |
+| [`runtime-checkout.md`](runtime-checkout.md) | current | verify running-service provenance, installation isolation and acceptance separately from source/package state |
 | [`oauth.md`](oauth.md) | current | static bearer and confidential-client OAuth configuration, token lifecycle, refresh rotation, and remote authentication limits |
+| [`vnext-capability-manifest-and-mission-ledger.md`](vnext-capability-manifest-and-mission-ledger.md) | current | read-only capability and per-mission ledger views |
 | [`jev.md`](jev.md) | unreleased source | default-off typed Jev decisions through the pinned external MCP adapter; owner setup and unchanged authority boundaries |
 | [`gemini-spark.md`](gemini-spark.md) | current | opt-in Gemini Spark client profile: dedicated-instance or additional-client setup, exact callback discovery, verification, and rollback |
 | [`mcp-compatibility.md`](mcp-compatibility.md) | current | SDK 1/2 support, protocol regression checks, transport matrix, trusted-client auth metadata |
@@ -113,8 +116,8 @@ These are version records, not current setup instructions:
 
 The following directories contain valuable provenance, but they are not operational source-of-truth documents:
 
-- `design/` - technical design documents written before or during implementation. v0.6 designs are historical; v0.7 Flight Deck architecture and ADRs are current design artifacts for the v0.7 release cycle.
-- `releases/` - release brief, integrated plan, risk reviews, counsel packet, and surface manifest created during pre-release work. v0.6 artifacts are historical; v0.7 Flight Deck research package, risk register, and implementation plan are current release-program artifacts.
+- `design/` - technical design documents written before or during implementation. v0.6 designs are historical; v0.7 Flight Deck architecture and ADRs are also historical release-cycle records.
+- `releases/` - release brief, integrated plan, risk reviews, counsel packet, and surface manifest created during pre-release work. v0.6 artifacts are historical; v0.7 Flight Deck research package, risk register, and implementation plan are also historical release-program records.
 
 Some of these files intentionally preserve phrases such as "candidate", "gate", or "before release" because they record the state at the time they were written. Agents must not treat those historical status statements as the current release state.
 

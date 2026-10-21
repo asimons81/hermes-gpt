@@ -17,7 +17,7 @@ $env:HERMES_HOME = 'C:\Users\<YOU>\AppData\Local\hermes'
 $env:HERMES_GPT_OPERATOR_ENABLED = '1'
 $env:HERMES_GPT_OPERATOR_LEVEL = 'skills_config'
 $env:HERMES_GPT_OPERATOR_APPLY_MODE = 'dry_run'
-$env:HERMES_GPT_OPERATOR_ALLOWED_PROFILES = 'default,hermes-researcher,hermes-trt-manager,hermes-nexus-wiki'
+$env:HERMES_GPT_OPERATOR_ALLOWED_PROFILES = 'default'
 
 Set-Location $WorkingDir
 & $PythonExe $ServerScript --http --host $ListenHost --port $ListenPort

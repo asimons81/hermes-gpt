@@ -4,7 +4,7 @@
 
 Hermes GPT v0.13.0 adds **Autopilot**: a durable runtime that drives one Mission through its MissionPlan (place nodes on capable peers, run independent nodes in parallel, observe and validate results, retry or replan within hard bounds, and stop at every approval boundary) without a human re-triggering every node. It is **default off**, and it is a caller of the existing Mission, plan, placement, Work Contract, delegation, budget, and live-event surfaces rather than a new authority.
 
-Operational guide: [`docs/autopilot.md`](autopilot.md). Design and the findings behind it: [`docs/design/v0.13-autopilot.md`](design/v0.13-autopilot.md) (historical intent; the code and tests win where they differ).
+Operational guide: [`docs/autopilot.md`](autopilot.md). Design and the findings behind it: [`docs/design/v0.13-autopilot.md`](https://github.com/asimons81/hermes-gpt/blob/master/docs/design/v0.13-autopilot.md) (historical intent; the code and tests win where they differ).
 
 ## Authority and defaults
 
