@@ -63,6 +63,7 @@ jobs:
         run: >-
           python -m py_compile
           server.py
+          jev_bridge.py
           codex_core.py
           codex_mcp.py
           mcp_compat.py
@@ -150,6 +151,7 @@ jobs:
       - run: >-
           python -m ruff check
           mcp_compat.py codex_mcp.py test_mcp_sdk_migration.py test_mcp_compat.py
+          jev_bridge.py test_jev_bridge.py
           test_mcp_transport_mode.py test_codex_mcp.py test_hermetic_environment.py test_operator_codex.py
           fabric_artifacts.py fabric_write_guard.py
           operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py
