@@ -11,20 +11,30 @@
 
 ## Current status
 
-- **Repository version:** 0.14.0
-- **Published GitHub release:** [v0.14.0](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0)
-- **Verified PyPI release:** [0.14.0](https://pypi.org/project/hermes-gpt/0.14.0/); check the badge for later updates
+- **Repository version:** 0.15.0 (source prepared for release; GitHub and PyPI publication must be verified before relying on it)
+- **GitHub release:** verify v0.15.0 on the [releases page](https://github.com/asimons81/hermes-gpt/releases). The last verified release is [v0.14.0](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0)
+- **PyPI release:** the badge above is the source of truth; the last verified version in this document is [0.14.0](https://pypi.org/project/hermes-gpt/0.14.0/)
 - **Python requirement:** 3.10+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
 
 > [!IMPORTANT]
-> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. Declared artifact acceptance and recovery require 0.14.0 or newer. Autopilot requires 0.13.0 or newer and `HERMES_GPT_AUTOPILOT=1`.
+> GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. The owner inbox, review assist, and connector tool profiles require 0.15.0 or newer. Declared artifact acceptance and recovery require 0.14.0 or newer. Autopilot requires 0.13.0 or newer and `HERMES_GPT_AUTOPILOT=1`.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
 
-Unreleased source also includes an optional [Jev decision bridge](docs/jev.md): three default-off tools reuse the pinned community `jev-mcp` adapter over local stdio. No gateway change or new authority is introduced. Owner key provisioning and deployment are separate setup steps; this is not a live-integration claim.
+## What v0.15.0 adds
+
+**Owner Loop** makes Owner decisions faster without adding authority: one read-only list of what is waiting, an advisory review score that never counts as evidence, smaller chat tool surfaces, and safer file-backup configuration. Every mutating path keeps its existing gates.
+
+1. **Owner inbox (read-only)** - `hermes_owner_inbox` is always registered. It lists Missions awaiting approval, Autopilot runs waiting for the Owner, and controller attention, with source health (`complete`). It approves, advances, and writes nothing; each item names the existing gated tool to use. See [docs/owner-inbox.md](docs/owner-inbox.md).
+2. **Advisory review assist (default off)** - `hermes_review_assess` asks the pinned Jev adapter for an advisory score of a dispatched Work Contract. It needs both `HERMES_GPT_ENABLE_JEV=1` and `HERMES_GPT_REVIEW_ASSIST=1`, is never review acceptance or Work Contract evidence, and is audited without a `task_id`. See [docs/review-assist.md](docs/review-assist.md).
+3. **Jev decision bridge (default off)** - three typed judgments (`hermes_jev_yes_no`, `hermes_jev_choose`, `hermes_jev_score`) reuse the pinned community `jev-mcp` adapter over local stdio, with no gateway change and no new authority. Owner key provisioning is a separate setup step. See [docs/jev.md](docs/jev.md).
+4. **Connector tool profiles** - `HERMES_GPT_TOOL_PROFILE` selects `full` (default), `operator` (without raw host primitives), or `chat-lean` (about 29 status and oversight tools). Profiles only remove tools and never bypass a gate. See [MCP compatibility](docs/mcp-compatibility.md#connector-tool-profiles).
+5. **Safer file backups** - `HERMES_GPT_OPERATOR_FILE_BACKUPS` disables backups only for an explicit `0`, `false`, `no`, `off`, or `disabled`; unset, empty, or unrecognized values keep them on. Thanks to @brunocasado for #85. See [Operator mode](docs/operator-mode.md#optional-file-backups).
+
+With optional gates unset the default connector surface is **138 tools**. `HERMES_GPT_AUTOPILOT=1` adds 3, `HERMES_GPT_ENABLE_JEV=1` adds 3, and `hermes_review_assess` adds 1 more when both Jev and review-assist gates are set. See [v0.15.0 release notes](docs/release-notes-v0.15.0.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## What v0.14.0 adds
 
@@ -144,6 +154,9 @@ See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention poli
 | Use ChatGPT or another trusted client to operate Hermes | [Operator Mode](docs/operator-mode.md) |
 | Group and approve a larger objective under one lifecycle | [Missions (v0.9)](docs/missions.md) |
 | Understand unified delegation lineage across runners | [Delegations (v0.9)](docs/delegations.md) |
+| See what is waiting on the Owner, read-only | [Owner inbox (v0.15)](docs/owner-inbox.md) |
+| Get an advisory Jev review score for a Work Contract (default off) | [Advisory review assist (v0.15)](docs/review-assist.md) |
+| Shrink the connector tool surface for a small-budget chat client | [Connector tool profiles](docs/mcp-compatibility.md#connector-tool-profiles) |
 | Consume durable live events / wake-up stream | [Live events (v0.9)](docs/live-events.md) |
 | Send bounded financial evidence to the local Finance profile | [Finance bridge](docs/finance.md) |
 | Understand cross-machine Fabric execution and its release boundary | [v0.8.0 Fabric release notes](docs/release-notes-v0.8.0.md) |
@@ -190,7 +203,7 @@ The v0.14.0 wheel and sdist are also attached to the [GitHub v0.14.0 release](ht
 
 ## Default local MCP surface
 
-With optional feature gates unset, the main server registers **137 tools**. The five core read-oriented tools are:
+With optional feature gates unset, the main server registers **138 tools**. The five core read-oriented tools are:
 
 - `hermes_read_file(path, offset=1, limit=500)`
 - `hermes_search_files(pattern, target="content", path=".", file_glob=None, limit=50)`
