@@ -22,12 +22,14 @@ These are future setup steps, not actions performed by the bridge. Do not enable
 2. Install Node.js 22+ on that runtime host. In a dedicated operator-managed directory, check out the exact adapter revision and install its locked dependencies:
 
    ```sh
-   git clone https://github.com/asimons81/jev-mcp.git
+   git clone --config core.autocrlf=false https://github.com/asimons81/jev-mcp.git
    cd jev-mcp
    git checkout --detach fc4d4bef26af92d1d5a3b9e05bffb46d90a37eae
    npm ci --ignore-scripts
    npm test
    ```
+
+   Preserve the exact Git source bytes: automatic LF-to-CRLF checkout conversion changes the pinned hashes, even when JavaScript behavior is equivalent. The clone setting above is scoped to this new adapter checkout; it does not change global Git settings. For an existing managed checkout, restore the pinned index bytes before installation with `git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force` only after preserving any local changes. Do not relax the hash verification to accommodate converted or modified files.
 
 3. Configure the following in the service's private environment/credential launcher, with absolute paths. Never place a key in MCP arguments, source control, logs, a client header, or a command-line argument:
 

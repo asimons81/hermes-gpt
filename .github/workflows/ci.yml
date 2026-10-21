@@ -35,6 +35,8 @@ jobs:
           ref: fc4d4bef26af92d1d5a3b9e05bffb46d90a37eae
           path: .qa-tmp/jev-mcp
           persist-credentials: false
+      - name: Preserve exact pinned adapter bytes on Windows and Linux
+        run: git -C .qa-tmp/jev-mcp -c core.autocrlf=false -c core.eol=lf checkout-index --all --force
       - run: npm ci --ignore-scripts --prefix .qa-tmp/jev-mcp
       - uses: actions/setup-python@v5
         with:
