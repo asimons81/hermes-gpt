@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-gpt"
-version = "0.14.0"
+version = "0.15.0"
 description = "Local-dev MCP sidecar for exposing selected Hermes Agent capabilities."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,6 +39,7 @@ hermes-gpt-fabric-peer = "operator_fabric_g4c:peer_main"
 include-package-data = true
 py-modules = [
   "server",
+  "tool_profiles",
   "jev_bridge",
   "oauth_auth",
   "operator_policy",
@@ -75,6 +76,8 @@ py-modules = [
   "operator_runners",
   "runner_confinement",
   "operator_review",
+  "operator_owner_inbox",
+  "operator_review_assist",
   "operator_events",
   "operator_live_events",
   "operator_oauth",
@@ -124,6 +127,7 @@ py-modules = [
   "docs/autopilot.md",
   "docs/release-notes-v0.13.0.md",
   "docs/release-notes-v0.14.0.md",
+  "docs/release-notes-v0.15.0.md",
   "docs/live-events.md",
   "docs/delegations.md",
   "docs/mcp-compatibility.md",
@@ -149,6 +153,8 @@ py-modules = [
   "docs/flight-deck-coverage.md",
   "docs/flight-deck-missions.md",
   "docs/gemini-spark.md",
+  "docs/owner-inbox.md",
+  "docs/review-assist.md",
 ]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",

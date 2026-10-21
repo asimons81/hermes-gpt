@@ -38,6 +38,7 @@ GATE_ENVS = [
     server.TRUSTED_PROXY_IPS_ENV,
     server.ALLOWED_HOSTS_ENV,
     server.op_autopilot.AUTOPILOT_ENV,
+    server.tool_profiles.TOOL_PROFILE_ENV,
 ]
 
 
@@ -1572,7 +1573,7 @@ V09_CONNECTOR_ADDITIONS = [
 # + 4 mission-budget envelope tools (sibling t_78e597c6) + 4 placement-scoring
 # tools (sibling t_167ac591) + 4 failure-semantics tools (t_49bbc143) + 4
 # supervised-mission-controller tools (t_ad1e6d07).
-V09_CONNECTOR_TOOL_COUNT = 137
+V09_CONNECTOR_TOOL_COUNT = 138
 
 
 def test_v09_connector_surface_acceptance(monkeypatch):
@@ -1589,7 +1590,7 @@ def test_v09_connector_surface_acceptance(monkeypatch):
     assert len(set(names)) == len(names), "duplicate tool registration"
 
     # serverInfo.version must track the checkout version, not the SDK version.
-    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.14.0"
+    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.15.0"
 
 
 def test_history_enabled_connector_surface_acceptance(monkeypatch):
@@ -1613,7 +1614,7 @@ def test_history_enabled_connector_surface_acceptance(monkeypatch):
         "hermes_bot_chat_get",
     }
 
-    assert len(enabled_names) == len(set(enabled_names)) == 142
+    assert len(enabled_names) == len(set(enabled_names)) == V09_CONNECTOR_TOOL_COUNT + 5
     assert set(enabled_names) - set(disabled_names) == expected_history_tools
     assert set(disabled_names) - set(enabled_names) == set()
 
@@ -1622,7 +1623,7 @@ def test_history_enabled_connector_surface_acceptance(monkeypatch):
         schema = enabled_by_name[name].model_dump(by_alias=True)["inputSchema"]
         assert schema["properties"]["profile"]["default"] == "default"
 
-    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.14.0"
+    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.15.0"
 
 
 AUTOPILOT_TOOLS = {"hermes_autopilot_start", "hermes_autopilot_status", "hermes_autopilot_stop"}

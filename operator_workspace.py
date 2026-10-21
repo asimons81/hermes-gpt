@@ -56,9 +56,20 @@ def _atomic_write_text(path: Path, content: str) -> None:
     os.replace(tmp, path)
 
 
-def _backup_file(path: Path) -> Path | None:
+# Only these explicit values disable backups. Unset, empty or unrecognized values
+# keep backups ON, so a typo cannot silently drop the rollback copy.
+_FILE_BACKUPS_DISABLED_VALUES = frozenset({"0", "false", "no", "off", "disabled"})
+
+
+def _file_backups_enabled() -> bool:
     raw = os.environ.get(OPERATOR_FILE_BACKUPS_ENV)
-    if raw is not None and not op.is_truthy(raw):
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _FILE_BACKUPS_DISABLED_VALUES
+
+
+def _backup_file(path: Path) -> Path | None:
+    if not _file_backups_enabled():
         return None
     if not path.exists():
         return None

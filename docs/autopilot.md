@@ -10,7 +10,7 @@ This is the current operational guide. `docs/design/v0.13-autopilot.md` records 
 
 Autopilot needs both of these, in addition to the normal Operator policy:
 
-- the machine gate `HERMES_GPT_AUTOPILOT=1` (read live; unset means off). While it is unset the three tools below are **not registered**, so the default connector surface is unchanged at 137 tools; with it set there are three more.
+- the machine gate `HERMES_GPT_AUTOPILOT=1` (read live; unset means off). While it is unset the three tools below are **not registered**, so the default connector surface is unchanged by Autopilot (138 tools in v0.15.0); with it set there are three more.
 - per call: Operator `workspace` level, direct apply mode, `dry_run=false`, and `confirm=true`. A dry run previews the start and writes nothing.
 
 ## Tools

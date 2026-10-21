@@ -52,7 +52,10 @@ import operator_swarm as op_swarm
 import operator_recovery as op_recovery
 import operator_autopilot as op_autopilot
 import operator_finance as op_finance
+import operator_owner_inbox as op_owner_inbox
+import operator_review_assist as op_review_assist
 import jev_bridge
+import tool_profiles
 from versioning import VERSION
 
 
@@ -2648,6 +2651,31 @@ def hermes_controller_trigger(mission_id: str, trigger_kind: str, ref: str = "")
     )
 
 
+# --- Owner inbox and advisory review assist (v0.15) -----------------------
+#
+# The wrappers hide hermes_root from the MCP input schema and pass the
+# server's data root, matching the other operator wrappers.
+
+
+def hermes_owner_inbox(limit: int = 50) -> str:
+    """Read-only list of what is waiting on the Owner (approvals, Autopilot, controller attention).
+
+    Lists items and suggests the existing gated tool to use; never approves, advances or changes anything.
+    Check ``sources`` and ``complete`` before treating an empty list as no pending work.
+    """
+    return op_owner_inbox.hermes_owner_inbox(limit, _default_hermes_root())
+
+
+async def hermes_review_assess(contract_sha256: str, artifact: str | None = None) -> str:
+    """Advisory Jev score of a dispatched Work Contract's state. Sends text to TypeSafe; never evidence or acceptance.
+
+    Registered only when HERMES_GPT_ENABLE_JEV=1 and HERMES_GPT_REVIEW_ASSIST=1 are both set.
+    """
+    return await op_review_assist.hermes_review_assess(
+        contract_sha256, artifact, _default_hermes_root()
+    )
+
+
 # --- Autopilot (v0.13 PR1) --------------------------------------------------
 #
 # Durable runtime only: places a Mission under Autopilot control via a
@@ -3248,6 +3276,13 @@ def build_server(
 
 
 def register_tools(server: FastMCP) -> None:
+    # Connector tool profile (HERMES_GPT_TOOL_PROFILE). Invalid values raise
+    # ValueError here so build_server fails closed at startup. "full" (the
+    # default) registers into the server unchanged; other profiles only skip
+    # tools and never bypass the env gates below.
+    profile = tool_profiles.profile_from_env()
+    if profile != tool_profiles.FULL_PROFILE:
+        server = tool_profiles.ProfileFilteredServer(server, profile)  # type: ignore[assignment]
     server.add_tool(hermes_read_file, meta=tool_meta())
     server.add_tool(hermes_search_files, meta=tool_meta())
     server.add_tool(hermes_memory, meta=tool_meta())
@@ -3295,6 +3330,21 @@ def register_tools(server: FastMCP) -> None:
                     idempotentHint=False, openWorldHint=True,
                 ),
             )
+
+    # Advisory review assist (v0.15): default OFF. Needs both the Jev gate and
+    # HERMES_GPT_REVIEW_ASSIST=1. The score is advisory and never evidence.
+    if op_review_assist.enabled():
+        server.add_tool(
+            hermes_review_assess,
+            meta=tool_meta(),
+            annotations=ToolAnnotations(
+                title="Advisory Jev review score for a Work Contract (never evidence)",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
+        )
 
     # --- Operator / Owner Mode tools -----------------------------------
     #
@@ -3354,6 +3404,20 @@ def register_tools(server: FastMCP) -> None:
         hermes_mission_audit,
     ):
         server.add_tool(_mission_tool, meta=tool_meta())
+
+    # Owner inbox (v0.15): read-only projection over existing read paths. It
+    # never approves, advances or writes; suggested actions stay gated tools.
+    server.add_tool(
+        hermes_owner_inbox,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="List work waiting on the Owner (read-only)",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
 
     # First-class durable Mission runtime (v0.9). Authority is enforced by
     # operator_mission_runtime; list/get are read-only, mutations are

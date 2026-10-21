@@ -12,6 +12,8 @@ include docs/operator-mode.md
 include docs/mcp-compatibility.md
 include docs/oauth.md
 include docs/jev.md
+include docs/owner-inbox.md
+include docs/review-assist.md
 include docs/runtime-checkout.md
 include docs/vnext-capability-manifest-and-mission-ledger.md
 include docs/release-notes-v0.2.0.md
@@ -32,6 +34,7 @@ include docs/gemini-spark.md
 include docs/autopilot.md
 include docs/release-notes-v0.13.0.md
 include docs/release-notes-v0.14.0.md
+include docs/release-notes-v0.15.0.md
 recursive-include web/dist *.html *.js *.css
 recursive-include examples *.ps1
 prune docs/design

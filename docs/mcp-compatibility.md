@@ -97,6 +97,30 @@ Client notes:
   update and cache-refresh behavior; it is the canonical guide and is not
   duplicated here.
 
+## Connector tool profiles
+
+`HERMES_GPT_TOOL_PROFILE` selects which of the registered connector tools the
+main server advertises. Chat clients with small tool budgets can use a smaller
+surface without changing any tool's behavior.
+
+| Value | Surface |
+| --- | --- |
+| unset or empty (default) | `full`: every registered tool, byte-identical to the unfiltered registration (138 tools in the pinned inventory: finance enabled, all other gates off). |
+| `operator` | `full` minus the raw host primitives `hermes_read_file`, `hermes_write_file`, `hermes_patch`, `hermes_search_files`, `hermes_run_command`, and `hermes_memory`. |
+| `chat-lean` | Read-only status and oversight plus owner decisions, about 29 tools with every gate off. The allowlist is `tool_profiles.CHAT_LEAN_TOOLS`. |
+
+Any other value fails closed: `build_server()` raises a `ValueError` naming
+`HERMES_GPT_TOOL_PROFILE` at startup, and the server does not start.
+
+Profiles never add authority. A profile only skips registrations, so each
+tool keeps its own env gates (for example `HERMES_GPT_AUTOPILOT=1` or
+`HERMES_GPT_ENABLE_SESSION_SEARCH=1`), its per-call confirm and dry-run checks,
+and the Operator and Owner policy that already applies. `chat-lean` is not
+read-only by policy: it still lists `hermes_mission_create`, `hermes_mission_approve`,
+and `hermes_review_accept`, which keep their existing gates. The authoritative
+inventory is pinned in `test_tool_inventory.py`, and `test_tool_profiles.py`
+covers the profile rules.
+
 ## Package floor and regression coverage
 
 `pyproject.toml` and `requirements.txt` allow `mcp[cli]>=1.28.1,<3`.

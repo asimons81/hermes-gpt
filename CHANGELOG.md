@@ -2,9 +2,17 @@
 
 ## Unreleased
 
-- Correct the default main-server inventory and source UI build instructions; replace host-specific runtime notes with a generic provenance/rollback guide, ship linked operational guides, and clarify unreleased-source versus package/runtime state. Keep example profiles generic and allow new example PowerShell scripts without unignoring private launchers.
+## 0.15.0 - 2026-10-21
 
-- Add a default-off Jev decision bridge: three tools reuse the pinned community `jev-mcp` adapter over bounded local stdio, retaining Hermes GPT's authentication and Operator/Owner gates. Includes mocked Python/Node interoperability, subprocess cleanup and authorization regression tests. Key provisioning, gate activation and deployment remain owner setup; see [docs/jev.md](docs/jev.md).
+Owner Loop: faster Owner decisions without new authority.
+
+- Added the read-only `hermes_owner_inbox` tool (always registered) and the Flight Deck read-only route `GET /api/ops/owner-inbox` with a read-only Owner inbox panel linked from the Deck overview. It lists Missions awaiting approval, Autopilot runs waiting for the Owner, and controller attention, with source health (`complete`) and suggested existing tools. It never approves, advances, or writes. See [docs/owner-inbox.md](docs/owner-inbox.md).
+- Added advisory review assist: `hermes_review_assess` scores a dispatched Work Contract through the pinned Jev adapter. It is registered only with `HERMES_GPT_ENABLE_JEV=1` and `HERMES_GPT_REVIEW_ASSIST=1`, requires the `read_only` Operator level, is advisory only, is never Work Contract evidence or review acceptance, and writes an audit record without a `task_id`. See [docs/review-assist.md](docs/review-assist.md).
+- Added `HERMES_GPT_TOOL_PROFILE` connector tool profiles (`full` default, `operator`, `chat-lean`). Profiles only remove tools; invalid values fail closed. See [docs/mcp-compatibility.md](docs/mcp-compatibility.md#connector-tool-profiles).
+- Made file backups configurable and safer: `HERMES_GPT_OPERATOR_FILE_BACKUPS` disables backups only for `0`, `false`, `no`, `off`, or `disabled` (case-insensitive). Unset, empty, or unrecognized values keep backups on. Thanks to @brunocasado for #85.
+- Added the default-off Jev decision bridge, with three tools reusing the pinned community `jev-mcp` adapter. See [docs/jev.md](docs/jev.md).
+- Docs hygiene (#94): corrected the default main-server inventory and source UI build instructions, replaced host-specific runtime notes with a generic provenance guide, and clarified unreleased-source versus package/runtime state.
+- Tool count: the default connector surface is 138 tools (137 in v0.14.0, plus `hermes_owner_inbox`). `HERMES_GPT_AUTOPILOT=1` adds 3 tools, `HERMES_GPT_ENABLE_JEV=1` adds 3, and `hermes_review_assess` adds 1 more when both Jev and review-assist gates are set.
 
 ## 0.14.0 - 2026-10-03
 

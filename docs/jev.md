@@ -1,6 +1,6 @@
 # Jev structured decisions
 
-Status: merged, unreleased source after v0.14.0; default off. Installing the published v0.14.0 release does not establish that this bridge is present. Verify the installed artifact/source revision and authenticated tool inventory. Deployment and live acceptance are specific to each installation; this guide is not a deployment receipt.
+Status: shipped in v0.15.0; default off. Installing an earlier release (v0.14.0 or older) does not establish that this bridge is present. Verify the installed artifact/source revision and authenticated tool inventory. Deployment and live acceptance are specific to each installation; this guide is not a deployment receipt.
 
 The optional bridge exposes TypeSafe Jev decisions through the main Hermes GPT MCP server. It reuses the separate community [jev-mcp adapter](https://github.com/asimons81/jev-mcp), pinned to `fc4d4bef26af92d1d5a3b9e05bffb46d90a37eae`; it does not implement another TypeSafe API client or change the Hermes Agent gateway.
 
@@ -14,11 +14,13 @@ Every tool accepts `state` and `instructions` as text. Choice requires a `criter
 
 Jev judges the supplied evidence; it does not search, chat, execute actions, approve work, or grant authority. Calls send the supplied text to TypeSafe and may incur API charges. Do not send credentials or sensitive operational records. The bridge never gathers session history, memory, files, or gateway state automatically.
 
+Advisory review triage built on `jev_score` (default off; separate gate `HERMES_GPT_REVIEW_ASSIST=1`) is documented in [`review-assist.md`](review-assist.md). Its results are advisory only and are never Work Contract evidence or review acceptance.
+
 ## Owner setup prerequisites
 
 These are operator setup steps; the bridge does not install or configure itself. Do not enable the gate or restart a deployment until the owner is ready.
 
-1. Verify the actual Hermes GPT runtime's executable, package/check-out provenance and authenticated MCP version. An unchanged `0.14.0` version string or a source checkout does not establish the running deployment; see [runtime provenance](runtime-checkout.md).
+1. Verify the actual Hermes GPT runtime's executable, package/check-out provenance and authenticated MCP version. An unchanged `0.15.0` version string or a source checkout does not establish the running deployment; see [runtime provenance](runtime-checkout.md).
 2. Install Node.js 22+ on that runtime host. In a dedicated operator-managed directory, check out the exact adapter revision and install its locked dependencies:
 
    ```sh
