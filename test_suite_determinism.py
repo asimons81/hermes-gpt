@@ -42,6 +42,10 @@ _EXPECTED_SKIPIF_COUNTS = {
     # check only applies when this package is installed editable in the
     # running interpreter (dev/CI venvs: yes; bare wheel installs: no).
     "test_editable_install_freshness.py": 1,
+    # TEST-01 tier-3 cross-repo lane: the conductor checkout exists on
+    # integration hosts (this machine) but not in hermes-gpt CI — the lane
+    # must not give CI a conductor dependency, so it skips there.
+    "test_spool_integration_cross_repo.py": 1,
 }
 
 _SKIP_PATTERN = re.compile(r"\bskipif\b")
