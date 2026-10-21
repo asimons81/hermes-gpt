@@ -139,9 +139,10 @@ def _item(
     suggested_tool: str | None,
     requires: str,
     stable_key: str,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     mid = str(mission_id or "")[:128]
-    return {
+    item: dict[str, Any] = {
         "item_id": _item_id(kind, mid, stable_key),
         "kind": kind,
         "mission_id": mid,
@@ -150,6 +151,12 @@ def _item(
         "suggested_tool": suggested_tool,
         "requires": requires,
     }
+    # Structured ids for kinds whose Flight Deck actions need them. They are
+    # not part of the stable id (see ``_item_id``), so they can change without
+    # changing the item's identity.
+    if extra:
+        item.update(extra)
+    return item
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +258,9 @@ def _autopilot_items(root: Path) -> tuple[str, list[dict[str, Any]]]:
                 suggested_tool=suggested,
                 requires="owner",
                 stable_key=",".join(all_nodes),
+                # A mission has at most one plan, keyed by mission_id in
+                # mission_plans; frontier_node_ids is the full sorted frontier.
+                extra={"plan_id": mission_id, "frontier_node_ids": list(all_nodes)},
             )
         )
     if unreadable:

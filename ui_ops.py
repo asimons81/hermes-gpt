@@ -46,6 +46,9 @@ import operator_diagnostics as op_diagnostics
 import operator_recovery as op_recovery
 import operator_oauth as op_oauth
 import operator_owner_inbox as op_owner_inbox
+import operator_mission_plan as op_plan
+import operator_mission_runtime as op_mission_rt
+import operator_autopilot as op_autopilot
 import ui_security
 from versioning import VERSION
 
@@ -440,7 +443,7 @@ def _account(request: Request) -> JSONResponse:
 
 
 class _MutationSpec:
-    __slots__ = ("fn", "args", "required_level", "confirm_gated", "long_running", "apply_flag")
+    __slots__ = ("fn", "args", "required_level", "confirm_gated", "long_running", "apply_flag", "precheck")
 
     def __init__(
         self,
@@ -451,6 +454,7 @@ class _MutationSpec:
         confirm_gated: bool = False,
         long_running: bool = False,
         apply_flag: bool = False,
+        precheck: Callable[[dict[str, Any], Any, bool], JSONResponse | None] | None = None,
     ) -> None:
         self.fn = fn
         self.args = set(args)
@@ -460,9 +464,116 @@ class _MutationSpec:
         # apply_flag tools use an ``apply`` boolean instead of dry_run/confirm
         # (hermes_operator_recover / hermes_swarm_reconcile).
         self.apply_flag = apply_flag
+        # Optional read-only check run before the gated function (both dry and
+        # direct). It may refuse (return a JSONResponse) or add server-derived
+        # kwargs to ``kwargs`` in place. Never client-controlled.
+        self.precheck = precheck
+
+
+# Plan node states from which an approval frontier is resolved, and the targets
+# the plan state machine allows from there. ``awaiting_approval -> completed`` is
+# approve; ``awaiting_approval -> failed`` is reject. ``paused`` is legal in the
+# state machine but does not resolve the frontier, so it is excluded.
+_APPROVAL_GATE_STATE = "awaiting_approval"
+_APPROVAL_RESOLUTION_TARGETS: frozenset[str] = frozenset(op_plan.NODE_TRANSITIONS[_APPROVAL_GATE_STATE]) - {"paused"}
+_ACK_MAX_IDS = 50
+
+
+def _refuse_approval_transition(message: str) -> JSONResponse:
+    return _json_resp(
+        _err("APPROVAL_TRANSITION_REFUSED", message, 400, extra={"tool": "hermes_plan_node_transition"}),
+        400,
+    )
+
+
+def _precheck_approval_transition(kwargs: dict[str, Any], root: Any, dry_run: bool) -> JSONResponse | None:
+    """Restrict ``hermes_plan_node_transition`` to resolving an approval frontier.
+
+    Browser-only restriction layered on the same tool: the node must be an
+    ``approval`` node or have ``capability_req.authorization_class ==
+    high_impact``, must currently be ``awaiting_approval``, and the target must
+    be ``completed`` (approve) or ``failed`` (reject). The browser path also
+    requires Owner Mode (the inbox item's ``requires`` is ``owner``). The plan
+    is read-only read here; its ``version`` is then passed as
+    ``expected_plan_version`` so a plan replaced in between is refused by the
+    tool's own compare-and-swap.
+    """
+    try:
+        op.OperatorPolicy().require_owner(dry_run)
+    except PermissionError as exc:
+        return _json_resp(
+            _err("LEVEL_REQUIRED", op.redact_output(str(exc))[:500], 403,
+                 extra={"required": "owner", "tool": "hermes_plan_node_transition"}),
+            403,
+        )
+    mission_id = kwargs.get("mission_id")
+    node_id = kwargs.get("node_id")
+    target = kwargs.get("target_state")
+    if not all(isinstance(v, str) and v for v in (mission_id, node_id, target)):
+        return _json_resp(_err("INVALID_ARGS", "mission_id, node_id and target_state must be non-empty strings", 400), 400)
+    if target not in _APPROVAL_RESOLUTION_TARGETS:
+        return _refuse_approval_transition("target_state must be completed (approve) or failed (reject)")
+    try:
+        plan = _parse_payload(op_plan.hermes_plan_get(mission_id=mission_id, hermes_root=root))
+    except Exception:  # noqa: BLE001 - fail closed; never echo internals
+        return _refuse_approval_transition("the mission plan could not be read")
+    if plan.get("success") is not True or plan.get("found") is False:
+        return _refuse_approval_transition("no mission plan was found for this mission")
+    node = next(
+        (n for n in (plan.get("nodes") or []) if isinstance(n, dict) and n.get("node_id") == node_id),
+        None,
+    )
+    if node is None:
+        return _refuse_approval_transition("the node is not part of this mission plan")
+    cap = node.get("capability_req") if isinstance(node.get("capability_req"), dict) else {}
+    gated = node.get("kind") == op_plan.KIND_APPROVAL or cap.get("authorization_class") == "high_impact"
+    if not gated:
+        return _refuse_approval_transition("the node is not an approval or high_impact node")
+    if node.get("state") != _APPROVAL_GATE_STATE:
+        return _refuse_approval_transition("the node is not awaiting approval")
+    version = plan.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        return _refuse_approval_transition("the mission plan version could not be read")
+    kwargs["expected_plan_version"] = version
+    return None
+
+
+def _precheck_owner_inbox_ack(kwargs: dict[str, Any], root: Any, dry_run: bool) -> JSONResponse | None:
+    ids = kwargs.get("item_ids")
+    if not isinstance(ids, list) or not 1 <= len(ids) <= _ACK_MAX_IDS:
+        return _json_resp(
+            _err("INVALID_ARGS", f"item_ids must be a list of 1 to {_ACK_MAX_IDS} item ids", 400),
+            400,
+        )
+    return None
 
 
 _MUTATION_TOOLS: dict[str, _MutationSpec] = {
+    "hermes_mission_approve": _MutationSpec(
+        op_mission_rt.hermes_mission_approve,
+        {"mission_id", "approval_reference", "confirm", "dry_run"},
+        required_level="owner",
+        confirm_gated=True,
+    ),
+    "hermes_plan_node_transition": _MutationSpec(
+        op_plan.hermes_plan_node_transition,
+        {"mission_id", "node_id", "target_state", "reason", "confirm", "dry_run"},
+        required_level="owner",
+        confirm_gated=True,
+        precheck=_precheck_approval_transition,
+    ),
+    "hermes_autopilot_stop": _MutationSpec(
+        op_autopilot.hermes_autopilot_stop,
+        {"mission_id", "confirm", "dry_run"},
+        required_level="workspace",
+        confirm_gated=True,
+    ),
+    "hermes_owner_inbox_ack": _MutationSpec(
+        op_owner_inbox.hermes_owner_inbox_ack,
+        {"item_ids", "dry_run"},
+        required_level="workspace",
+        precheck=_precheck_owner_inbox_ack,
+    ),
     "hermes_review_accept": _MutationSpec(
         op_review.hermes_review_accept,
         {"contract_sha256", "task_id", "assignee", "reviewer", "verdict", "evidence_refs", "approval_reference", "dry_run", "confirm"},
@@ -632,6 +743,15 @@ async def _action(request: Request) -> JSONResponse:
             kwargs["dry_run"] = bool(requested_dry_run)
 
     dry_run_effective = _action_effective_dry_run(spec, kwargs)
+
+    if spec.precheck is not None:
+        try:
+            refusal = spec.precheck(kwargs, _resolve_root(), bool(kwargs.get("dry_run", True)))
+        except Exception as exc:  # noqa: BLE001
+            return _json_resp(_err("INTERNAL", f"{tool} precheck failed: {op.redact_output(str(exc))[:300]}"), 500)
+        if refusal is not None:
+            _audit(tool, success=False, summary=f"{tool} refused before execution (dry_run={dry_run_effective})")
+            return refusal
 
     # Long-running tools (hermes_cron_run) block 30-7200s; never hold the
     # HTTP request. Dry-run plans are fast and run inline; real executions

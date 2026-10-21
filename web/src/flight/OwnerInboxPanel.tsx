@@ -1,8 +1,12 @@
-// OwnerInboxPanel — read-only list of what is waiting on the Owner.
-// No buttons mutate anything: suggested tools are shown as text only.
-import { useEffect } from 'react';
+// OwnerInboxPanel — what is waiting on the Owner, with the gated actions that
+// resolve it. Every action goes through GatedActionButton: a dry-run POST to
+// /api/ops/action first, then a separate confirm gesture. The server enforces
+// every gate (Owner Mode, level, apply mode); the UI adds no authority. The
+// inbox is refetched after any action that was actually applied.
+import { useEffect, useState } from 'react';
 
 import { useOwnerInboxStore } from '../stores/ownerInbox';
+import { GatedActionButton } from './GatedActionButton';
 import type { OwnerInboxItem } from './types';
 import { EmptyState, ErrorState, LoadingState, PanelCard, StatusChip, safeText } from './ui';
 
@@ -14,6 +18,12 @@ const KIND_LABELS: Record<string, string> = {
   no_capable_target: 'No capable target',
 };
 
+/** Kinds whose actions are wired in the browser. Everything else is guidance text. */
+const WIRED_KINDS = new Set(['mission_awaiting_approval', 'autopilot_waiting_owner']);
+
+// Same shape the server accepts for plan node ids (operator_mission_plan.NODE_ID_RE).
+const NODE_ID_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+const APPROVAL_REFERENCE_MAX = 256;
 const SUMMARY_MAX = 240;
 
 function sinceEpoch(item: OwnerInboxItem): number {
@@ -50,12 +60,104 @@ function SinceLine({ since, now }: { since: string | null; now: number }) {
   );
 }
 
+interface ActionProps {
+  item: OwnerInboxItem;
+  onApplied: () => void;
+}
+
+/** mission_awaiting_approval: hermes_mission_approve needs an Owner-supplied approval reference. */
+function MissionApproveAction({ item, onApplied }: ActionProps) {
+  const [reference, setReference] = useState('');
+  const trimmed = reference.trim();
+  return (
+    <div className="fd-stack">
+      <label className="fd-hint">
+        Approval reference
+        <input
+          type="text"
+          className="fd-input"
+          maxLength={APPROVAL_REFERENCE_MAX}
+          value={reference}
+          onChange={(event) => setReference(event.target.value)}
+        />
+      </label>
+      {/* Keyed on the reference: editing it discards any dry-run shown for the old one. */}
+      <GatedActionButton
+        key={trimmed}
+        tool="hermes_mission_approve"
+        args={{ mission_id: item.mission_id, approval_reference: trimmed }}
+        label="Approve Mission…"
+        levelTag="owner"
+        disabled={trimmed === '' || item.mission_id === ''}
+        onApplied={onApplied}
+      />
+    </div>
+  );
+}
+
+/** autopilot_waiting_owner: per frontier node approve/reject, plus stop. */
+function AutopilotActions({ item, onApplied }: ActionProps) {
+  const nodes = (item.frontier_node_ids ?? []).filter((id) => NODE_ID_RE.test(id));
+  const missionId = item.mission_id;
+  return (
+    <div className="fd-stack">
+      {nodes.map((nodeId) => (
+        <div key={nodeId} className="fd-stack">
+          <span className="fd-mono">node {safeText(nodeId, 64)}</span>
+          <GatedActionButton
+            tool="hermes_plan_node_transition"
+            args={{ mission_id: missionId, node_id: nodeId, target_state: 'completed' }}
+            label={`Approve node ${nodeId}…`}
+            levelTag="owner"
+            disabled={missionId === ''}
+            onApplied={onApplied}
+          />
+          <GatedActionButton
+            tool="hermes_plan_node_transition"
+            args={{ mission_id: missionId, node_id: nodeId, target_state: 'failed' }}
+            label={`Reject node ${nodeId}…`}
+            levelTag="owner"
+            disabled={missionId === ''}
+            onApplied={onApplied}
+          />
+        </div>
+      ))}
+      <GatedActionButton
+        tool="hermes_autopilot_stop"
+        args={{ mission_id: missionId }}
+        label="Stop Autopilot…"
+        levelTag="workspace"
+        disabled={missionId === ''}
+        onApplied={onApplied}
+      />
+    </div>
+  );
+}
+
+function ItemActions({ item, onApplied }: ActionProps) {
+  return (
+    <div className="fd-stack">
+      {item.kind === 'mission_awaiting_approval' ? <MissionApproveAction item={item} onApplied={onApplied} /> : null}
+      {item.kind === 'autopilot_waiting_owner' ? <AutopilotActions item={item} onApplied={onApplied} /> : null}
+      {/* Acknowledge hides the item only; it never resolves the condition. No confirm argument exists. */}
+      <GatedActionButton
+        tool="hermes_owner_inbox_ack"
+        args={{ item_ids: [item.item_id] }}
+        label="Acknowledge"
+        confirmArg={false}
+        onApplied={onApplied}
+      />
+    </div>
+  );
+}
+
 export function OwnerInboxPanel() {
   const { payload, status, error, fetchedAt, fetchInbox } = useOwnerInboxStore();
   useEffect(() => {
     void fetchInbox();
   }, [fetchInbox]);
 
+  const refetch = () => void fetchInbox();
   const now = Date.now();
   const unavailable = payload
     ? Object.entries(payload.sources)
@@ -70,10 +172,10 @@ export function OwnerInboxPanel() {
       <header className="fd-surface-head">
         <h2>Owner inbox</h2>
         <p className="fd-surface-desc">
-          Read-only list of what is waiting on you. Act with the existing gated tools from your MCP client.
+          What is waiting on you. Each action is a dry-run first, then a separate confirm; the server enforces every gate.
         </p>
         {fetchedAt ? (
-          <button type="button" className="fd-btn fd-btn--ghost" onClick={() => void fetchInbox()}>
+          <button type="button" className="fd-btn fd-btn--ghost" onClick={refetch}>
             Refresh
           </button>
         ) : null}
@@ -92,7 +194,7 @@ export function OwnerInboxPanel() {
       ) : null}
 
       {status === 'error' && payload === null ? (
-        <ErrorState message={error ?? 'owner inbox failed'} onRetry={() => void fetchInbox()} />
+        <ErrorState message={error ?? 'owner inbox failed'} onRetry={refetch} />
       ) : null}
 
       {payload && incomplete ? (
@@ -115,9 +217,9 @@ export function OwnerInboxPanel() {
             {payload.truncated ? ` · showing the newest ${payload.limit}; more items exist` : ''}
           </p>
           <div className="fd-stack">
-            {newestFirst(payload.items).map((item, index) => (
+            {newestFirst(payload.items).map((item) => (
               <PanelCard
-                key={`${item.kind}-${item.mission_id}-${index}`}
+                key={item.item_id}
                 title={KIND_LABELS[item.kind] ?? safeText(item.kind, 60)}
                 tone={item.requires === 'owner' ? 'review' : 'warn'}
                 aside={<StatusChip tone={item.requires === 'owner' ? 'review' : 'warn'} label={`requires ${item.requires}`} />}
@@ -127,13 +229,20 @@ export function OwnerInboxPanel() {
                 <p><SinceLine since={item.since} now={now} /></p>
                 <p className="fd-hint">
                   {item.suggested_tool ? (
-                    <>
-                      Act with <code>{safeText(item.suggested_tool, 80)}</code> from your MCP client
-                    </>
+                    WIRED_KINDS.has(item.kind) ? (
+                      <>
+                        Gated tool <code>{safeText(item.suggested_tool, 80)}</code>
+                      </>
+                    ) : (
+                      <>
+                        Act with <code>{safeText(item.suggested_tool, 80)}</code> from your MCP client
+                      </>
+                    )
                   ) : (
                     'No single tool suggested; inspect in Flight Deck.'
                   )}
                 </p>
+                <ItemActions item={item} onApplied={refetch} />
               </PanelCard>
             ))}
           </div>
