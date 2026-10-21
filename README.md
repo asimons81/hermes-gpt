@@ -214,6 +214,8 @@ Optional legacy feature gates remain available for compatibility:
 
 For new automation and maintenance work, prefer Operator Mode instead of enabling broad legacy write gates.
 
+To shrink the advertised tool list for chat clients, set `HERMES_GPT_TOOL_PROFILE` to `operator` or `chat-lean`. The default is `full` (unset or empty); profiles only remove tools and never add authority. See [connector tool profiles](docs/mcp-compatibility.md#connector-tool-profiles).
+
 ## Session history and control
 
 Session history and session control are independent, opt-in surfaces.

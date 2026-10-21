@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `HERMES_GPT_TOOL_PROFILE` connector tool profiles: `full` (default, unchanged surface), `operator` (drops raw host primitives), and `chat-lean` (about 28 status, oversight and owner-decision tools, gates unchanged). Profiles only remove tools and never add authority; invalid values fail closed at startup. A pinned default-inventory test guards the 137-tool surface. See [docs/mcp-compatibility.md](docs/mcp-compatibility.md#connector-tool-profiles).
+
 - Correct the default main-server inventory and source UI build instructions; replace host-specific runtime notes with a generic provenance/rollback guide, ship linked operational guides, and clarify unreleased-source versus package/runtime state. Keep example profiles generic and allow new example PowerShell scripts without unignoring private launchers.
 
 - Add a default-off Jev decision bridge: three tools reuse the pinned community `jev-mcp` adapter over bounded local stdio, retaining Hermes GPT's authentication and Operator/Owner gates. Includes mocked Python/Node interoperability, subprocess cleanup and authorization regression tests. Key provisioning, gate activation and deployment remain owner setup; see [docs/jev.md](docs/jev.md).
