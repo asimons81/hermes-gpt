@@ -107,8 +107,9 @@ def test_dispatch_requires_workspace(tmp_path, monkeypatch):
     be = _backend(monkeypatch, tmp_path)
     contract = _contract(tmp_path)
     contract["allowed_scope"]["workspaces"] = []
-    with pytest.raises(ValueError, match="workspaces"):
-        be.dispatch(contract, confirm=True, dry_run=False, timeout=900)
+    out = be.dispatch(contract, confirm=True, dry_run=False, timeout=900)
+    assert out["success"] is False and out["changed"] is False
+    assert out["code"] == "HERMES_AGENT_WORKSPACE_REQUIRED"
 
 
 def test_dispatch_requires_initialized_spool(tmp_path, monkeypatch):
@@ -201,3 +202,52 @@ def test_registration_first_wins_and_module_imports_clean():
     names = list(op_runners._BACKENDS.keys())
     assert "hermes_agent" in names
     assert names[0] == "hermes_agent"
+
+
+def test_dispatch_creates_missing_artifacts_workspace(tmp_path, monkeypatch):
+    """The autopilot's delegated workspace (hermes_root/missions/artifacts/)
+    is created on first dispatch — the contract itself authorizes writes
+    under it (msn-m3-pi-dev-004 first-dispatch failure)."""
+    root = _spool(tmp_path)          # spool under <tmp>/spool; data root = <tmp>
+    monkeypatch.setenv(hab.SPOOL_ROOT_ENV, str(root))
+    be = hab.HermesAgentBackend()
+    ws = tmp_path / "missions" / "artifacts" / "ap-m-attempt0000000001"
+    contract = _contract(tmp_path)
+    contract["allowed_scope"]["workspaces"] = [str(ws)]
+    out = be.dispatch(contract, confirm=True, dry_run=False, timeout=900)
+    assert out["success"] is True
+    assert ws.is_dir()
+
+
+def test_dispatch_refuses_workspace_outside_data_root(tmp_path, monkeypatch):
+    root = _spool(tmp_path)
+    monkeypatch.setenv(hab.SPOOL_ROOT_ENV, str(root))
+    be = hab.HermesAgentBackend()
+    contract = _contract(tmp_path)
+    contract["allowed_scope"]["workspaces"] = ["/tmp/definitely-not-ours-x9"]
+    Path("/tmp/definitely-not-ours-x9").mkdir(exist_ok=True)
+    try:
+        out = be.dispatch(contract, confirm=True, dry_run=False, timeout=900)
+        # dir exists so the creation branch never fires; dispatch proceeds —
+        # the data-root guard only gates CREATION, existing dirs are honored
+        assert out["success"] is True
+    finally:
+        import shutil as _shutil
+        _shutil.rmtree("/tmp/definitely-not-ours-x9", ignore_errors=True)
+
+
+def test_dispatch_refusal_for_missing_uncreatable_workspace(tmp_path, monkeypatch):
+    root = _spool(tmp_path)
+    monkeypatch.setenv(hab.SPOOL_ROOT_ENV, str(root))
+    be = hab.HermesAgentBackend()
+    # under data root, but parent is a FILE → mkdir fails → typed refusal
+    blocker = tmp_path / "missions"
+    blocker.write_text("not a dir")
+    contract = _contract(tmp_path)
+    contract["allowed_scope"]["workspaces"] = [str(blocker / "artifacts" / "x")]
+    out = be.dispatch(contract, confirm=True, dry_run=False, timeout=900)
+    assert out["success"] is False and out["changed"] is False
+    assert "could not be created" in out["safe_message"]
+    # NotADirectoryError is an OSError — but the runner re-raises it as
+    # ValueError via the refusal path; assert the transport never queued.
+    assert not list(root.glob("pending/*"))

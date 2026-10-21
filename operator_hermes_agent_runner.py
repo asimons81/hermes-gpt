@@ -194,11 +194,47 @@ class HermesAgentBackend:
 
         workspaces = contract.get("allowed_scope", {}).get("workspaces") or []
         workspace = str(workspaces[0]) if workspaces else ""
+        def _refusal(code: str, message: str) -> dict[str, Any]:
+            return {
+                "success": False,
+                "ok": False,
+                "code": code,
+                "safe_message": message,
+                "changed": False,  # deterministic pre-backend refusal
+                "backend": self.name,
+            }
+
         if not workspace:
-            raise ValueError(f"{self.name} contracts require allowed_scope.workspaces[0]")
+            return _refusal(
+                "HERMES_AGENT_WORKSPACE_REQUIRED",
+                f"{self.name} contracts require allowed_scope.workspaces[0]",
+            )
         workspace_path = Path(workspace).expanduser()
         if not workspace_path.is_dir():
-            raise ValueError(f"authorized workspace does not exist: {workspace}")
+            # The autopilot's _build_contract derives the workspace from
+            # hermes_root/missions/artifacts/<attempt-key>/ — hermes-gpt's
+            # OWN delegated workspace. Unlike the fleet rail (whose peer
+            # materializes the dir when it starts work), nothing on this
+            # host creates it before dispatch, so the first dispatch of
+            # every mission failed 'authorized workspace does not exist'
+            # (msn-m3-pi-dev-004, 2026-10-21). Creating the authorized
+            # workspace here is within the contract's own grant — the
+            # contract AUTHORIZES writes under this path; a workspace
+            # outside hermes-gpt's data root is never created.
+            data_root = _spool_root(hermes_root).parent
+            try:
+                resolved = workspace_path.resolve()
+                under_root = str(resolved).startswith(str(data_root.resolve()))
+                if under_root:
+                    workspace_path.mkdir(parents=True, exist_ok=True, mode=0o770)
+            except (OSError, RuntimeError):
+                under_root = False
+            if not under_root:
+                return _refusal(
+                    "HERMES_AGENT_WORKSPACE_UNAVAILABLE",
+                    f"authorized workspace does not exist and could not be "
+                    f"created: {workspace}",
+                )
 
         task_id = str(contract.get("task_id") or "")
         if not _ATTEMPT_ID_RE.fullmatch(task_id):
