@@ -7,7 +7,10 @@ and never contact Hermes or Messages. An autouse guard refuses any other spawn.
 
 from __future__ import annotations
 
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
 import json
 import os
 import signal
@@ -41,6 +44,11 @@ SENTINELS = {
     "HERMES_GPT_OAUTH_CLIENT_SECRET": "sentinel-oauth-value",
 }
 
+
+
+# The real-process tests spawn shebang scripts and rely on POSIX execute bits
+# and flock; the relay's child backends (imsg, hermes send) are POSIX in practice.
+POSIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="POSIX process/permission/flock semantics")
 
 def make_exe(path: Path, body: str = "import sys\nsys.exit(0)\n") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,6 +189,7 @@ def test_missing_executable_rejected(relay):
         delivery.load_config()
 
 
+@POSIX_ONLY
 def test_non_executable_file_rejected(relay):
     plain = relay.tmp / "plain-hermes"
     plain.write_text("not executable", encoding="utf-8")
@@ -563,6 +572,7 @@ def test_message_excludes_raw_prompt_fields(relay, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@POSIX_ONLY
 def test_real_driver_uses_argv_stdin_and_minimal_env(relay, monkeypatch):
     monkeypatch.setattr(delivery, "_drive", REAL_DRIVE)
     for name, value in SENTINELS.items():
@@ -590,6 +600,7 @@ def test_real_driver_uses_argv_stdin_and_minimal_env(relay, monkeypatch):
         assert value not in blob
 
 
+@POSIX_ONLY
 def test_real_jsonrpc_exchange_over_pipes(relay, monkeypatch):
     monkeypatch.setattr(delivery, "_drive", REAL_DRIVE)
     capture = relay.tmp / "rpc-lines.txt"
@@ -612,6 +623,7 @@ def test_real_jsonrpc_exchange_over_pipes(relay, monkeypatch):
     assert read_state(relay.root)["targets"]["imessage:+15551234567"]["delivered"]
 
 
+@POSIX_ONLY
 def test_real_driver_kills_and_reaps_on_timeout(relay):
     marker = relay.tmp / "pid.txt"
     exe = make_exe(
@@ -627,12 +639,14 @@ def test_real_driver_kills_and_reaps_on_timeout(relay):
         os.kill(pid, 0)  # killed and reaped: no process and no zombie
 
 
+@POSIX_ONLY
 def test_real_driver_missing_executable_is_not_configured(relay):
     with pytest.raises(delivery._SpawnFailed) as info:
         REAL_DRIVE([str(relay.tmp / "absent-binary")], b"", env={"PATH": "/usr/bin:/bin"}, timeout=2.0)
     assert info.value.code == "NOT_CONFIGURED"
 
 
+@POSIX_ONLY
 def test_real_driver_bounds_stdout(relay):
     exe = make_exe(relay.tmp / "flood-bin" / "flood", "import sys\nsys.stdout.write('x' * (300 * 1024))\n")
     outcome = REAL_DRIVE([str(exe)], b"", env={"PATH": "/usr/bin:/bin"}, timeout=10.0)
@@ -702,6 +716,7 @@ def test_corrupt_state_sends_nothing_and_is_not_overwritten(relay, monkeypatch):
     assert (relay.root / STATE_REL).read_text(encoding="utf-8") == "{not json"
 
 
+@POSIX_ONLY
 def test_second_writer_is_skipped_while_lock_held(relay, monkeypatch):
     set_inbox(monkeypatch, [item("a1")])
     relay.monkeypatch.setenv(delivery.TARGETS_ENV, "hermes:telegram")
