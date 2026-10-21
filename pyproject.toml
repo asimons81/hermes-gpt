@@ -105,6 +105,10 @@ py-modules = [
 "share/hermes-gpt/web/assets" = ["web/dist/assets/*.js", "web/dist/assets/*.css"]
 "share/hermes-gpt" = [
   "README.md",
+  "AGENTS.md",
+  "BOUNDARY.md",
+  "RELEASE_CHECKLIST.md",
+  "LICENSE",
   "pyproject.toml",
   "CHANGELOG.md",
 ]
@@ -112,6 +116,8 @@ py-modules = [
   "docs/README.md",
   "docs/oauth.md",
   "docs/jev.md",
+  "docs/runtime-checkout.md",
+  "docs/vnext-capability-manifest-and-mission-ledger.md",
   "docs/operator-mode.md",
   "docs/finance.md",
   "docs/missions.md",

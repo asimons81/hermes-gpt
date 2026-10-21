@@ -1,4 +1,7 @@
 include README.md
+include AGENTS.md
+include BOUNDARY.md
+include RELEASE_CHECKLIST.md
 include pyproject.toml
 include CHANGELOG.md
 # Public-safe docs only. Internal counsel/design/release-planning packets
@@ -9,6 +12,8 @@ include docs/operator-mode.md
 include docs/mcp-compatibility.md
 include docs/oauth.md
 include docs/jev.md
+include docs/runtime-checkout.md
+include docs/vnext-capability-manifest-and-mission-ledger.md
 include docs/release-notes-v0.2.0.md
 include docs/release-notes-v0.3.0.md
 include docs/release-notes-v0.4.0.md

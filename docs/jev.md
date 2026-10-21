@@ -1,6 +1,6 @@
 # Jev structured decisions
 
-Status: unreleased source; default off. Live TypeSafe authentication and deployment are not verified.
+Status: merged, unreleased source after v0.14.0; default off. Installing the published v0.14.0 release does not establish that this bridge is present. Verify the installed artifact/source revision and authenticated tool inventory. Deployment and live acceptance are specific to each installation; this guide is not a deployment receipt.
 
 The optional bridge exposes TypeSafe Jev decisions through the main Hermes GPT MCP server. It reuses the separate community [jev-mcp adapter](https://github.com/asimons81/jev-mcp), pinned to `fc4d4bef26af92d1d5a3b9e05bffb46d90a37eae`; it does not implement another TypeSafe API client or change the Hermes Agent gateway.
 
@@ -16,9 +16,9 @@ Jev judges the supplied evidence; it does not search, chat, execute actions, app
 
 ## Owner setup prerequisites
 
-These are future setup steps, not actions performed by the bridge. Do not enable the gate or restart a deployment until the owner is ready.
+These are operator setup steps; the bridge does not install or configure itself. Do not enable the gate or restart a deployment until the owner is ready.
 
-1. Verify the actual Hermes GPT runtime's executable, package/check-out provenance and authenticated MCP version. A source checkout does not establish the running deployment; see [runtime provenance](runtime-checkout.md).
+1. Verify the actual Hermes GPT runtime's executable, package/check-out provenance and authenticated MCP version. An unchanged `0.14.0` version string or a source checkout does not establish the running deployment; see [runtime provenance](runtime-checkout.md).
 2. Install Node.js 22+ on that runtime host. In a dedicated operator-managed directory, check out the exact adapter revision and install its locked dependencies:
 
    ```sh
@@ -43,8 +43,8 @@ These are future setup steps, not actions performed by the bridge. Do not enable
 
    `TYPESAFE_MODEL` is optional. All other settings are required for successful calls. The gate is enabled only by the exact value `1`. Paths are administrator configuration, never tool arguments. The bridge checks the pinned hashes of all adapter runtime sources, `package.json` and `package-lock.json`, plus direct dependency versions, before spawning. Keep the adapter, its installed dependency tree and the Node executable protected from untrusted writes. Changing the pin requires a reviewed code update; there is no automatic update/download path.
 
-4. Install the reviewed Hermes GPT build, restart only the intended Hermes GPT process after owner approval, then refresh the client's tool list. The separate curated Codex toolset is unchanged; Codex may continue using `jev-mcp` directly.
-5. Verify the three additional tools and make synthetic calls such as `{"state":"The parcel arrived.","instructions":"Did the parcel arrive?"}` to `hermes_jev_yes_no`. A successful call returns bounded `model`, `answer` and `usage` data. Check missing-key, invalid-key and disabled-gate failures without printing a key. No live result should be claimed until this succeeds in the intended deployment.
+4. If other services share the Python environment, use an isolated installation for a service-specific update; preserve the existing launcher/auth configuration for rollback. Install the reviewed Hermes GPT build, restart only the intended Hermes GPT process after owner approval, then refresh the client's tool list. The separate curated Codex toolset is unchanged; Codex may continue using `jev-mcp` directly.
+5. Verify the three additional tools and make synthetic calls such as `{"state":"The parcel arrived.","instructions":"Did the parcel arrive?"}` to `hermes_jev_yes_no`. A successful call returns bounded `model`, `answer` and `usage` data. Check missing-key, invalid-key and disabled-gate failures without printing a key. A standalone `jev-mcp` smoke test proves only that adapter/key path. Claim Hermes GPT live acceptance only after authenticated discovery and all three wrapper calls succeed through the intended service and transport.
 
 ## Authentication and authority
 

@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.14.0 — Acceptance and bounded recovery](assets/hermes-gpt-v0.14.0-readme-hero.jpg)
+![Hermes GPT v0.14.0 — Acceptance and bounded recovery](https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.14.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
@@ -82,7 +82,7 @@ v0.10.0 is the vNext slice-1 release: additive, decision-only derived mission vi
 5. **Semantic failure classification + recovery matrix** - `hermes_failure_classify`, `hermes_failure_taxonomy`, `hermes_recovery_matrix`, `hermes_controller_plan_list`: the Ops 8-class taxonomy and deterministic smallest-first recovery matrix; decision output only (`would_execute` always `False`).
 6. **Supervised mission controller — shadow/observe reconciler loop** - `hermes_controller_reconcile/status/lease_list/trigger`: a T1-T5 trigger model, per-mission pass lease, and a single shadow reconcile pass that emits the smallest recovery action as a proposal only. `controller_telemetry` reports deterministic GREEN / YELLOW / RED health.
 
-See [CHANGELOG.md](CHANGELOG.md) for the complete v0.10 change list; the vNext design notes are in [docs/design/](docs/design/) and the manifest/ledger guide is [docs/vnext-capability-manifest-and-mission-ledger.md](docs/vnext-capability-manifest-and-mission-ledger.md).
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.10 change list; the vNext design notes are in [docs/design/](https://github.com/asimons81/hermes-gpt/tree/master/docs/design) and the manifest/ledger guide is [docs/vnext-capability-manifest-and-mission-ledger.md](docs/vnext-capability-manifest-and-mission-ledger.md).
 
 ## What v0.9.0 adds
 
@@ -167,21 +167,38 @@ Check the PyPI badge before relying on version-specific features.
 ```bash
 git clone https://github.com/asimons81/hermes-gpt.git
 cd hermes-gpt
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+source .venv/bin/activate
 python -m pip install .
 hermes-gpt
 ```
+
+The source install above supports the MCP server. To include the optional browser UI in a source-built wheel, build its assets **before** installing/building the Python package:
+
+```bash
+cd web
+npm ci
+npm run build
+cd ..
+python -m pip install .
+```
+
+The locked UI build requires Node `^20.19.0 || >=22.12.0` (Node 24 works); it is also required separately when enabling the [Jev bridge](docs/jev.md). Installing a package does not install Hermes Agent or activate optional gates. Release wheels include built UI assets; an unbuilt source checkout can serve MCP while `/ui` reports missing assets. See [UI configuration](docs/ui-security-boundary.md).
 
 The v0.14.0 wheel and sdist are also attached to the [GitHub v0.14.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0). See [v0.14 release notes](docs/release-notes-v0.14.0.md) for acceptance and recovery, and [Autopilot](docs/autopilot.md) for setup and limits. The v0.11.0 release notes cover the opt-in Gemini Spark client profile, MCP Python SDK 2.x support, and profile-aware Bot Chat; the v0.10.0 release notes cover the vNext slice-1 surfaces (MissionPlan DAG, derived capability-manifest and mission-ledger views, budget envelope, placement scoring, failure semantics, and the shadow controller); the v0.8.0 release notes cover the Fabric surfaces (`hermes-gpt-fabric-peer`, capability-aware routing, remote evidence admission, reconciliation); the v0.9 surfaces (Missions `hermes_mission_*`, delegations `hermes_delegation_*`, live events `hermes_live_events_*`, `hermes_job_status/wait`) are documented in [docs/missions.md](docs/missions.md), [docs/delegations.md](docs/delegations.md), and [docs/live-events.md](docs/live-events.md). Operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
 
 ## Default local MCP surface
 
-With no optional feature gates enabled, the server exposes a small read-oriented surface:
+With optional feature gates unset, the main server registers **137 tools**. The five core read-oriented tools are:
 
 - `hermes_read_file(path, offset=1, limit=500)`
 - `hermes_search_files(pattern, target="content", path=".", file_glob=None, limit=50)`
 - `hermes_memory(action="search", target="memory", content=None, old_text=None)`
 - `hermes_skill_list()`
 - `hermes_skill_view(name)`
+
+Operator, Mission, contract, budget, controller and other policy-gated tools are also registered so callers can discover them and receive explicit refusals when authority is missing. Registration does not authorize mutation; the default policy remains read-only. See [Operator Mode](#operator-mode). Optional gates add to this inventory, so counts depend on the selected surface and configuration.
 
 Optional legacy feature gates remain available for compatibility:
 
@@ -201,7 +218,7 @@ For new automation and maintenance work, prefer Operator Mode instead of enablin
 
 Session history and session control are independent, opt-in surfaces.
 
-With `HERMES_GPT_ENABLE_SESSION_SEARCH=1`, Hermes GPT exposes four bounded read-only history tools: `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, and `hermes_session_export`. The default transcript roles are `user` and `assistant`; `system`, `tool`, and `function` content additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`. Export stays in memory, is size/message bounded, creates no files or paths, and lineage export fails closed.
+With `HERMES_GPT_ENABLE_SESSION_SEARCH=1`, Hermes GPT exposes four bounded read-only history tools: `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, and `hermes_session_export`, plus `hermes_bot_chat_get` for canonical Bot Chat resolution. The default transcript roles are `user` and `assistant`; `system`, `tool`, and `function` content additionally requires `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`. Export stays in memory, is size/message bounded, creates no files or paths, and lineage export fails closed.
 
 With `HERMES_GPT_ENABLE_SESSION_CONTROL=1`, Hermes GPT exposes `hermes_session_continue`, `hermes_session_send`, `hermes_session_job_status`, and `hermes_session_job_result`. Control jobs are bounded, use fixed argv with `shell=False`, allow only one active job per session, persist prompt length/hash rather than raw prompts, and return bounded redacted results. A server restart fails closed by marking unowned running jobs orphaned rather than signaling a persisted PID.
 
@@ -392,7 +409,7 @@ Git checkout updates require a clean checkout on the default branch and use fast
 Current operational documentation:
 
 - [Documentation map and source-of-truth rules](docs/README.md)
-- [Runtime checkout pin (which checkout is live)](docs/runtime-checkout.md)
+- [Runtime provenance and update verification](docs/runtime-checkout.md)
 - [Reuse / do-not-rebuild boundary](BOUNDARY.md)
 - [OpenAI Secure MCP Tunnel](docs/openai-secure-mcp-tunnel.md)
 - [OAuth and bearer authentication](docs/oauth.md)

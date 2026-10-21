@@ -69,8 +69,9 @@ The MCP specification leaves rendering of embedded resources to the client. Herm
 
 The `initialize` handshake advertises the hermes-gpt app version in
 `serverInfo.version` (from `versioning.VERSION`) — not the
-MCP SDK version. This lets a client detect a stale process that is still
-exposing an old schema. `test_mcp_compat.py::test_initialize_advertises_server_version`
+MCP SDK version. This helps detect a stale released version. Unreleased commits can share the
+same version string, so also verify source/artifact provenance and tool discovery
+when testing unreleased features; see [runtime provenance](runtime-checkout.md). `test_mcp_compat.py::test_initialize_advertises_server_version`
 asserts the handshake reports `versioning.VERSION` and that the pinned floor
 (`2024-11-05`) remains negotiable on the running SDK.
 
@@ -128,4 +129,5 @@ python -m venv .venv-sdk2 && .venv-sdk2/bin/pip install -e ".[dev]" "mcp>=2,<3"
 ```
 
 Swap the specifier for `"mcp>=1.28.1,<2"` to check SDK 1. Two runs cover the
-compatibility surface; the suite takes roughly a minute per run.
+compatibility surface. Duration depends on platform and enabled integration tests;
+Windows process/regression checks can take several minutes.
