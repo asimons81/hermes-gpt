@@ -251,3 +251,18 @@ def test_invalid_tool_profile_still_fails_closed() -> None:
     with _sandbox({tool_profiles.TOOL_PROFILE_ENV: "not-a-profile"}, finance_marker=False):
         with pytest.raises(ValueError):
             server.build_server()
+
+
+if __name__ == "__main__":
+    # Regenerate after an intentional tool-surface change (new tool, changed
+    # schema, annotation or docstring), then review the diff:
+    #   python test_tool_registry_neutrality.py
+    # Run it under both MCP SDK families; the document must be identical.
+    fresh = capture_golden()
+    if GOLDEN_PATH.exists():
+        prior = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+        same = {k: v for k, v in prior.items() if k != "captured_under"} == {k: v for k, v in fresh.items() if k != "captured_under"}
+        if same:
+            fresh["captured_under"] = {**prior.get("captured_under", {}), **fresh["captured_under"]}
+    GOLDEN_PATH.write_text(json.dumps(fresh, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"wrote {GOLDEN_PATH.name}")
