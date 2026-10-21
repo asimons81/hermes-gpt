@@ -52,6 +52,13 @@ def adapter(monkeypatch):
     return bridge._launch_config()
 
 
+def python_child_launch(script):
+    # Windows Python 3.10 needs SystemRoot to create its child process. Mirror
+    # the production Windows OS allowance without inheriting user credentials.
+    env = {"SystemRoot": os.environ["SystemRoot"]} if os.name == "nt" else {}
+    return bridge._Launch((sys.executable, str(script)), script.parent, env)
+
+
 def track_children(monkeypatch):
     children = []
     original = anyio.open_process
@@ -199,7 +206,7 @@ def test_child_errors_and_invalid_results_are_safe(monkeypatch, enabled, raw, ex
 def test_failed_child_is_reaped(monkeypatch, enabled, tmp_path, behavior, expected):
     script = tmp_path / "child.py"
     script.write_text(behavior)
-    launch = bridge._Launch((sys.executable, str(script)), tmp_path, {})
+    launch = python_child_launch(script)
     monkeypatch.setattr(bridge, "_launch_config", lambda: launch)
     monkeypatch.setattr(bridge, "CALL_TIMEOUT", 0.2 if expected == "TIMEOUT" else 3)
     children = track_children(monkeypatch)
@@ -210,15 +217,23 @@ def test_failed_child_is_reaped(monkeypatch, enabled, tmp_path, behavior, expect
 def test_cancelled_call_reaps_child_and_releases_slot(monkeypatch, enabled, tmp_path):
     script = tmp_path / "child.py"
     script.write_text("import time; time.sleep(60)")
-    monkeypatch.setattr(bridge, "_launch_config", lambda: bridge._Launch((sys.executable, str(script)), tmp_path, {}))
+    monkeypatch.setattr(bridge, "_launch_config", lambda: python_child_launch(script))
     children = track_children(monkeypatch)
     async def cancel():
         task = asyncio.create_task(bridge.call("jev_yes_no", INPUT))
-        while not children:
-            await asyncio.sleep(0.01)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        try:
+            with anyio.fail_after(5):
+                while not children:
+                    assert not task.done(), "child creation failed before cancellation"
+                    await asyncio.sleep(0.01)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            if not task.done():
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
     asyncio.run(cancel())
     assert children[0].returncode is not None
     assert bridge._SLOTS.acquire(blocking=False)
