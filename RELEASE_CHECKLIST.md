@@ -57,10 +57,11 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - `docs/runtime-checkout.md`
   - `docs/jev.md`
   - `docs/owner-inbox.md`
+  - `docs/attention-delivery.md`
   - `docs/review-assist.md`
   - `docs/vnext-capability-manifest-and-mission-ledger.md`
   - `docs/retention-policy.md`
-  - current release notes
+  - `docs/release-notes-v0.16.0.md` (and the current release notes for any later release)
 - Run `python tools/check_package_hygiene.py dist/*` and require exit `0` / `CLEAN`.
 - Confirm package artifacts contain no absolute private machine paths, RFC1918/Tailscale addresses, machine hostnames, live operational metrics, or private release-planning packets.
 
@@ -83,6 +84,9 @@ Use this checklist before publishing a Hermes GPT release artifact.
 - Confirm Owner Mode still denies secret paths.
 - Confirm `--profile remote` requires configured authentication and the existing TLS/loopback-proxy boundary. With neither authentication nor the two-part unsafe acknowledgement, startup must refuse; the unsafe no-auth experiment path is not release-safe.
 - Confirm README still states public unauthenticated Operator exposure is unsupported.
+- Confirm attention delivery is default off: `HERMES_GPT_ATTENTION_DELIVERY` must be exactly `1`, targets and executables come only from administrator environment variables (no MCP tool sets them), and the relay is notification-only. Its messages never carry approvals or commands, and no MCP tool sends. `hermes_attention_delivery_status` is the only MCP surface and is read-only.
+- Confirm `POST /api/ops/action` refuses cross-site requests before parsing the body: a non-JSON `Content-Type` returns `415 UNSUPPORTED_MEDIA_TYPE`, and a foreign `Sec-Fetch-Site` or `Origin` returns `403 CROSS_SITE_REFUSED`.
+- Confirm browser approvals still enforce Owner gates server-side. Mission approval needs Owner Mode in `hermes_mission_approve`, browser approval-node transitions need Owner Mode in the `ui_ops` precheck and are limited to approval and `high_impact` nodes, Autopilot stop and inbox acknowledgement need workspace level with direct apply mode, and none of them bypasses the tool's own gate.
 
 ## 6. Retention
 
@@ -141,5 +145,5 @@ Only after the checks above pass:
 - restart/reconnect any live MCP deployments whose tool schema changed;
 - for ChatGPT MCP apps/connectors, refresh or rescan the app actions after any tool-schema change and review/enable newly discovered actions before acceptance. ChatGPT may retain a frozen approved tool snapshot even after the MCP server and tunnel restart; if the workspace/plan does not expose an action refresh, recreate/re-publish the app connection;
 - verify the refreshed ChatGPT action count/set against the live MCP `tools/list`, then prove representative newly added tools from a new chat;
-- run the automated connector acceptance gate `python -m pytest -q test_server.py::test_v09_connector_surface_acceptance` (Finance enabled, optional env gates neutralized): it must report the exact expected tool count (139 for the v0.16 default surface: 137 through v0.14, plus `hermes_owner_inbox` in v0.15 and `hermes_owner_inbox_ack` in v0.16; the v0.12 slice-2 budget-enforcement and controller-L2 rungs add no tools and stay invisible with their machine gates unset) with all release additions present, no duplicates, and `serverInfo.version` equal to `versioning.VERSION` for this checkout;
+- run the automated connector acceptance gate `python -m pytest -q test_server.py::test_v09_connector_surface_acceptance` (Finance enabled, optional env gates neutralized): it must report the exact expected tool count (139 with Finance enabled (`HERMES_GPT_ENABLE_FINANCE=1`, which the gate sets) and every other optional gate neutralized: 137 through v0.14, plus `hermes_owner_inbox` in v0.15 and `hermes_owner_inbox_ack` in v0.16. With every optional gate unset the count is 138; the v0.12 slice-2 budget-enforcement and controller-L2 rungs add no tools and stay invisible with their machine gates unset) with all release additions present, no duplicates, and `serverInfo.version` equal to `versioning.VERSION` for this checkout;
 - confirm the advertised `serverInfo/version` seen by a real MCP client handshake (not just the SDK default) matches the version being published before accepting the connector.
