@@ -29,6 +29,7 @@ def clean_env(monkeypatch):
         op.OPERATOR_ENABLED_ENV, op.OPERATOR_LEVEL_ENV, op.OPERATOR_APPLY_MODE_ENV,
         op.OPERATOR_ALLOWED_PROFILES_ENV, op.OPERATOR_ALLOWED_PATHS_ENV,
         op.OPERATOR_DENIED_PATHS_ENV, op.OWNER_ACK_ENV, op.OWNER_ACTIVE_ENV,
+        ows.OPERATOR_FILE_BACKUPS_ENV,
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -154,6 +155,24 @@ def test_workspace_patch_direct_writes(workspace_tree, clean_env, audit_override
     assert "# New Project" in target.read_text(encoding="utf-8")
     backups = list(workspace_tree.glob("README.md.bak.*"))
     assert len(backups) == 1
+
+
+def test_workspace_patch_can_disable_file_backups(workspace_tree, clean_env, audit_override, monkeypatch):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PATHS_ENV, str(workspace_tree))
+    monkeypatch.setenv(ows.OPERATOR_FILE_BACKUPS_ENV, "0")
+    target = workspace_tree / "README.md"
+    out = ows.hermes_workspace_patch(
+        path=str(target), old_string="# Project", new_string="# No Backup",
+        dry_run=False,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["backup"] is None
+    assert "# No Backup" in target.read_text(encoding="utf-8")
+    assert list(workspace_tree.glob("README.md.bak.*")) == []
 
 
 def test_workspace_write_file_direct_writes(workspace_tree, clean_env, audit_override, monkeypatch):
@@ -529,6 +548,20 @@ def test_owner_patch_direct_writes_normal_path(workspace_tree, clean_env, audit_
     parsed = json.loads(out)
     assert parsed["success"] is True
     assert "# Owner Edit" in target.read_text(encoding="utf-8")
+
+
+def test_owner_write_file_can_disable_file_backups(workspace_tree, clean_env, audit_override, monkeypatch):
+    _enable_owner(monkeypatch)
+    monkeypatch.setenv(ows.OPERATOR_FILE_BACKUPS_ENV, "off")
+    target = workspace_tree / "README.md"
+    out = ows.hermes_owner_write_file(
+        path=str(target), content="# Owner No Backup\n", dry_run=False,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["backup"] is None
+    assert target.read_text(encoding="utf-8") == "# Owner No Backup\n"
+    assert list(workspace_tree.glob("README.md.bak.*")) == []
 
 
 def test_owner_run_command_in_apply_mode_dry_run_returns_dry_run_plan(workspace_tree, clean_env, audit_override, monkeypatch):
