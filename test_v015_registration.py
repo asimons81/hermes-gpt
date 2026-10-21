@@ -77,24 +77,23 @@ def test_review_assess_present_under_chat_lean_with_both_gates(monkeypatch):
     assert REVIEW_ASSESS in tools
 
 
-def test_neither_tool_exposes_hermes_root(monkeypatch):
+def test_neither_tool_exposes_hermes_root(monkeypatch, wire):
     tools = _surface(monkeypatch, gates=(JEV_GATE, REVIEW_GATE))
     for name in (OWNER_INBOX, REVIEW_ASSESS):
-        schema = tools[name].model_dump(by_alias=True)["inputSchema"]
+        schema = wire(tools[name])["inputSchema"]
         assert "hermes_root" not in schema["properties"], name
 
 
-def test_owner_inbox_annotations_are_read_only_and_idempotent(monkeypatch):
-    # Wire (alias) form: SDK 1 and SDK 2 differ in attribute naming.
-    ann = _surface(monkeypatch)[OWNER_INBOX].model_dump(by_alias=True)["annotations"]
+def test_owner_inbox_annotations_are_read_only_and_idempotent(monkeypatch, wire):
+    ann = wire(_surface(monkeypatch)[OWNER_INBOX])["annotations"]
     assert ann["readOnlyHint"] is True
     assert ann["destructiveHint"] is False
     assert ann["idempotentHint"] is True
     assert ann["openWorldHint"] is False
 
 
-def test_review_assess_annotations_match_jev_style(monkeypatch):
-    ann = _surface(monkeypatch, gates=(JEV_GATE, REVIEW_GATE))[REVIEW_ASSESS].model_dump(by_alias=True)["annotations"]
+def test_review_assess_annotations_match_jev_style(monkeypatch, wire):
+    ann = wire(_surface(monkeypatch, gates=(JEV_GATE, REVIEW_GATE))[REVIEW_ASSESS])["annotations"]
     assert ann["readOnlyHint"] is True
     assert ann["destructiveHint"] is False
     assert ann["idempotentHint"] is False

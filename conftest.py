@@ -164,6 +164,22 @@ def wire(model):
     return model.model_dump(by_alias=True)
 
 
+@pytest.fixture(name="wire")
+def _wire_fixture():
+    """Render an MCP SDK object in wire (alias) form for assertions.
+
+    Returns ``model.model_dump(by_alias=True, exclude_none=True)``. Compare
+    annotations, server info and schemas through this, never through SDK
+    attribute names (``readOnlyHint`` vs ``read_only_hint``), so one test runs
+    on both the SDK 1 and SDK 2 families. Unset fields are omitted.
+    """
+
+    def _wire(model) -> dict:
+        return model.model_dump(by_alias=True, exclude_none=True)
+
+    return _wire
+
+
 @pytest.fixture(autouse=True)
 def isolate_operator_environment(monkeypatch):
     for name in _ISOLATED_ENV_VARS:
