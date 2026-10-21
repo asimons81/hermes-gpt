@@ -1,6 +1,6 @@
 # Attention delivery (default off)
 
-Status: **v0.16 source change; default off.** Verify the installed revision and that `operator_attention_delivery.py` exists before relying on it (see [runtime provenance](runtime-checkout.md)).
+Status: **shipped in v0.16.0; default off.** Verify the installed version and that `operator_attention_delivery.py` exists before relying on it (see [runtime provenance](runtime-checkout.md)).
 
 ## Current behavior
 

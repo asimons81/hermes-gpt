@@ -24,7 +24,7 @@ The Mission screens (list, detail, Autopilot panel) contain no mutation controls
 
 ## Owner inbox actions (v0.16)
 
-Status: branch `feat/v016-deck-actions`, not part of a release until the release notes say so.
+Status: shipped in v0.16.0 (the Owner inbox Flight Deck actions and their approval-frontier gates).
 
 The Owner inbox panel (`GET /api/ops/owner-inbox`) offers per-item actions for Missions that wait on the Owner. Each action is a dry-run request followed by a separate confirm request. The server enforces every gate, including Owner Mode, and refuses with the tool's own message.
 

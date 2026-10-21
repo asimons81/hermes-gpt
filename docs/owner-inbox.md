@@ -1,6 +1,6 @@
 # Owner inbox
 
-Status: the read-only inbox **shipped in v0.15.0**. The Work Contract review source, stable item ids and acknowledgements are **v0.16 changes on branch `feat/v016-inbox-ack`**. The per-item Flight Deck actions (see [Flight Deck actions](#flight-deck-actions)) are **v0.16 changes on branch `feat/v016-deck-actions`**. None of these is part of a release until the release notes say so. Verify the installed version and tool inventory before relying on any of them (see [runtime provenance](runtime-checkout.md)).
+Status: the read-only inbox **shipped in v0.15.0**. The Work Contract review source, stable item ids, acknowledgements (`hermes_owner_inbox_ack`), and the Flight Deck inbox actions **ship in v0.16.0**. Verify the installed version and tool inventory before relying on any of them (see [runtime provenance](runtime-checkout.md)).
 
 ## Current behavior
 
@@ -179,7 +179,7 @@ The projection never calls these tools. The Flight Deck actions below call the s
 
 ## Flight Deck actions
 
-Status: v0.16, branch `feat/v016-deck-actions`.
+Status: shipped in v0.16.0.
 
 Each inbox item in the Flight Deck offers the actions below. Every action uses the existing gated tool named in the table, through `POST /api/ops/action`. The server-side allowlist, argument checks, level checks, dry-run, confirm gate, and audit are those of the tool. The browser adds no authority. See [ui-security-boundary.md](ui-security-boundary.md#6-mutations-remain-auditable-and-gated) for the allowlist.
 
