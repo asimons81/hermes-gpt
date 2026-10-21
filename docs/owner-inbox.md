@@ -1,6 +1,6 @@
 # Owner inbox (read-only)
 
-Status: **unreleased source** on `feat/v015-owner-inbox`. Verify the checked-out revision before relying on it (see [runtime provenance](runtime-checkout.md)).
+Status: **shipped in v0.15.0**; always registered (read-only). Verify the installed version and tool inventory before relying on it (see [runtime provenance](runtime-checkout.md)).
 
 ## Current behavior
 
@@ -11,7 +11,7 @@ Code: `operator_owner_inbox.py`.
 - `build_inbox(hermes_root: Path | None = None, limit: int = 50) -> dict`. `limit` must be an int from 1 to 200; anything else raises `ValueError`.
 - `hermes_owner_inbox(limit: int = 50, hermes_root: Path | None = None) -> str`. JSON-string wrapper that returns `{"success": true, "tool": "hermes_owner_inbox", ...}`, or an error envelope for an invalid limit or a denied read level. It writes one audit record through `operator_policy.audit_record`.
 
-Flight Deck route (unreleased source): `GET /api/ops/owner-inbox?limit=N` in `ui_ops.py`. It returns the same projection in the `{"ok": true, "data": ...}` envelope, redacted by `ui_security`. There is no POST. It respects the `approvals` entry of the Mission allowlist (`HERMES_GPT_MISSION_ALLOWED_SURFACES`: unset allows, a list allows only listed surfaces, empty denies). A bad `limit` returns `400 INVALID_LIMIT`.
+Flight Deck route: `GET /api/ops/owner-inbox?limit=N` in `ui_ops.py`. It returns the same projection in the `{"ok": true, "data": ...}` envelope, redacted by `ui_security`. There is no POST. It respects the `approvals` entry of the Mission allowlist (`HERMES_GPT_MISSION_ALLOWED_SURFACES`: unset allows, a list allows only listed surfaces, empty denies). A bad `limit` returns `400 INVALID_LIMIT`.
 
 ### Result shape
 
@@ -83,7 +83,7 @@ The inbox never calls these tools.
 
 - Not an approval queue. Approving or rejecting still happens only through the tools above.
 - Not a notification system. Nothing is pushed; the inbox is pulled.
-- Not registered as an MCP tool in `server.py` by this change. Registration is a separate change. Check the live tool inventory before naming `hermes_owner_inbox` in an agent prompt.
+- Registered as the MCP tool `hermes_owner_inbox(limit=50)` in every profile, including `chat-lean`. The MCP input is `limit` only; `hermes_root` is not exposed. Its annotations are `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, `openWorldHint=false`.
 - `limit` above 200 is rejected, not clamped.
 
 Historical context: the Autopilot `waiting_for_owner` state and the Mission `awaiting_approval` state are described in [autopilot.md](autopilot.md) and [missions.md](missions.md). The Flight Deck Mission views are in [flight-deck-missions.md](flight-deck-missions.md).

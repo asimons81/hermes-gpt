@@ -76,6 +76,8 @@ py-modules = [
   "operator_runners",
   "runner_confinement",
   "operator_review",
+  "operator_owner_inbox",
+  "operator_review_assist",
   "operator_events",
   "operator_live_events",
   "operator_oauth",
@@ -150,6 +152,8 @@ py-modules = [
   "docs/flight-deck-coverage.md",
   "docs/flight-deck-missions.md",
   "docs/gemini-spark.md",
+  "docs/owner-inbox.md",
+  "docs/review-assist.md",
 ]
 "share/hermes-gpt/examples" = [
   "examples/start-hermes-gpt.example.ps1",

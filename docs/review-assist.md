@@ -1,10 +1,10 @@
 # Advisory review triage (Jev-backed)
 
-Status: unreleased source after v0.14.0; default off. The `hermes_review_assess` function exists in `operator_review_assist.py`, but this source revision does not register it as an MCP tool. Registration is a separate change. Verify the active tool inventory before relying on it.
+Status: shipped in v0.15.0; default off. `hermes_review_assess` is registered as an MCP tool only when both `HERMES_GPT_ENABLE_JEV=1` and `HERMES_GPT_REVIEW_ASSIST=1` are set. Verify the active tool inventory before relying on it.
 
 ## Current behavior
 
-`hermes_review_assess(contract_sha256, artifact=None, hermes_root=None)` asks the pinned Jev adapter for an advisory score of how well a dispatched Work Contract's state fits its completion criteria. It is an opinion for a human reviewer. It is never review acceptance and never Work Contract evidence.
+`hermes_review_assess(contract_sha256, artifact=None)` (MCP input; the data root is supplied by the server and is not an input) asks the pinned Jev adapter for an advisory score of how well a dispatched Work Contract's state fits its completion criteria. It is an opinion for a human reviewer. It is never review acceptance and never Work Contract evidence.
 
 ### Gates
 
