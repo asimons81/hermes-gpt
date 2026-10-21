@@ -41,7 +41,7 @@ All settings are **administrator environment variables**. Tool arguments cannot 
 | `HERMES_GPT_HERMES_CLI` | none | Absolute path to the `hermes` executable. Required only if a `hermes:` target is configured. |
 | `HERMES_GPT_IMSG_CLI` | none | Absolute path to the `imsg` executable. Required only if an `imessage:` target is configured. |
 | `HERMES_GPT_ATTENTION_LINK_BASE` | unset | Optional `https://` base. When set, each message ends with `<base>/ui/ops/owner-inbox`. |
-| `HERMES_GPT_ATTENTION_MAX_PER_RUN` | `5` | 1 to 20 messages per target per pass. More than this becomes one digest. |
+| `HERMES_GPT_ATTENTION_MAX_PER_RUN` | `5` | 1 to 20 per target per pass, one message each. More than this becomes one digest. |
 
 Invalid configuration fails closed with exit code `2` and a message that does not echo the configured values. Each executable must exist, be a regular file, and be executable.
 

@@ -34,6 +34,7 @@ dev = [
 [project.scripts]
 hermes-gpt = "server:main"
 hermes-gpt-fabric-peer = "operator_fabric_g4c:peer_main"
+hermes-gpt-attention-relay = "operator_attention_delivery:main_entry"
 
 [tool.setuptools]
 include-package-data = true
@@ -69,6 +70,7 @@ py-modules = [
   "operator_placement",
   "operator_failure_semantics",
   "operator_autopilot",
+  "operator_mission_launch",
   "operator_controller",
   "operator_contract",
   "operator_delegations",
@@ -77,6 +79,7 @@ py-modules = [
   "runner_confinement",
   "operator_review",
   "operator_owner_inbox",
+  "operator_attention_delivery",
   "operator_review_assist",
   "operator_events",
   "operator_live_events",
@@ -154,6 +157,7 @@ py-modules = [
   "docs/flight-deck-missions.md",
   "docs/gemini-spark.md",
   "docs/owner-inbox.md",
+  "docs/attention-delivery.md",
   "docs/review-assist.md",
 ]
 "share/hermes-gpt/examples" = [

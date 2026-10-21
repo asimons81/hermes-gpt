@@ -13,6 +13,7 @@ include docs/mcp-compatibility.md
 include docs/oauth.md
 include docs/jev.md
 include docs/owner-inbox.md
+include docs/attention-delivery.md
 include docs/review-assist.md
 include docs/runtime-checkout.md
 include docs/vnext-capability-manifest-and-mission-ledger.md

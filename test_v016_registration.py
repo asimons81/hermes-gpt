@@ -195,3 +195,28 @@ def test_default_surface_count_is_pinned(monkeypatch):
 def _surface_server(monkeypatch):
     _surface(monkeypatch)
     return server.build_server()
+
+
+def test_packaging_ships_v016_modules_entry_point_and_docs():
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
+    root = Path(server.__file__).resolve().parent
+    with open(root / "pyproject.toml", "rb") as fh:
+        pyproject = tomllib.load(fh)
+    modules = pyproject["tool"]["setuptools"]["py-modules"]
+    assert {"operator_attention_delivery", "operator_mission_launch"} <= set(modules)
+    assert pyproject["project"]["scripts"]["hermes-gpt-attention-relay"] == "operator_attention_delivery:main_entry"
+    shipped_docs = pyproject["tool"]["setuptools"]["data-files"]["share/hermes-gpt/docs"]
+    assert "docs/attention-delivery.md" in shipped_docs
+    assert "include docs/attention-delivery.md" in (root / "MANIFEST.in").read_text(encoding="utf-8")
+
+
+def test_attention_relay_entry_point_exits_with_configuration_code(monkeypatch, capsys):
+    # An out-of-range interval is a configuration error: exit 2 and a bounded JSON line.
+    monkeypatch.setattr("sys.argv", ["hermes-gpt-attention-relay", "--watch", "--interval", "1"])
+    with pytest.raises(SystemExit) as exc:
+        attention.main_entry()
+    assert exc.value.code == 2
+    assert json.loads(capsys.readouterr().out)["error"] == attention.ERR_CONFIG

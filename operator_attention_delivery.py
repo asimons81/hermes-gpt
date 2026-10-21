@@ -1023,10 +1023,16 @@ __all__ = [
     "Target",
     "load_config",
     "main",
+    "main_entry",
     "mask_target",
     "run_once",
     "status",
 ]
+
+def main_entry() -> None:
+    """Console-script entry point (``hermes-gpt-attention-relay``): forwards argv to ``main``."""
+    sys.exit(main(sys.argv[1:]))
+
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
