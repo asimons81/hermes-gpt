@@ -33,6 +33,7 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`oauth.md`](oauth.md) | current | static bearer and confidential-client OAuth configuration, token lifecycle, refresh rotation, and remote authentication limits |
 | [`vnext-capability-manifest-and-mission-ledger.md`](vnext-capability-manifest-and-mission-ledger.md) | current | read-only capability and per-mission ledger views |
 | [`jev.md`](jev.md) | unreleased source | default-off typed Jev decisions through the pinned external MCP adapter; owner setup and unchanged authority boundaries |
+| [`review-assist.md`](review-assist.md) | unreleased source | default-off advisory Jev scoring of Work Contract state; text sent to TypeSafe, separate advisory store, never evidence or acceptance |
 | [`gemini-spark.md`](gemini-spark.md) | current | opt-in Gemini Spark client profile: dedicated-instance or additional-client setup, exact callback discovery, verification, and rollback |
 | [`mcp-compatibility.md`](mcp-compatibility.md) | current | SDK 1/2 support, protocol regression checks, transport matrix, trusted-client auth metadata |
 | [`file-export.md`](file-export.md) | current | bounded binary file transfer, workspace/denied-path gates, size/extension limits, MCP embedded-resource semantics |
