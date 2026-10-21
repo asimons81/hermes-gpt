@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import hashlib
 import importlib.metadata
+import inspect
 import json
 import os
 import tempfile
@@ -167,6 +168,10 @@ def snapshot(env: dict[str, str], *, finance_marker: bool = False) -> list[tuple
     rows = []
     for tool in tools:
         dump = tool.model_dump(by_alias=True, exclude_none=True)
+        # Python 3.13+ strips docstring indentation at compile time; 3.10-3.12
+        # do not. Normalize so the golden is interpreter-independent.
+        if isinstance(dump.get("description"), str):
+            dump["description"] = inspect.cleandoc(dump["description"])
         rows.append((tool.name, _sha256(dump), dump))
     return rows
 

@@ -171,7 +171,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "dbbca80aff7effcdadcca0a6a8097bd80aa90654a80a81d3ccfef38a1ae9f27d"
+   "sha256": "fa9e3345bf31778b4891e4cdf31eb6b54e7864f38e97932ed5613f7559a1f25c"
   },
   "all_but:autopilot": {
    "auth": "noauth",
@@ -337,7 +337,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "bf93ffbcd6e605f891223fb07217053ec7e093bfd3329b55f9e751eb0d059223"
+   "sha256": "ca3a03d421972e3800fbcbd2397c0fd37b805b65e15d235ae2eb86068717b936"
   },
   "all_but:finance": {
    "auth": "noauth",
@@ -506,7 +506,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "f4428b13fe5684d9d3678ccb69e48f25a03eedfdca396cb845ba256d325eabc8"
+   "sha256": "69a96ac6b2d8cbf218c5b6e2bba5007a1133a7e3ef092ee8d15735e21170ceaa"
   },
   "all_but:jev": {
    "auth": "noauth",
@@ -672,7 +672,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "b57b5798e06bdeb20669708aabb3ade7c9c6b45d7db8264c622d032320bd98e8"
+   "sha256": "8918e46722381a7fb581438beafad88253f667ef10a9bcdd97ceff5bb21d1034"
   },
   "all_but:memory_write": {
    "auth": "noauth",
@@ -842,7 +842,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "8c0b7535e1b5acb1efb4d4d5ad51539aba9daadde836732b0047ee6cedd8021b"
+   "sha256": "a9c46181de595436050c77226c6e78bd7b136bd20f4361d2a2da927fbfc9fe0e"
   },
   "all_but:review_assist": {
    "auth": "noauth",
@@ -1011,7 +1011,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "18fea9fe9439581f458bd6f4f6f2da1ad36e6fae90dc2b36c7520e3735d3e1f0"
+   "sha256": "d7e4ba62308ac3650b6d26e2a573b2d975cd889a7ac8781531441bdd5bd85a15"
   },
   "all_but:session_control": {
    "auth": "noauth",
@@ -1176,7 +1176,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "b50f40c2bd75a0016dbbd732d0faf9af6adf5a095689c9bde9757eb88c13a9d7"
+   "sha256": "2d83558bfbbf337d586741ea1b5e0bf0c7393a70d70f6fa8d96cda1205cda763"
   },
   "all_but:session_search": {
    "auth": "noauth",
@@ -1340,7 +1340,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "c32cdd7b190c96ec5087a0de5dacf72604a55a75781f143408b134bcc2820bb1"
+   "sha256": "e3cacdf46f5b6b50bcdf209f35d9b07486c2427071e65a5c4dd0145abba88e24"
   },
   "all_but:terminal": {
    "auth": "noauth",
@@ -1509,7 +1509,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "69ebf17a8c5a16c2c0752faa9163a71e040bff97e8e3feef929e9697b67025d6"
+   "sha256": "1227629c5aa08a0e062cc8b82f06014dad1476ad257d0425d449d15a3e4f394a"
   },
   "all_but:vision": {
    "auth": "noauth",
@@ -1678,7 +1678,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "8aea739fa00b05f19c32eb6592398906dd5ec7e69134b1d284b4b4e63df7c7e6"
+   "sha256": "d3634df586dea4384f71082071a02c4177f0ed3b172e960a36823270310791e4"
   },
   "all_but:web": {
    "auth": "noauth",
@@ -1846,7 +1846,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "3c834090aa1fbb375b4267086281d645e8e4f51c7fb99a675617c832b50bc6f8"
+   "sha256": "b0c6b6d60ac73ad70ba5c1920cf161581a5436ca482876363b9f80463bda209e"
   },
   "all_but:write": {
    "auth": "noauth",
@@ -2014,7 +2014,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "7b966d6bfffb25c050f382ab4978125e9ef38617602b7feceba8a653fe29fe30"
+   "sha256": "86c46d95a9d947e0d3b39ffa598a9e95d3fe098402c13f094375e0cd9401b603"
   },
   "all_on": {
    "auth": "noauth",
@@ -2184,7 +2184,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "8c0b7535e1b5acb1efb4d4d5ad51539aba9daadde836732b0047ee6cedd8021b"
+   "sha256": "a9c46181de595436050c77226c6e78bd7b136bd20f4361d2a2da927fbfc9fe0e"
   },
   "bearer": {
    "auth": "bearer",
@@ -2328,7 +2328,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "4abdad34c9e00d7c13854270a48ebd9b08b33813f5fd6fb4d09c5f9ec287c28b"
+   "sha256": "31119669fff56dc27d92ef03b8b0a278943406d932110022a3408285fcb701c2"
   },
   "bearer+all_on": {
    "auth": "bearer",
@@ -2498,7 +2498,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "d2afeede887a9d8f2b1c23f4c69a4f10cc1c9aec2fcbb844436846afac691967"
+   "sha256": "a640faeddfad9f7618ace0cfc8d44826fae469dbb3c89a81cf87d602b24d9404"
   },
   "finance_marker_file": {
    "auth": "noauth",
@@ -2643,7 +2643,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "de0495d904388683b1bb29f046bae1a2fe03a9462018d16abe0da3d76456b242"
+   "sha256": "0a1da86e906823985dbe7702c12cd7138177c3c853bf85959bdf40178e11ad75"
   },
   "none": {
    "auth": "noauth",
@@ -2787,7 +2787,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "cbc2d81423e3f4d1ef96501e275529108d21d704a86b86690b518cb8f10df80c"
+   "sha256": "43a011a0efed5c3839a2db59b4da8b05269601cc090010907a44d57da9380770"
   },
   "only:attention_delivery": {
    "auth": "noauth",
@@ -2932,7 +2932,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "492630aa05106af0b65b232b6a29ca872bd5dc9051df23c14071a63cada652fc"
+   "sha256": "03c974ce0456fe675e82b774933340b8f8fcc7aa3de419446125509bbc97a42e"
   },
   "only:autopilot": {
    "auth": "noauth",
@@ -3080,7 +3080,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "6af36114c03ba86a90f0f3271d5291b507c7847810b9045eca52f4aaa1c84f53"
+   "sha256": "381e6a534686855c6c07d969b3f8aac3b6487bfc6f0b34eae99ac089ae6cb3aa"
   },
   "only:finance": {
    "auth": "noauth",
@@ -3225,7 +3225,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "de0495d904388683b1bb29f046bae1a2fe03a9462018d16abe0da3d76456b242"
+   "sha256": "0a1da86e906823985dbe7702c12cd7138177c3c853bf85959bdf40178e11ad75"
   },
   "only:jev": {
    "auth": "noauth",
@@ -3372,7 +3372,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "820a7a4f286230b8e72b31c23e957dd0f6df67f559d493f7340085148b4f9101"
+   "sha256": "a99b46d9a4384ed5748b8512002b895dffd5be3d59d72ce6969ca955663fe399"
   },
   "only:jev+review_assist": {
    "auth": "noauth",
@@ -3520,7 +3520,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "48dacaf4b9c567ddd2c71a15561c67e11178eb5d9175be49ceea2b0ea523a4a3"
+   "sha256": "643c6663edcf4f32b4dd5244800ec01e26695d5bd573b1058e1002a184a8c3bb"
   },
   "only:memory_write": {
    "auth": "noauth",
@@ -3664,7 +3664,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "cbc2d81423e3f4d1ef96501e275529108d21d704a86b86690b518cb8f10df80c"
+   "sha256": "43a011a0efed5c3839a2db59b4da8b05269601cc090010907a44d57da9380770"
   },
   "only:review_assist": {
    "auth": "noauth",
@@ -3808,7 +3808,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "cbc2d81423e3f4d1ef96501e275529108d21d704a86b86690b518cb8f10df80c"
+   "sha256": "43a011a0efed5c3839a2db59b4da8b05269601cc090010907a44d57da9380770"
   },
   "only:session_control": {
    "auth": "noauth",
@@ -3956,7 +3956,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "0c81b312ee2b98ffc1734918b6fbf057fd9ee8f3910fe026102763a1baf0f93a"
+   "sha256": "f0d048e22bf79d8ef0231accd4102e939b00aaaede99e7e9fffd20eedfd64b62"
   },
   "only:session_search": {
    "auth": "noauth",
@@ -4105,7 +4105,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "f92a62493e33fbd952e5b098b1cf18d6e86b3f76d913f13ea4da2202cce13c69"
+   "sha256": "5b6fb4888207e1d44220f419e24b7cd8fafb96869e49cd54ff3578edfc4a6b2f"
   },
   "only:session_search+session_control": {
    "auth": "noauth",
@@ -4259,7 +4259,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "0a7eeb9d0a0cfd5ba4a0754186c089a25da50ab39d716154215db6d742c7f33a"
+   "sha256": "f8e67ccebcda68b9a7481fcbe3178410e33299a8134c34444e1e0dbcf8127da0"
   },
   "only:terminal": {
    "auth": "noauth",
@@ -4404,7 +4404,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "59e253ee63afe40ab4b6c4fa1fea78ac035ad09c05f50c748744c03d1de25f9e"
+   "sha256": "b9c92d8d188cd4ffaf07bb2522e024b8ab47efd55f261d17554c0afd79238aab"
   },
   "only:vision": {
    "auth": "noauth",
@@ -4549,7 +4549,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "fce329004aba3bb19d90c8891c6cc8eb146e2ac608bbaf983089ca39a91af995"
+   "sha256": "142751c57c8cbeea3b164492e0e69545b195756d73a4fa650e41efe64a3c421f"
   },
   "only:web": {
    "auth": "noauth",
@@ -4695,7 +4695,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "ca5604dae28bc8055f4578bfe43f9c18f58e5833d27530e37935af13a0f401f1"
+   "sha256": "91041a8b70a6a37bed938e131fbb833d6666f9e23913c1543b8d03fe5fc6e6bd"
   },
   "only:write": {
    "auth": "noauth",
@@ -4841,7 +4841,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "9d3ad848115a58d43596867e444caa85c5719ecf4e9268a17cf6d85282a9c976"
+   "sha256": "d6e915ba70bc26b6d6757e4fe5c1d9fb482ddf18dc10b29608db5daad25cf659"
   },
   "profile:chat-lean": {
    "auth": "noauth",
@@ -4877,7 +4877,7 @@
     "hermes_delegation_list",
     "hermes_review_accept"
    ],
-   "sha256": "ae42f09e3eba9c0620a5be41faeea13b606bfc29d52ef27f04b349d7c11070c5"
+   "sha256": "98fea9670c1e4de828e0b0bcaf8130af780155ca4e569f36c9f9bc2625950d28"
   },
   "profile:chat-lean+all_on": {
    "auth": "noauth",
@@ -4926,7 +4926,7 @@
     "hermes_delegation_list",
     "hermes_review_accept"
    ],
-   "sha256": "3746ad9d99ace81b5ec3f54fbb7c0680d093667c9be89b3ba47f2767fa4d8866"
+   "sha256": "95a711d68a30f9a53a3a72ddbedbc5e5303098fe34df235659a6df601fe547b0"
   },
   "profile:full": {
    "auth": "noauth",
@@ -5070,7 +5070,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "cbc2d81423e3f4d1ef96501e275529108d21d704a86b86690b518cb8f10df80c"
+   "sha256": "43a011a0efed5c3839a2db59b4da8b05269601cc090010907a44d57da9380770"
   },
   "profile:full+all_on": {
    "auth": "noauth",
@@ -5240,7 +5240,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "8c0b7535e1b5acb1efb4d4d5ad51539aba9daadde836732b0047ee6cedd8021b"
+   "sha256": "a9c46181de595436050c77226c6e78bd7b136bd20f4361d2a2da927fbfc9fe0e"
   },
   "profile:operator": {
    "auth": "noauth",
@@ -5381,7 +5381,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "138593b62c4ef313ca8895fdaca356730327f412c11f5ce79080564567604d14"
+   "sha256": "ca2796a658d96629211fe1eed29501a650d39c6b9e7df8262c4c153c9f5f49e6"
   },
   "profile:operator+all_on": {
    "auth": "noauth",
@@ -5545,14 +5545,14 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "fd66e2a1afc61e63fab9b3f56c2c4673e9119ee1a3b87cb98a226c7685a060d2"
+   "sha256": "26f166cf27b57f1d2f4e2321da7ed7a31507e141b90f9996064ec4e94750430c"
   }
  },
  "schema": "tool_registry_golden/v1",
  "tool_digests": {
   "bearer": {
-   "hermes_attention_delivery_status": "7ad81ce70c7a1293e8fedd96a9dc1da8b80918566c746d177481f7f6d9d390c3",
-   "hermes_autopilot_start": "4bb2e2d7ed0548dd9731f870c022dd16d26b9184a87964c577a46a75b00ff56b",
+   "hermes_attention_delivery_status": "8e6cb0ba0454aee6fd93b04a2ac0a04b5d56161e66ddf4b2f75a32bdbd76d660",
+   "hermes_autopilot_start": "a199fa66b661d63fef9c03d0af00a63f0ddfad7a897c1bc882ef87a4ede231b4",
    "hermes_autopilot_status": "2333b639a1785e1c8f8e56fc5c52934810c03366a51d4b081c402b36298d3f0d",
    "hermes_autopilot_stop": "7e2c250748670f2e05fb8eed7f89d32366de6d0e11f261e96ebb83af079de095",
    "hermes_bot_chat_get": "a7f9a213b070518d7d304745ff1cec8206c99b40696f6bca322476622fd69a51",
@@ -5579,7 +5579,7 @@
    "hermes_contract_validate": "60ae1f126a7e364473c4db6754f4651856399d9b2ff1607a725905c56eed63df",
    "hermes_controller_lease_list": "1b0396d50a1c5020b8eee320ccd9b554b90d0ea0e2dab7ce0b67940507306d52",
    "hermes_controller_plan_list": "deee6e9c1de08524555a02b5a16f2ca1eaef5a0d449f5d6599d909aea515d94b",
-   "hermes_controller_reconcile": "168b93572d13b8cc90991336f1a8b54fb02b15498634400a2a5965fca5e17be2",
+   "hermes_controller_reconcile": "da33ccd11d8c55a6c7e6b7b38e23afd2b7244d63597734e933ea62807ba75e5f",
    "hermes_controller_status": "b1ca70c820681549f55f49316897be03e717d424dbff9eeff86474a991813ed4",
    "hermes_controller_trigger": "19e8b4d185cba39e9950ac4fc1097a6c6a947479fe5b238cab3a52efda9adb76",
    "hermes_cron_copy": "db2e21fc31f6482917ab6e4153ed444e752ccce383f35b33720c64a86d9a7d67",
@@ -5600,7 +5600,7 @@
    "hermes_events_query": "dbbe8aa04db2abac6f47f241e6fe2042587126855364b9a4259c43b63e391182",
    "hermes_events_tail": "7b0b005d887c40bad3bf70f2060f532d53282ce7a074d60492f708e5b57bf918",
    "hermes_export_file": "f83e31ab7ef0bcd7084efadd959e6ed6e8d782a339805d4c2e6d3a9b0ca61466",
-   "hermes_failure_classify": "10e0083913805225aafe7324a80911f270cf86279dbe1003a7ce0f64455ecc7a",
+   "hermes_failure_classify": "9ee4a596925d231e11da1623b13a50907d37ad2397de227bfcf25de57ab67eb4",
    "hermes_failure_taxonomy": "931495c92290906b6929dc238bbab1b09789e936864614cd1d08393e2e3cb4f6",
    "hermes_finance_analyze": "297db9dc32f181b32227e1944ab0d7b4658e17e5fa5b17c93bf3bd7fd4dc1e9d",
    "hermes_fleet_authority_drift": "d36589f52f8a1b76b56921fd3bdf1546cbc73aeec975759baf7008b92557bb67",
@@ -5634,8 +5634,8 @@
    "hermes_mission_fleet": "a2fed0d5d8b1910a54406c4f6934bc7ef03f7f47e10a6e90ddb9629a8c8d9bc4",
    "hermes_mission_get": "c13c55568686a1f5dbb399e868bd780a59f8ff1ba336c9a6655e4b28ce4cf141",
    "hermes_mission_health": "9937509c5e0218c90016bcf498ef3881dd638fb33cd68372f44c27a4025247c0",
-   "hermes_mission_launch": "9a8439b0aafb518a1f865067e5dfe4283bcf714b908811698e694813e6ce6e36",
-   "hermes_mission_ledger": "c09819ee045f88ce1d3210a045f369e35bf6be09154b133f10ca87325952e166",
+   "hermes_mission_launch": "148e6a270b90f401267a10df1e9e74fc13c7609329b9d43f0e4fd695354a09cb",
+   "hermes_mission_ledger": "90c8c167d75e3bdacb427a0b6153fbdaf9dbb936cfb35a2250f07eb1d288940e",
    "hermes_mission_ledger_replay": "4b9725dbad9b37b54f244cd8aaf4d78dc1b165897345db01d5a16b9c41085941",
    "hermes_mission_list": "96fb6e01c55425714b86150b0d69dbac73ee5bb7300068ec21c036d6a59b2191",
    "hermes_mission_overview": "5ea14e56893ef408eb84ec3a3a863cb61380c395ac435c22aed07b78d93e6a86",
@@ -5653,8 +5653,8 @@
    "hermes_operator_recover": "f2e1f2c2e4926a01ef0cdb6d731e706f8b890d6249c1acd0c3fba5f8be2f136b",
    "hermes_operator_snapshot": "a2c5dafcdb335076e1c0550fa3c1d632fcb905431c02fc39cbfdb5db50704c75",
    "hermes_operator_status": "e511c3c72a5457adc92cad9aea25f8e7dad07ba6e13642f9d921529615a1f5bb",
-   "hermes_owner_inbox": "cb67fce0a5a581ae77a06d33fc544ea00b6c9b621bc884d16801dd47616aa60c",
-   "hermes_owner_inbox_ack": "c271cef4b8b13bfdbb1ef0aebb0c1df8dfe9555e1e9c2386789148cc9f345cb1",
+   "hermes_owner_inbox": "e0760f662c1d8c380e233662f8da74b2ae963fe80559b2b42334dc0a7955544a",
+   "hermes_owner_inbox_ack": "3a68bdcf6a06dbba172a03035042a4a3f2844c97592ce8c364bbce63e706362a",
    "hermes_owner_patch": "f79fcc08a282334bb7f7de382db4e7611667fab8cdda1f9b862d4cc6bdb9c22f",
    "hermes_owner_run_command": "ca456f7ae456e830c7395ffc9f4c30b72452369c53b935fc4933ecbc41b93b6c",
    "hermes_owner_write_file": "aac1a51ea03a5488e6d2640d9223dd16b355889483bdc707b39a980a533e0d3e",
@@ -5662,7 +5662,7 @@
    "hermes_placement_candidates": "9db6f09e1fdd8de95d0ae33504cd9cf87695ca620d2322771767f44c2b74f28a",
    "hermes_placement_get": "d788bfe68b448a5c8d19eaf151317fd3e6e81bc697f2a1725273f574337d8b22",
    "hermes_placement_list": "217bd89d65111a6c0870d07ce8193e28db6bcfba34ef394cece524fb73f3a9ba",
-   "hermes_placement_score": "1ed67368397e4a51ac6e1b6d35393445a614f6211ea5c1b4f1147e9acbd1ada3",
+   "hermes_placement_score": "3a5b6d34f6812001b4af0246db229dc6425547fab8920984ede3bf8f33b6ccde",
    "hermes_plan_create": "2445d3b3df2512fdcef420019f73776c025b6a4ddc9ad3db34726196f7a30182",
    "hermes_plan_decompose": "2f172784beb66405832e6051b50400aa084e0c01f767b9a4d863bb7c1e540873",
    "hermes_plan_get": "9a8c856a3f6ef4c0220f81311584d854d0df07ccc17369856ff7534021e0aeac",
@@ -5675,7 +5675,7 @@
    "hermes_recovery_matrix": "30151414b1d0274204603e281dd9d2afe5431b70e5a3a3d53f426aa478bc0a3a",
    "hermes_release_doctor": "dc6cc15b465110cf8e2ffda12940826186ada3c08dab8dec499ab1079b929c01",
    "hermes_review_accept": "2e860c17e65a9d92500300d29d1148853260b1e8d977ec8419cbc2ed96d17401",
-   "hermes_review_assess": "d1cf0f33a041c2e51334b8b9ccc2842434bf65d3271599673beb1c6d083842ae",
+   "hermes_review_assess": "a7d165729d78ec443d65833f4540c383ee552dcfcea90f37698df2a4be097244",
    "hermes_run_command": "37b51f92dbdcfc8be2bbbee1be0f8764a8da41ccdb892c5660a11dd5891a7d70",
    "hermes_runner_cancel": "ebbc35e07128c3de091ba584c6ea174041f6c5f49ed7054a33b09b9b3f26a2c3",
    "hermes_runner_list": "2a87b4a7ce67aa48d0f0102beffe5e0954024d0476961ceab25b35d301eca7cf",
@@ -5717,8 +5717,8 @@
    "hermes_write_file": "8be0f029091aca3cfe6f582ef382ce658f88c0b55a1e12be554f4f8ae9cb7cda"
   },
   "noauth": {
-   "hermes_attention_delivery_status": "a23ba4ff7abcc40a40dc80327e85cc7ac4f6709d2ae3b7c9968b898428b850fb",
-   "hermes_autopilot_start": "16ed692d0aa94e0d907f1911c9d454cfcb0f1427b4af251f4dc950472d91f017",
+   "hermes_attention_delivery_status": "37a5650f8f414e134a48d6b649527c7ad6926f335a4bbdec840a148d62328d47",
+   "hermes_autopilot_start": "6f63d6eb78a828674af78c407cddda28aec00bd340ac0f214bb0368608833062",
    "hermes_autopilot_status": "2f428e851df3fa3d6184b2a0db6c6a4a2df372448f246ae3b53441ece12db8b3",
    "hermes_autopilot_stop": "4dd32c744b1933fd93c1f1214c434680330c3ba1dd95f77ca35d6d85a30cec42",
    "hermes_bot_chat_get": "aba17d93975518353d70b5980bfbb2ba77ac6c03b05d4f1cb4a7c154daf15a7a",
@@ -5745,7 +5745,7 @@
    "hermes_contract_validate": "86d5eacc115f577a1bf94003de256c7b17236a2c4280a53b572ad615bc50373c",
    "hermes_controller_lease_list": "c04c06874d50a7e1e7ac31b14b4a0a2d5a0992357bd5e707363be769c3c7576c",
    "hermes_controller_plan_list": "3f6eeb328134b5b82d4a0113970b0af3fff94cc7c79abbf16bd7259fa5cd8696",
-   "hermes_controller_reconcile": "96f2111767ebbab6642a46f68e6b186ccdaef089cb6fc35bc75f01a279abe0e4",
+   "hermes_controller_reconcile": "d8dc06f3e4a7273e272b9eae16efbc99011032dc0089f9f39d00a8bd181e4c60",
    "hermes_controller_status": "23d7ee940e5f8df0cc4adb2d273d95384c00ab3111b0d70141c1d3db5a2f17d9",
    "hermes_controller_trigger": "b90b911d1ed0a883b5a3a3480ae8f8f03b5feaedd82b87f96aff281accb7097a",
    "hermes_cron_copy": "7bd1445134436dc02522aca4068dc22830efcba973eae17a13c85e51c336977f",
@@ -5766,7 +5766,7 @@
    "hermes_events_query": "7e03f17473279b313ebc863b5aa71ad9f236971b9b651ad784f3c8db99a0c29e",
    "hermes_events_tail": "92af73205edc13a03c547bf262adbfaefe9ff0db2b4740c0556a5a48ed58ee1b",
    "hermes_export_file": "fff287392a1f677dd2932cf2b50020ba168d08bcae5a92b658852f10e7242b21",
-   "hermes_failure_classify": "43063ee3ca3cfe0c66076951532e6d28b3e6c93e502ae56e669f4ed1945feadf",
+   "hermes_failure_classify": "5594604b4179e9d1386369477baf91c2801c17d06574ba41b3d368d9f40d2cf8",
    "hermes_failure_taxonomy": "66e804ddcb0815c8eeceb5d4195eb00933efa058f5215f3a6979fa2678fd36fb",
    "hermes_finance_analyze": "8da5f916a3cecb248a23e596ba31f93346858b806424e876510464bb0eb25eaf",
    "hermes_fleet_authority_drift": "2cba852a366688676b42b215977e56e0199b6f94cfebd55a7d75bebee244061a",
@@ -5800,8 +5800,8 @@
    "hermes_mission_fleet": "75978cc5a4185cecbadb2308493b7f2ac4b47378cd336402294a92fd3843b79b",
    "hermes_mission_get": "f3670fd6c1f2fbd215c3ac0b67af5a28b4c1b407ca5cfc6cab01097c1121837e",
    "hermes_mission_health": "e91aa7c09bf947c129802cf56525eb1efbe7984d4bbd291e5c73a37a6b1aaf5b",
-   "hermes_mission_launch": "c1c7d20adc21428984d9f1b5f014137cd21730728afc3de75e60550e5eebea11",
-   "hermes_mission_ledger": "3f91f37668f5c36a09cfa06ff35a2cbdc605fb92a99195026b2f175513eebb54",
+   "hermes_mission_launch": "f871c7be3b492d6cbcb67ba5747fc74a8884e693983df3d5d9b105cd6e06117c",
+   "hermes_mission_ledger": "0f49a3c47e173c5be46266ebd706dfd12d6a22c6580365113e190bc3dcbabe8b",
    "hermes_mission_ledger_replay": "d96b88fc1038afd0a0bed9961d9d747c4a0a6ee93614e2f4af38ab6a35f2bc68",
    "hermes_mission_list": "d53fa559131cf848cce11f8fc431211cd01aacb008fe406c23977655417c4867",
    "hermes_mission_overview": "2bd294dbab9e6fa6165f8da909240393c2c4a3554aa1d66d3447793d8395a755",
@@ -5819,8 +5819,8 @@
    "hermes_operator_recover": "965d624881f181985be7c1ba92855a6e3d885cdd2025191ef046635591b02adf",
    "hermes_operator_snapshot": "8c290b3b9a89fe227f26cb455fd454d364be571e7a4f8197f214ea298ee249e1",
    "hermes_operator_status": "0b515a86c28508f374938d519b3882203c2a05b50b0f0101123381f63704859e",
-   "hermes_owner_inbox": "22b24300b9387f91367eca307216e45326972800cdf8d669a44921ac954e787b",
-   "hermes_owner_inbox_ack": "7d8823856ba5b2428d26b69d8b336381ec79e5b2ab06ad73e01521f2b4efbbfc",
+   "hermes_owner_inbox": "9430585f4f40ad3f974ab9b8781823d44178feb939ceae3393805b9776c798e1",
+   "hermes_owner_inbox_ack": "de8df34b3d989dae6b4921f81b86aec5aaf866d686de1ce9bd412400f6aaebd8",
    "hermes_owner_patch": "8e74b983648dd07b2b72b1de94e6127253aa5893c8a18299d3a82483b1aa82a1",
    "hermes_owner_run_command": "383e32d1909882d44deaf8e6196df4041d63f8b84c9086be4c7b21d193164eb5",
    "hermes_owner_write_file": "79768eaee84fa45e6dee02e66879e75ac977a7e712bbbf2fd6f449e0007dcb80",
@@ -5828,7 +5828,7 @@
    "hermes_placement_candidates": "c815344c21c714bed148f467096dd6f5d8b5b4858244b8a299a218bb37e6c2cd",
    "hermes_placement_get": "7cef5ee90c54dca73d202a23fad131b43ce0d96a26b69f1c91f4c09d2b08530b",
    "hermes_placement_list": "59e31fb3d660df33d0410815ed25e6c66cecd0c98933d849827bcb4366400f18",
-   "hermes_placement_score": "64a6a7a6a524c71dbdde986ff452f02aeb0693fbec5b2322062de298ba34ab78",
+   "hermes_placement_score": "84c9d229553e07d5ecfde5a233929743b3af1f03ef06ee990d15e57c16e15ada",
    "hermes_plan_create": "4ddfaed4c4df3b7ab1d9dbb684a30d5b7d80d5f109efda3c31f7669f0852dcef",
    "hermes_plan_decompose": "9b7ec23c7ae26498baea7eba9af5487748d179505f69a821a1caf2eb70ad9c8b",
    "hermes_plan_get": "254dd1045ed2cae3b7d1dc5d4731732d90d5e8c6836831d8af589282b360b6fc",
@@ -5841,7 +5841,7 @@
    "hermes_recovery_matrix": "738d3278781103bbbe89830ab109b72401ad5a5b19a187e7aa7f27f817af9cc2",
    "hermes_release_doctor": "53c0b4a37f77077f54b470c41e14c76b44b163c25597b7736bbba9cc1afd7e5b",
    "hermes_review_accept": "43dd23ca23f3f7cfe70b8046614b590172ede6904967352911361bff2aa05598",
-   "hermes_review_assess": "3e3fa6c0e98838c0698c1fad280939b114a3816f26cebfafc8c435e332a36f86",
+   "hermes_review_assess": "97e7ab2285c81399cccd62f68d411bb55d60f5b6534de32ca89222a68bce6b3b",
    "hermes_run_command": "25b1b4641876710b6de6ddf301ef0f5b705af6a96c1ba3e24f4dad20583444d0",
    "hermes_runner_cancel": "035e02427fd313ae866c7e8a8eb499a7bb810b1c6f713028fb775c17f3a07400",
    "hermes_runner_list": "fcc49fcb0671cb8cad35137bdd7e8db9b683778f414c5660a3a337a266237ed9",
