@@ -41,6 +41,7 @@ include-package-data = true
 py-modules = [
   "server",
   "tool_profiles",
+  "tool_registry",
   "jev_bridge",
   "oauth_auth",
   "operator_policy",

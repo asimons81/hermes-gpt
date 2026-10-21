@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import urllib.parse
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Callable, List
 
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
@@ -58,6 +58,7 @@ import operator_mission_launch as op_mission_launch
 import operator_attention_delivery as op_attention_delivery
 import jev_bridge
 import tool_profiles
+import tool_registry
 from versioning import VERSION
 
 
@@ -3326,68 +3327,104 @@ def build_server(
     return server
 
 
-def register_tools(server: FastMCP) -> None:
-    # Connector tool profile (HERMES_GPT_TOOL_PROFILE). Invalid values raise
-    # ValueError here so build_server fails closed at startup. "full" (the
-    # default) registers into the server unchanged; other profiles only skip
-    # tools and never bypass the env gates below.
-    profile = tool_profiles.profile_from_env()
-    if profile != tool_profiles.FULL_PROFILE:
-        server = tool_profiles.ProfileFilteredServer(server, profile)  # type: ignore[assignment]
-    server.add_tool(hermes_read_file, meta=tool_meta())
-    server.add_tool(hermes_search_files, meta=tool_meta())
-    server.add_tool(hermes_memory, meta=tool_meta())
-    server.add_tool(hermes_skill_list, meta=tool_meta())
-    server.add_tool(hermes_skill_view, meta=tool_meta())
+ToolEntry = tool_registry.ToolEntry
 
-    if env_enabled(ENABLE_WRITE_ENV):
-        server.add_tool(hermes_write_file, meta=tool_meta())
-        server.add_tool(hermes_patch, meta=tool_meta())
-    if env_enabled(ENABLE_TERMINAL_ENV):
-        server.add_tool(hermes_run_command, meta=tool_meta())
-    if env_enabled(ENABLE_SESSION_SEARCH_ENV):
-        server.add_tool(hermes_session_search, meta=tool_meta())
-        server.add_tool(hermes_session_list, meta=tool_meta())
-        server.add_tool(hermes_session_read, meta=tool_meta())
-        server.add_tool(hermes_session_export, meta=tool_meta())
-        server.add_tool(hermes_bot_chat_get, meta=tool_meta())
-    if env_enabled(ENABLE_SESSION_CONTROL_ENV):
-        server.add_tool(hermes_session_continue, meta=tool_meta())
-        server.add_tool(hermes_session_send, meta=tool_meta())
-        if env_enabled(ENABLE_SESSION_SEARCH_ENV):
-            server.add_tool(hermes_bot_chat_send, meta=tool_meta())
-        server.add_tool(hermes_session_job_status, meta=tool_meta())
-        server.add_tool(hermes_session_job_result, meta=tool_meta())
-    if env_enabled(ENABLE_VISION_ENV):
-        server.add_tool(hermes_vision_analyze, meta=tool_meta())
-    if env_enabled(ENABLE_WEB_ENV):
-        server.add_tool(hermes_web_search, meta=tool_meta())
-        server.add_tool(hermes_web_extract, meta=tool_meta())
-    if op_finance.finance_enabled(_default_hermes_root()):
-        server.add_tool(hermes_finance_analyze, meta=tool_meta())
 
+def _plain(*fns: Any) -> list[ToolEntry]:
+    """Ungated entries, in the order given."""
+    return [ToolEntry(fn) for fn in fns]
+
+
+def _env_gate(name: str) -> Callable[[], bool]:
+    return lambda: env_enabled(name)
+
+
+def _jev_annotations() -> ToolAnnotations:
+    return ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=False, openWorldHint=True,
+    )
+
+
+def _core_tools() -> list[ToolEntry]:
+    return _plain(
+        hermes_read_file,
+        hermes_search_files,
+        hermes_memory,
+        hermes_skill_list,
+        hermes_skill_view,
+    )
+
+
+def _write_tools() -> list[ToolEntry]:
+    gate = _env_gate(ENABLE_WRITE_ENV)
+    return [ToolEntry(hermes_write_file, gate=gate), ToolEntry(hermes_patch, gate=gate)]
+
+
+def _terminal_tools() -> list[ToolEntry]:
+    return [ToolEntry(hermes_run_command, gate=_env_gate(ENABLE_TERMINAL_ENV))]
+
+
+def _session_search_tools() -> list[ToolEntry]:
+    gate = _env_gate(ENABLE_SESSION_SEARCH_ENV)
+    return [
+        ToolEntry(hermes_session_search, gate=gate),
+        ToolEntry(hermes_session_list, gate=gate),
+        ToolEntry(hermes_session_read, gate=gate),
+        ToolEntry(hermes_session_export, gate=gate),
+        ToolEntry(hermes_bot_chat_get, gate=gate),
+    ]
+
+
+def _session_control_tools() -> list[ToolEntry]:
+    control = _env_gate(ENABLE_SESSION_CONTROL_ENV)
+    search = _env_gate(ENABLE_SESSION_SEARCH_ENV)
+    return [
+        ToolEntry(hermes_session_continue, gate=control),
+        ToolEntry(hermes_session_send, gate=control),
+        # Chat send needs the session-search gate as well (nested in the original).
+        ToolEntry(hermes_bot_chat_send, gate=lambda: control() and search()),
+        ToolEntry(hermes_session_job_status, gate=control),
+        ToolEntry(hermes_session_job_result, gate=control),
+    ]
+
+
+def _vision_tools() -> list[ToolEntry]:
+    return [ToolEntry(hermes_vision_analyze, gate=_env_gate(ENABLE_VISION_ENV))]
+
+
+def _web_tools() -> list[ToolEntry]:
+    gate = _env_gate(ENABLE_WEB_ENV)
+    return [ToolEntry(hermes_web_search, gate=gate), ToolEntry(hermes_web_extract, gate=gate)]
+
+
+def _finance_tools() -> list[ToolEntry]:
+    # Lazy: the finance gate also reads the Hermes data root marker.
+    return [
+        ToolEntry(
+            hermes_finance_analyze,
+            gate=lambda: op_finance.finance_enabled(_default_hermes_root()),
+        ),
+    ]
+
+
+def _jev_tools() -> list[ToolEntry]:
     # External typed judgments are opt-in and never alter Operator authority.
-    if jev_bridge.enabled():
-        for tool in (
-            jev_bridge.hermes_jev_yes_no,
-            jev_bridge.hermes_jev_choose,
-            jev_bridge.hermes_jev_score,
-        ):
-            server.add_tool(
-                tool,
-                meta=tool_meta(),
-                annotations=ToolAnnotations(
-                    readOnlyHint=True, destructiveHint=False,
-                    idempotentHint=False, openWorldHint=True,
-                ),
-            )
+    gate = lambda: jev_bridge.enabled()  # noqa: E731
+    return [
+        ToolEntry(jev_bridge.hermes_jev_yes_no, gate=gate, annotations=_jev_annotations()),
+        ToolEntry(jev_bridge.hermes_jev_choose, gate=gate, annotations=_jev_annotations()),
+        ToolEntry(jev_bridge.hermes_jev_score, gate=gate, annotations=_jev_annotations()),
+    ]
 
+
+def _review_assist_tools() -> list[ToolEntry]:
     # Advisory review assist (v0.15): default OFF. Needs both the Jev gate and
     # HERMES_GPT_REVIEW_ASSIST=1. The score is advisory and never evidence.
-    if op_review_assist.enabled():
-        server.add_tool(
+    return [
+        ToolEntry(
             hermes_review_assess,
-            meta=tool_meta(),
+            gate=lambda: op_review_assist.enabled(),
             annotations=ToolAnnotations(
                 title="Advisory Jev review score for a Work Contract (never evidence)",
                 readOnlyHint=True,
@@ -3395,52 +3432,67 @@ def register_tools(server: FastMCP) -> None:
                 idempotentHint=False,
                 openWorldHint=True,
             ),
-        )
-
-    # --- Operator / Owner Mode tools -----------------------------------
-    #
-    # Read-only tools are always registered. Mutating tools are registered
-    # unconditionally too (per spec: "register with refusal so the user can
-    # see why unavailable") — the wrappers above return a JSON error string
-    # when the operator policy is not enabled / level is insufficient /
-    # apply_mode is dry_run / owner ack is missing.
-    server.add_tool(hermes_operator_policy, meta=tool_meta())
-    server.add_tool(hermes_operator_status, meta=tool_meta())
-    server.add_tool(hermes_operator_audit_tail, meta=tool_meta())
-    server.add_tool(hermes_operator_doctor, meta=tool_meta())
-    server.add_tool(hermes_operator_snapshot, meta=tool_meta())
-    server.add_tool(hermes_release_doctor, meta=tool_meta())
-    server.add_tool(hermes_operator_recover, meta=tool_meta())
-    server.add_tool(
-        hermes_swarm_reconcile,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Reconcile state after a restart (dry-run by default; apply requires workspace + direct)"
         ),
+    ]
+
+
+# --- Operator / Owner Mode tools ---------------------------------------------
+#
+# Read-only tools are always registered. Mutating tools are registered
+# unconditionally too (per spec: "register with refusal so the user can see why
+# unavailable") — the wrappers return a JSON error string when the operator
+# policy is not enabled / level is insufficient / apply_mode is dry_run / owner
+# ack is missing.
+
+
+def _operator_tools() -> list[ToolEntry]:
+    return _plain(
+        hermes_operator_policy,
+        hermes_operator_status,
+        hermes_operator_audit_tail,
+        hermes_operator_doctor,
+        hermes_operator_snapshot,
+        hermes_release_doctor,
+        hermes_operator_recover,
+    ) + [
+        ToolEntry(
+            hermes_swarm_reconcile,
+            annotations=ToolAnnotations(
+                title="Reconcile state after a restart (dry-run by default; apply requires workspace + direct)"
+            ),
+        ),
+    ]
+
+
+def _fleet_tools() -> list[ToolEntry]:
+    # Fleet routing: named peers in the local authenticated A2A registry only.
+    return _plain(
+        hermes_fleet_list,
+        hermes_fleet_status,
+        hermes_fleet_dispatch,
+        hermes_fleet_dispatch_work_order,
+        hermes_fleet_task,
+        hermes_fleet_result,
+        hermes_fleet_authority_drift,
     )
 
-    # Fleet routing: named peers in the local authenticated A2A registry only.
-    server.add_tool(hermes_fleet_list, meta=tool_meta())
-    server.add_tool(hermes_fleet_status, meta=tool_meta())
-    server.add_tool(hermes_fleet_dispatch, meta=tool_meta())
-    server.add_tool(hermes_fleet_dispatch_work_order, meta=tool_meta())
-    server.add_tool(hermes_fleet_task, meta=tool_meta())
-    server.add_tool(hermes_fleet_result, meta=tool_meta())
-    server.add_tool(hermes_fleet_authority_drift, meta=tool_meta())
 
-    # Cron
-    server.add_tool(hermes_cron_list, meta=tool_meta())
-    server.add_tool(hermes_cron_status, meta=tool_meta())
-    server.add_tool(hermes_cron_create, meta=tool_meta())
-    server.add_tool(hermes_cron_run, meta=tool_meta())
-    server.add_tool(hermes_cron_pause, meta=tool_meta())
-    server.add_tool(hermes_cron_copy, meta=tool_meta())
-    server.add_tool(hermes_cron_move, meta=tool_meta())
+def _cron_tools() -> list[ToolEntry]:
+    return _plain(
+        hermes_cron_list,
+        hermes_cron_status,
+        hermes_cron_create,
+        hermes_cron_run,
+        hermes_cron_pause,
+        hermes_cron_copy,
+        hermes_cron_move,
+    )
 
-    # Mission Control (v0.6 M0): read-only operational view. Registered
-    # unconditionally; each surface enforces the per-client allowlist
-    # (HERMES_GPT_MISSION_ALLOWED_SURFACES) and audits every call.
-    for _mission_tool in (
+
+def _mission_control_tools() -> list[ToolEntry]:
+    # Mission Control (v0.6 M0): read-only operational view. Each surface
+    # enforces HERMES_GPT_MISSION_ALLOWED_SURFACES and audits every call.
+    return _plain(
         hermes_mission_overview,
         hermes_mission_health,
         hermes_mission_profiles,
@@ -3453,41 +3505,43 @@ def register_tools(server: FastMCP) -> None:
         hermes_mission_vault,
         hermes_mission_usage,
         hermes_mission_audit,
-    ):
-        server.add_tool(_mission_tool, meta=tool_meta())
+    )
 
-    # Owner inbox (v0.15): read-only projection over existing read paths. It
-    # never approves, advances or writes; suggested actions stay gated tools.
-    server.add_tool(
-        hermes_owner_inbox,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="List work waiting on the Owner (read-only)",
-            readOnlyHint=True,
-            destructiveHint=False,
-            idempotentHint=True,
-            openWorldHint=False,
+
+def _owner_inbox_tools() -> list[ToolEntry]:
+    # Owner inbox (v0.15): read-only projection. Acknowledging hides an item only;
+    # it is gated internally (workspace level plus direct apply; dry run default).
+    return [
+        ToolEntry(
+            hermes_owner_inbox,
+            annotations=ToolAnnotations(
+                title="List work waiting on the Owner (read-only)",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
-    )
-    # Acknowledging hides an item only. It is always registered and gated
-    # internally (workspace level plus direct apply mode; dry run by default).
-    server.add_tool(
-        hermes_owner_inbox_ack,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Hide Owner-inbox items by id (workspace direct; dry run by default)",
-            readOnlyHint=False,
-            destructiveHint=False,
-            idempotentHint=True,
-            openWorldHint=False,
+        ToolEntry(
+            hermes_owner_inbox_ack,
+            annotations=ToolAnnotations(
+                title="Hide Owner-inbox items by id (workspace direct; dry run by default)",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
-    )
+    ]
+
+
+def _attention_tools() -> list[ToolEntry]:
     # Attention relay status (v0.16): registered only when the relay is enabled.
     # Read-only and never sends a message.
-    if op_attention_delivery.enabled():
-        server.add_tool(
+    return [
+        ToolEntry(
             hermes_attention_delivery_status,
-            meta=tool_meta(),
+            gate=lambda: op_attention_delivery.enabled(),
             annotations=ToolAnnotations(
                 title="Attention delivery relay status (read-only; sends nothing)",
                 readOnlyHint=True,
@@ -3495,12 +3549,14 @@ def register_tools(server: FastMCP) -> None:
                 idempotentHint=True,
                 openWorldHint=False,
             ),
-        )
+        ),
+    ]
 
-    # First-class durable Mission runtime (v0.9). Authority is enforced by
-    # operator_mission_runtime; list/get are read-only, mutations are
-    # workspace/direct and final approval is Owner-gated.
-    for _mission_runtime_tool in (
+
+def _mission_runtime_tools() -> list[ToolEntry]:
+    # Durable Mission runtime (v0.9). Authority is enforced by
+    # operator_mission_runtime; final approval is Owner-gated.
+    return _plain(
         hermes_mission_create,
         hermes_mission_get,
         hermes_mission_list,
@@ -3509,14 +3565,12 @@ def register_tools(server: FastMCP) -> None:
         hermes_mission_reconcile,
         hermes_mission_transition,
         hermes_mission_approve,
-    ):
-        server.add_tool(_mission_runtime_tool, meta=tool_meta())
+    )
 
-    # MissionPlan (decomposition DAG, additive; read-only re missions).
-    # Get/list/review/validate/decompose are read-only; create/node-transition/
-    # set-status mutate only the plan store and never dispatch or change a
-    # Mission's lifecycle (Phase-1 read-only slice).
-    for _plan_tool in (
+
+def _plan_tools() -> list[ToolEntry]:
+    # MissionPlan (additive DAG). Mutations touch only the plan store.
+    return _plain(
         hermes_plan_create,
         hermes_plan_get,
         hermes_plan_list,
@@ -3525,74 +3579,62 @@ def register_tools(server: FastMCP) -> None:
         hermes_plan_review,
         hermes_plan_node_transition,
         hermes_plan_set_status,
-    ):
-        server.add_tool(_plan_tool, meta=tool_meta())
+    )
 
-    # Mission budget envelope (spend envelope + budget_check; dry-run).
-    # Get/check are read-only; set/record mutate only the budget store and never
-    # pause a Mission or change its lifecycle (Phase-2 dry-run slice). D3 hard-
-    # block semantics are designed (flag default off) but wired in Phase 4/5.
-    for _budget_tool in (
+
+def _budget_tools() -> list[ToolEntry]:
+    # Mission budget envelope (Phase-2 dry-run slice).
+    return _plain(
         hermes_budget_set,
         hermes_budget_get,
         hermes_budget_check,
         hermes_budget_record,
-    ):
-        server.add_tool(_budget_tool, meta=tool_meta())
+    )
 
-    # Deterministic placement scoring (filter-and-score, D7): dry-run only.
-    # Score/candidates/get/list never dispatch work; score records a placement
-    # decision only under workspace+direct (dry-run-first) and always returns
-    # would_assign=False. The controller proposes; dispatch goes through the
-    # existing contract/fleet/delegation authority surfaces.
-    for _placement_tool in (
+
+def _placement_tools() -> list[ToolEntry]:
+    # Deterministic placement scoring (D7): dry-run only.
+    return _plain(
         hermes_placement_score,
         hermes_placement_candidates,
         hermes_placement_get,
         hermes_placement_list,
-    ):
-        server.add_tool(_placement_tool, meta=tool_meta())
+    )
 
-    # Semantic failure classification + deterministic recovery matrix (vNext
-    # slice-1, phase 3, §17 item 7 / D8 / §11): decision output only. The
-    # classifier proposes the smallest action and never executes anything;
-    # taxonomy/matrix/plan-list are read-only.
-    for _failure_tool in (
+
+def _failure_tools() -> list[ToolEntry]:
+    # Semantic failure classification and recovery matrix: decision output only.
+    return _plain(
         hermes_failure_classify,
         hermes_failure_taxonomy,
         hermes_recovery_matrix,
         hermes_controller_plan_list,
-    ):
-        server.add_tool(_failure_tool, meta=tool_meta())
+    )
 
-    # Supervised mission controller — shadow/observe reconciler loop (§17 item 6 /
-    # §7, D2, D10). Read-only surfaces + a single-pass shadow reconcile. The
-    # reconcile surface observes authoritative mission/plan/delegation/runner
-    # state, classifies it, and emits the smallest recovery action as decision
-    # output ONLY (would_execute always False); its only durable writes are the
-    # controller's own controller_plan + controller_telemetry + pass lease. It
-    # never dispatches work, never completes, never approves — the loop is not
-    # started by this slice (no deploy / no process mutation).
-    for _controller_tool in (
+
+def _controller_tools() -> list[ToolEntry]:
+    # Supervised mission controller: read-only surfaces and a single-pass shadow
+    # reconcile that never dispatches, completes or approves.
+    return _plain(
         hermes_controller_reconcile,
         hermes_controller_status,
         hermes_controller_lease_list,
         hermes_controller_trigger,
-    ):
-        server.add_tool(_controller_tool, meta=tool_meta())
+    )
 
-    # Autopilot (v0.13) — default OFF. The three tools are registered only when
-    # HERMES_GPT_AUTOPILOT=1, so the default connector surface is unchanged;
-    # status/stop are only reachable once a run could ever exist. See
-    # docs/autopilot.md.
-    if env_enabled(op_autopilot.AUTOPILOT_ENV):
-        server.add_tool(hermes_autopilot_start, meta=tool_meta())
-        server.add_tool(hermes_autopilot_status, meta=tool_meta())
-        server.add_tool(hermes_autopilot_stop, meta=tool_meta())
+
+def _autopilot_tools() -> list[ToolEntry]:
+    # Autopilot (v0.13) — default OFF. Registered only when HERMES_GPT_AUTOPILOT=1.
+    # See docs/autopilot.md.
+    gate = _env_gate(op_autopilot.AUTOPILOT_ENV)
+    return [
+        ToolEntry(hermes_autopilot_start, gate=gate),
+        ToolEntry(hermes_autopilot_status, gate=gate),
+        ToolEntry(hermes_autopilot_stop, gate=gate),
         # One-call launch (v0.16): same machine gate as the Autopilot tools.
-        server.add_tool(
+        ToolEntry(
             hermes_mission_launch,
-            meta=tool_meta(),
+            gate=gate,
             annotations=ToolAnnotations(
                 title="One-call Mission launch (dry run by default; apply needs confirm and direct workspace)",
                 readOnlyHint=False,
@@ -3600,159 +3642,154 @@ def register_tools(server: FastMCP) -> None:
                 idempotentHint=False,
                 openWorldHint=False,
             ),
-        )
+        ),
+    ]
 
-    # Event history (v0.7 S4): read-only normalized timeline over durable
-    # stores. Registered unconditionally; each tool enforces the per-client
-    # allowlist (HERMES_GPT_EVENTS_ALLOWED_SOURCES) and audits every call.
-    # readOnlyHint is advisory for client-side filtering (Cursor/Claude
-    # Desktop); it is not authority and never gates a call.
-    server.add_tool(
-        hermes_events_query,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Query the normalized Hermes GPT event timeline",
-            readOnlyHint=True,
-        ),
-    )
-    server.add_tool(
-        hermes_events_tail,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Tail recent Hermes GPT events across allowed sources",
-            readOnlyHint=True,
-        ),
-    )
-    server.add_tool(
-        hermes_live_events_cursor,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Read the durable v0.9 live-event cursor",
-            readOnlyHint=True,
-        ),
-    )
-    server.add_tool(
-        hermes_live_events_since,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Read or wait for durable v0.9 live events",
-            readOnlyHint=True,
-        ),
-    )
 
-    # Derived capability-manifest + per-mission ledger (vNext slice-1, phase 1):
-    # read-only derived views over authoritative registries. Registered
-    # unconditionally; each enforces a per-client allowlist env, audits every
-    # call, and carries readOnlyHint (advisory, not authority). No mutation
-    # path exists in either module.
-    server.add_tool(
-        hermes_capability_manifest,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Query the derived capability manifest (read-only)",
-            readOnlyHint=True,
+def _events_tools() -> list[ToolEntry]:
+    # Event history (v0.7 S4) and live events. readOnlyHint is advisory for
+    # client-side filtering; it is not authority and never gates a call.
+    return [
+        ToolEntry(
+            hermes_events_query,
+            annotations=ToolAnnotations(
+                title="Query the normalized Hermes GPT event timeline",
+                readOnlyHint=True,
+            ),
         ),
-    )
-    server.add_tool(
-        hermes_mission_ledger,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Query the merged, replayable per-mission ledger (read-only)",
-            readOnlyHint=True,
+        ToolEntry(
+            hermes_events_tail,
+            annotations=ToolAnnotations(
+                title="Tail recent Hermes GPT events across allowed sources",
+                readOnlyHint=True,
+            ),
         ),
-    )
-    server.add_tool(
-        hermes_mission_ledger_replay,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Replay a mission's full ledger event history (read-only)",
-            readOnlyHint=True,
+        ToolEntry(
+            hermes_live_events_cursor,
+            annotations=ToolAnnotations(
+                title="Read the durable v0.9 live-event cursor",
+                readOnlyHint=True,
+            ),
         ),
-    )
+        ToolEntry(
+            hermes_live_events_since,
+            annotations=ToolAnnotations(
+                title="Read or wait for durable v0.9 live events",
+                readOnlyHint=True,
+            ),
+        ),
+    ]
 
-    # Trusted-client OAuth (v0.7 S5): durable token store surfaces. Status is
-    # read-only; revoke is owner-gated (pending legal scope decision).
-    server.add_tool(
-        hermes_oauth_status,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Durable OAuth token store status",
-            readOnlyHint=True,
-        ),
-    )
-    server.add_tool(
-        hermes_oauth_revoke,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Revoke durable OAuth tokens",
-            destructiveHint=True,
-        ),
-    )
 
-    # Work Contracts (v0.6 M1): define/dispatch/validate/status. Registered
-    # unconditionally; dispatch enforces workspace level + dry-run-first +
-    # confirm gates; validate enforces D6 test gating internally.
-    for _contract_tool in (
+def _ledger_tools() -> list[ToolEntry]:
+    # Derived capability manifest and per-mission ledger: read-only views.
+    return [
+        ToolEntry(
+            hermes_capability_manifest,
+            annotations=ToolAnnotations(
+                title="Query the derived capability manifest (read-only)",
+                readOnlyHint=True,
+            ),
+        ),
+        ToolEntry(
+            hermes_mission_ledger,
+            annotations=ToolAnnotations(
+                title="Query the merged, replayable per-mission ledger (read-only)",
+                readOnlyHint=True,
+            ),
+        ),
+        ToolEntry(
+            hermes_mission_ledger_replay,
+            annotations=ToolAnnotations(
+                title="Replay a mission's full ledger event history (read-only)",
+                readOnlyHint=True,
+            ),
+        ),
+    ]
+
+
+def _oauth_tools() -> list[ToolEntry]:
+    # Trusted-client OAuth (v0.7 S5): status is read-only; revoke is owner-gated.
+    return [
+        ToolEntry(
+            hermes_oauth_status,
+            annotations=ToolAnnotations(
+                title="Durable OAuth token store status",
+                readOnlyHint=True,
+            ),
+        ),
+        ToolEntry(
+            hermes_oauth_revoke,
+            annotations=ToolAnnotations(
+                title="Revoke durable OAuth tokens",
+                destructiveHint=True,
+            ),
+        ),
+    ]
+
+
+def _contract_tools() -> list[ToolEntry]:
+    # Work Contracts (v0.6 M1): dispatch enforces workspace level, dry-run-first
+    # and confirm gates; validate enforces D6 test gating internally.
+    return _plain(
         hermes_contract_define,
         hermes_contract_dispatch,
         hermes_contract_validate,
         hermes_contract_status,
-    ):
-        server.add_tool(_contract_tool, meta=tool_meta())
-
-    # Pluggable execution backends: list/status are read-only; cancellation is
-    # workspace/direct gated internally and dry-run-first.
-    for _runner_tool in (
-        hermes_runner_list,
-        hermes_runner_status,
-        hermes_runner_cancel,
-    ):
-        server.add_tool(_runner_tool, meta=tool_meta())
-
-    # Runner-neutral durable job status. The wait tool carries the polling
-    # contract so chat clients can make one bounded decisive call per turn.
-    server.add_tool(
-        hermes_job_status,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Read durable background-job status and log cursor",
-            readOnlyHint=True,
-        ),
-    )
-    server.add_tool(
-        hermes_job_wait,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Wait up to 120 seconds for a background job to finish",
-            readOnlyHint=True,
-        ),
     )
 
-    # Unified delegation lifecycle (v0.9): normalized durable lineage over
-    # runner/Fabric execution. Get/list are read-only; dispatch/cancel/reconcile
-    # preserve the underlying authority and dry-run gates.
-    for _delegation_tool in (
+
+def _runner_tools() -> list[ToolEntry]:
+    # Pluggable execution backends: list/status read-only; cancel is gated.
+    return _plain(hermes_runner_list, hermes_runner_status, hermes_runner_cancel)
+
+
+def _job_tools() -> list[ToolEntry]:
+    # Runner-neutral durable job status. The wait tool carries the polling contract.
+    return [
+        ToolEntry(
+            hermes_job_status,
+            annotations=ToolAnnotations(
+                title="Read durable background-job status and log cursor",
+                readOnlyHint=True,
+            ),
+        ),
+        ToolEntry(
+            hermes_job_wait,
+            annotations=ToolAnnotations(
+                title="Wait up to 120 seconds for a background job to finish",
+                readOnlyHint=True,
+            ),
+        ),
+    ]
+
+
+def _delegation_tools() -> list[ToolEntry]:
+    # Unified delegation lifecycle (v0.9). Underlying authority gates are preserved.
+    return _plain(
         hermes_delegation_dispatch,
         hermes_delegation_get,
         hermes_delegation_list,
         hermes_delegation_reconcile,
         hermes_delegation_cancel,
-    ):
-        server.add_tool(_delegation_tool, meta=tool_meta())
-
-    # Review-evidence writer (v0.7 S3): owner-gated, distinct reviewer.
-    server.add_tool(
-        hermes_review_accept,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Accept a review verdict for a Work Contract"
-        ),
     )
 
-    # Swarm Orchestration (v0.6 M2): workflow engine on contracts. Registered
-    # unconditionally; each tool enforces its own level/apply/dry-run gates
-    # and audits every call (D-SW9/D-SW10).
-    for _swarm_tool in (
+
+def _review_accept_tools() -> list[ToolEntry]:
+    # Review-evidence writer (v0.7 S3): owner-gated, distinct reviewer.
+    return [
+        ToolEntry(
+            hermes_review_accept,
+            annotations=ToolAnnotations(
+                title="Accept a review verdict for a Work Contract"
+            ),
+        ),
+    ]
+
+
+def _swarm_tools() -> list[ToolEntry]:
+    # Swarm Orchestration (v0.6 M2): each tool enforces its own gates and audits.
+    return _plain(
         hermes_swarm_workflow_create,
         hermes_swarm_workflow_list,
         hermes_swarm_workflow_status,
@@ -3760,54 +3797,124 @@ def register_tools(server: FastMCP) -> None:
         hermes_swarm_stage_dispatch,
         hermes_swarm_stage_advance,
         hermes_swarm_approve,
-    ):
-        server.add_tool(_swarm_tool, meta=tool_meta())
-
-    # Skills
-    server.add_tool(hermes_skill_diff, meta=tool_meta())
-    server.add_tool(hermes_skill_create, meta=tool_meta())
-    server.add_tool(hermes_skill_edit, meta=tool_meta())
-    server.add_tool(hermes_skill_patch, meta=tool_meta())
-    server.add_tool(hermes_skill_write_file, meta=tool_meta())
-    server.add_tool(hermes_skill_copy, meta=tool_meta())
-    server.add_tool(hermes_skill_sync_to_default, meta=tool_meta())
-    server.add_tool(hermes_skill_delete, meta=tool_meta())
-
-    # Config / env
-    server.add_tool(hermes_config_get, meta=tool_meta())
-    server.add_tool(hermes_config_set, meta=tool_meta())
-    server.add_tool(hermes_config_patch, meta=tool_meta())
-    server.add_tool(hermes_env_status, meta=tool_meta())
-    server.add_tool(hermes_env_set_nonsecret, meta=tool_meta())
-    server.add_tool(hermes_env_copy_nonsecret, meta=tool_meta())
-
-    # Gateway / workspace / git / owner
-    server.add_tool(hermes_gateway_status, meta=tool_meta())
-    server.add_tool(hermes_gateway_restart, meta=tool_meta())
-    server.add_tool(hermes_workspace_read, meta=tool_meta())
-    server.add_tool(
-        hermes_export_file,
-        meta=tool_meta(),
-        annotations=ToolAnnotations(
-            title="Export an authorized local file as an MCP embedded resource",
-            readOnlyHint=True,
-        ),
     )
-    server.add_tool(hermes_workspace_patch, meta=tool_meta())
-    server.add_tool(hermes_workspace_write_file, meta=tool_meta())
-    server.add_tool(hermes_workspace_run_test, meta=tool_meta())
-    server.add_tool(hermes_git_status, meta=tool_meta())
-    server.add_tool(hermes_git_diff, meta=tool_meta())
-    server.add_tool(hermes_owner_run_command, meta=tool_meta())
-    server.add_tool(hermes_owner_patch, meta=tool_meta())
-    server.add_tool(hermes_owner_write_file, meta=tool_meta())
 
-    for tool in (
-        hermes_codex_status, hermes_codex_plan, hermes_codex_start,
-        hermes_codex_review_start, hermes_codex_jobs, hermes_codex_job_status,
-        hermes_codex_job_result, hermes_codex_cancel,
-    ):
-        server.add_tool(tool, meta=tool_meta())
+
+def _skill_tools() -> list[ToolEntry]:
+    return _plain(
+        hermes_skill_diff,
+        hermes_skill_create,
+        hermes_skill_edit,
+        hermes_skill_patch,
+        hermes_skill_write_file,
+        hermes_skill_copy,
+        hermes_skill_sync_to_default,
+        hermes_skill_delete,
+    )
+
+
+def _config_tools() -> list[ToolEntry]:
+    return _plain(
+        hermes_config_get,
+        hermes_config_set,
+        hermes_config_patch,
+        hermes_env_status,
+        hermes_env_set_nonsecret,
+        hermes_env_copy_nonsecret,
+    )
+
+
+def _workspace_owner_tools() -> list[ToolEntry]:
+    # Gateway / workspace / git / owner.
+    return _plain(
+        hermes_gateway_status,
+        hermes_gateway_restart,
+        hermes_workspace_read,
+    ) + [
+        ToolEntry(
+            hermes_export_file,
+            annotations=ToolAnnotations(
+                title="Export an authorized local file as an MCP embedded resource",
+                readOnlyHint=True,
+            ),
+        ),
+    ] + _plain(
+        hermes_workspace_patch,
+        hermes_workspace_write_file,
+        hermes_workspace_run_test,
+        hermes_git_status,
+        hermes_git_diff,
+        hermes_owner_run_command,
+        hermes_owner_patch,
+        hermes_owner_write_file,
+    )
+
+
+def _codex_tools() -> list[ToolEntry]:
+    return _plain(
+        hermes_codex_status,
+        hermes_codex_plan,
+        hermes_codex_start,
+        hermes_codex_review_start,
+        hermes_codex_jobs,
+        hermes_codex_job_status,
+        hermes_codex_job_result,
+        hermes_codex_cancel,
+    )
+
+
+def _tool_groups() -> list[tuple[str, list[ToolEntry]]]:
+    """Ordered registration groups. Order here is the registration order."""
+    return [
+        ("core", _core_tools()),
+        ("write", _write_tools()),
+        ("terminal", _terminal_tools()),
+        ("session_search", _session_search_tools()),
+        ("session_control", _session_control_tools()),
+        ("vision", _vision_tools()),
+        ("web", _web_tools()),
+        ("finance", _finance_tools()),
+        ("jev", _jev_tools()),
+        ("review_assist", _review_assist_tools()),
+        ("operator", _operator_tools()),
+        ("fleet", _fleet_tools()),
+        ("cron", _cron_tools()),
+        ("mission_control", _mission_control_tools()),
+        ("owner_inbox", _owner_inbox_tools()),
+        ("attention_delivery", _attention_tools()),
+        ("mission_runtime", _mission_runtime_tools()),
+        ("plan", _plan_tools()),
+        ("budget", _budget_tools()),
+        ("placement", _placement_tools()),
+        ("failure", _failure_tools()),
+        ("controller", _controller_tools()),
+        ("autopilot", _autopilot_tools()),
+        ("events", _events_tools()),
+        ("ledger", _ledger_tools()),
+        ("oauth", _oauth_tools()),
+        ("contract", _contract_tools()),
+        ("runner", _runner_tools()),
+        ("job", _job_tools()),
+        ("delegation", _delegation_tools()),
+        ("review_accept", _review_accept_tools()),
+        ("swarm", _swarm_tools()),
+        ("skill", _skill_tools()),
+        ("config", _config_tools()),
+        ("workspace_owner", _workspace_owner_tools()),
+        ("codex", _codex_tools()),
+    ]
+
+
+def register_tools(server: FastMCP) -> None:
+    # Connector tool profile (HERMES_GPT_TOOL_PROFILE). Invalid values raise
+    # ValueError here so build_server fails closed at startup. "full" (the
+    # default) registers into the server unchanged; other profiles only skip
+    # tools and never bypass the env gates in the groups above.
+    profile = tool_profiles.profile_from_env()
+    if profile != tool_profiles.FULL_PROFILE:
+        server = tool_profiles.ProfileFilteredServer(server, profile)  # type: ignore[assignment]
+    tool_registry.register(server, _tool_groups(), meta_factory=tool_meta)
+
 
 
 def _codex_gateway_diagnostics() -> dict[str, Any]:
