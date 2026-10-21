@@ -45,6 +45,8 @@ import operator_review as op_review
 import operator_diagnostics as op_diagnostics
 import operator_recovery as op_recovery
 import operator_oauth as op_oauth
+import operator_owner_inbox as op_owner_inbox
+import ui_security
 from versioning import VERSION
 
 # The 12 Mission Control surfaces (must match operator_mission.MISSION_SURFACES).
@@ -377,6 +379,30 @@ def _cron_detail(request: Request) -> JSONResponse:
     return _json_resp(_ok({"success": True, "job": job}), 200)
 
 
+def _owner_inbox(request: Request) -> JSONResponse:
+    """GET /api/ops/owner-inbox — read-only projection of what waits on the Owner.
+
+    Read-only: lists items and suggested existing tools; never approves or
+    advances. Gated by the ``approvals`` Mission Control allowlist entry, since
+    the inbox aggregates Mission approval state.
+    """
+    raw_limit = request.query_params.get("limit")
+    try:
+        limit = int(raw_limit) if raw_limit not in (None, "") else op_owner_inbox.DEFAULT_LIMIT
+    except ValueError:
+        return _json_resp(_err("INVALID_LIMIT", "limit must be an integer between 1 and 200", 400), 400)
+    if not op_mission._surface_allowed("approvals"):  # noqa: SLF001
+        return _json_resp(ui_security.error_envelope("AUTHZ_DENIED", "Owner inbox is not allowed for this client."), 403)
+    try:
+        payload = op_owner_inbox.build_inbox(hermes_root=_resolve_root(), limit=limit)
+    except ValueError as exc:
+        return _json_resp(_err("INVALID_LIMIT", op.redact_output(str(exc))[:200], 400), 400)
+    except Exception as exc:  # noqa: BLE001
+        return _json_resp(_err("INTERNAL", f"owner inbox failed: {op.redact_output(str(exc))[:300]}"), 500)
+    _audit("hermes_owner_inbox", success=True, summary=f"owner inbox count={payload['count']} complete={payload['complete']}")
+    return _json_resp(ui_security.ok(payload), 200)
+
+
 def _account(request: Request) -> JSONResponse:
     """GET /api/ops/account — operator policy + OAuth store status + version.
 
@@ -649,6 +675,7 @@ def ui_ops_routes() -> list[Route]:
     return [
         Route("/api/events", _events, methods=["GET"]),
         Route("/api/ops/account", _account, methods=["GET"]),
+        Route("/api/ops/owner-inbox", _owner_inbox, methods=["GET"]),
         Route("/api/ops/contracts", _contracts_list, methods=["GET"]),
         Route("/api/ops/contracts/{contract_sha256}", _contracts_detail, methods=["GET"]),
         Route("/api/ops/swarm", _swarm_list, methods=["GET"]),
