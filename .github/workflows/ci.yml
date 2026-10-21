@@ -43,9 +43,10 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]" "${{ matrix.sdk }}"
       - name: Run bounded Jev bridge interoperability preflight
+        timeout-minutes: 3
         env:
           HERMES_GPT_TEST_JEV_ADAPTER_ROOT: ${{ github.workspace }}/.qa-tmp/jev-mcp
-        run: python -m pytest -q test_jev_bridge.py
+        run: python -m pytest -vv -o addopts='' -o faulthandler_timeout=30 test_jev_bridge.py
       - name: Run full test suite
         env:
           HERMES_HTTP_TEST: "1"
