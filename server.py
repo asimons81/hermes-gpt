@@ -53,6 +53,7 @@ import operator_recovery as op_recovery
 import operator_autopilot as op_autopilot
 import operator_finance as op_finance
 import jev_bridge
+import tool_profiles
 from versioning import VERSION
 
 
@@ -3248,6 +3249,13 @@ def build_server(
 
 
 def register_tools(server: FastMCP) -> None:
+    # Connector tool profile (HERMES_GPT_TOOL_PROFILE). Invalid values raise
+    # ValueError here so build_server fails closed at startup. "full" (the
+    # default) registers into the server unchanged; other profiles only skip
+    # tools and never bypass the env gates below.
+    profile = tool_profiles.profile_from_env()
+    if profile != tool_profiles.FULL_PROFILE:
+        server = tool_profiles.ProfileFilteredServer(server, profile)  # type: ignore[assignment]
     server.add_tool(hermes_read_file, meta=tool_meta())
     server.add_tool(hermes_search_files, meta=tool_meta())
     server.add_tool(hermes_memory, meta=tool_meta())

@@ -38,6 +38,7 @@ GATE_ENVS = [
     server.TRUSTED_PROXY_IPS_ENV,
     server.ALLOWED_HOSTS_ENV,
     server.op_autopilot.AUTOPILOT_ENV,
+    server.tool_profiles.TOOL_PROFILE_ENV,
 ]
 
 
