@@ -608,3 +608,40 @@ def test_ack_never_mutates_mission_plan_or_contract_stores(root, tmp_path, monke
     still = json.loads(delegations.hermes_delegation_get(delegation["delegation_id"], hermes_root=root))
     assert still["delegation"]["state"] == "reconciling"
     assert inbox.build_inbox(hermes_root=root)["items"] == []
+
+
+def _unrelated_acceptances(root: Path, count: int) -> None:
+    for index in range(count):
+        op_review._write_acceptance(root, {  # noqa: SLF001 - test fixture writes the store directly
+            "schema": op_review.REVIEW_SCHEMA,
+            "record_id": f"rev-{index:016x}",
+            "contract_sha256": f"{index + 1:064x}",
+            "task_id": f"t_unrelated_{index}",
+            "assignee": "worker-a",
+            "reviewer": "reviewer-a",
+            "verdict": "SATISFIED",
+            "evidence_refs": [],
+            "created_at": "2026-10-01T00:00:00+00:00",
+        })
+
+
+def test_review_item_clears_after_250_unrelated_acceptances(root, tmp_path, monkeypatch):
+    delegation = _review_delegation(root, tmp_path, monkeypatch)
+    _unrelated_acceptances(root, 250)
+    assert "contract_review_pending" in _kinds(inbox.build_inbox(hermes_root=root))
+    _accept_review(root, monkeypatch, delegation["contract_sha256"])
+    cleared = inbox.build_inbox(hermes_root=root)
+    assert "contract_review_pending" not in _kinds(cleared)
+    assert cleared["sources"]["work_contract_review"] == "empty"
+    assert cleared["complete"] is True
+
+
+def test_review_source_reads_a_store_past_the_old_5000_line_bound(root, tmp_path, monkeypatch):
+    delegation = _review_delegation(root, tmp_path, monkeypatch)
+    _unrelated_acceptances(root, 5200)
+    result = inbox.build_inbox(hermes_root=root)
+    assert result["sources"]["work_contract_review"] == "ok"
+    assert result["complete"] is True
+    assert "contract_review_pending" in _kinds(result)
+    _accept_review(root, monkeypatch, delegation["contract_sha256"])
+    assert "contract_review_pending" not in _kinds(inbox.build_inbox(hermes_root=root))

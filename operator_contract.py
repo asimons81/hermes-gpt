@@ -1081,7 +1081,10 @@ def _check_review(contract: dict[str, Any], contract_sha256: str, hermes_root: P
     try:
         import operator_review as op_review
 
-        for rec in op_review.read_review_acceptances(hermes_root):
+        # Whole-store read for this contract: an acceptance written after many
+        # unrelated records must still count. An unreadable store or an over-limit
+        # match raises here and is treated as no evidence (fail closed).
+        for rec in op_review.acceptance_records_for(hermes_root, contract_sha256):
             if rec.get("contract_sha256") != contract_sha256:
                 continue
             if rec.get("verdict") != "SATISFIED":

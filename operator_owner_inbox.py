@@ -88,7 +88,6 @@ _ACK_TAIL_BYTES = 1024 * 1024
 _RUN_FILE_MAX_BYTES = 1024 * 1024
 _RUN_SCAN_MAX = 200
 _REVIEW_ROW_MAX = 200
-_ACCEPTANCE_SCAN_MAX = 5000
 _SUMMARY_MAX = 240
 _NODE_LIST_MAX = 8
 _ITEM_ID_RE = re.compile(r"^[0-9a-f]{24}$")
@@ -346,18 +345,6 @@ def _spool_items(root: Path) -> tuple[str, list[dict[str, Any]]]:
 # ---------------------------------------------------------------------------
 
 
-def _acceptance_records(root: Path) -> list[dict[str, Any]]:
-    """Read review acceptances; an unreadable or over-bound store is unavailable."""
-    path = op_review.review_evidence_path(root)
-    if path.exists():
-        with path.open("rb"):  # raises OSError when the store is unreadable
-            pass
-    records = op_review.read_review_acceptances(root, limit=_ACCEPTANCE_SCAN_MAX)
-    if len(records) >= _ACCEPTANCE_SCAN_MAX:
-        raise _SourceUnavailable("review-evidence store exceeds the bounded scan")
-    return records
-
-
 def _accepted(records: list[dict[str, Any]], contract_sha256: str, identities: set[str]) -> bool:
     """Same evidence rule as the validator's review-evidence path (operator_contract._check_review)."""
     for rec in records:
@@ -394,7 +381,6 @@ def _review_items(root: Path) -> tuple[str, list[dict[str, Any]]]:
         ).fetchall()
         if len(rows) > _REVIEW_ROW_MAX:
             raise _SourceUnavailable("more reconciling delegations than the bounded review scan")
-        records: list[dict[str, Any]] | None = None
         for row in rows:
             if delegations._normalize_state(row["outcome"] or row["backend_state"]) != "succeeded":  # noqa: SLF001
                 continue
@@ -418,8 +404,9 @@ def _review_items(root: Path) -> tuple[str, list[dict[str, Any]]]:
                 required.add("forbidden")
             if any(checks.get(kind) != "PASS" for kind in required):
                 continue  # another required check blocks; this is not a pure review wait
-            if records is None:
-                records = _acceptance_records(root)
+            # Same whole-store, per-contract read the validator uses. An unreadable
+            # store or an over-limit match raises and makes this source unavailable.
+            records = op_review.acceptance_records_for(root, sha)
             if _accepted(records, sha, contract_mod._attributable_identities(contract)):  # noqa: SLF001
                 continue
             items.append(

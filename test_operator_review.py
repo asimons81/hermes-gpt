@@ -376,3 +376,84 @@ def test_human_approval_reference_still_accepted(hermes_root, clean_env, audit_o
     parsed = oc._check_review(contract, sha, hermes_root)
     assert parsed["status"] == "PASS"
     assert "human approval" in parsed["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Acceptance store is read whole, not capped at the first N lines.
+# ---------------------------------------------------------------------------
+
+
+def _unrelated_acceptance(index: int) -> dict:
+    return {
+        "schema": rev.REVIEW_SCHEMA,
+        "record_id": f"rev-{index:016x}",
+        "contract_sha256": f"{index:064x}",
+        "task_id": f"t_unrelated_{index}",
+        "assignee": "worker-a",
+        "reviewer": "reviewer-a",
+        "verdict": "SATISFIED",
+        "evidence_refs": [],
+        "created_at": "2026-10-01T00:00:00+00:00",
+    }
+
+
+def test_matching_acceptance_after_250_unrelated_records_still_passes(
+    hermes_root, clean_env, audit_override, monkeypatch
+):
+    _owner_env(monkeypatch)
+    contract = _minimal_contract()
+    sha = _contract_sha(contract)
+    for index in range(250):
+        rev._write_acceptance(hermes_root, _unrelated_acceptance(index))
+    out = rev.hermes_review_accept(
+        contract_sha256=sha, task_id=contract["task_id"], assignee="worker-a",
+        reviewer="reviewer-a", verdict="SATISFIED", evidence_refs=["docs/report.md"],
+        confirm=True, dry_run=False, hermes_root=hermes_root,
+    )
+    assert json.loads(out)["success"] is True
+
+    assert oc._check_review(contract, sha, hermes_root)["status"] == "PASS"
+    verdict = json.loads(oc.hermes_contract_validate(json.dumps(contract), hermes_root=hermes_root))
+    assert {ch["kind"]: ch["status"] for ch in verdict["checks"]}["review"] == "PASS"
+
+
+def test_corrupt_and_truncated_lines_never_count_as_acceptance(hermes_root, clean_env, monkeypatch):
+    contract = _minimal_contract()
+    sha = _contract_sha(contract)
+    path = rev.review_evidence_path(hermes_root)
+    truncated = (
+        '{"schema": "hermes.review-acceptance/v1", "contract_sha256": "%s", '
+        '"verdict": "SATISFIED", "reviewer": "reviewer-a"' % sha
+    )
+    oversized = json.dumps(
+        {**_unrelated_acceptance(1), "contract_sha256": sha, "padding": "x" * (rev.REVIEW_LINE_MAX_BYTES + 10)}
+    )
+    path.write_text("not json at all\n" + truncated + "\n" + oversized + "\n", encoding="utf-8")
+    assert rev.acceptance_records_for(hermes_root, sha) == []
+    assert oc._check_review(contract, sha, hermes_root)["status"] == "FAIL"
+
+    # A valid record after the corrupt lines is still found.
+    good = _unrelated_acceptance(2) | {"contract_sha256": sha}
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(good) + "\n")
+    found = rev.acceptance_records_for(hermes_root, sha)
+    assert [r["record_id"] for r in found] == [good["record_id"]]
+    assert oc._check_review(contract, sha, hermes_root)["status"] == "PASS"
+
+
+def test_acceptance_records_for_fails_closed_above_its_cap(hermes_root):
+    sha = "a" * 64
+    for index in range(3):
+        rev._write_acceptance(hermes_root, _unrelated_acceptance(index) | {"contract_sha256": sha})
+    assert len(rev.acceptance_records_for(hermes_root, sha, limit=3)) == 3
+    with pytest.raises(ValueError):
+        rev.acceptance_records_for(hermes_root, sha, limit=2)
+
+
+def test_recent_reader_returns_newest_records_in_order(hermes_root):
+    for index in range(250):
+        rev._write_acceptance(hermes_root, _unrelated_acceptance(index))
+    recent = rev.read_review_acceptances(hermes_root, limit=200)
+    assert len(recent) == 200
+    assert recent[0]["record_id"] == _unrelated_acceptance(50)["record_id"]
+    assert recent[-1]["record_id"] == _unrelated_acceptance(249)["record_id"]
