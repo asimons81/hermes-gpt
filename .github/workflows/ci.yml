@@ -25,13 +25,32 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check out pinned Jev adapter for offline interoperability tests
+        uses: actions/checkout@v4
+        with:
+          repository: asimons81/jev-mcp
+          ref: fc4d4bef26af92d1d5a3b9e05bffb46d90a37eae
+          path: .qa-tmp/jev-mcp
+          persist-credentials: false
+      - name: Preserve exact pinned adapter bytes on Windows and Linux
+        run: git -C .qa-tmp/jev-mcp -c core.autocrlf=false -c core.eol=lf checkout-index --all --force
+      - run: npm ci --ignore-scripts --prefix .qa-tmp/jev-mcp
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]" "${{ matrix.sdk }}"
+      - name: Run bounded Jev bridge interoperability preflight
+        timeout-minutes: 3
+        env:
+          HERMES_GPT_TEST_JEV_ADAPTER_ROOT: ${{ github.workspace }}/.qa-tmp/jev-mcp
+        run: python -m pytest -vv -o addopts='' -o faulthandler_timeout=30 test_jev_bridge.py
       - name: Run full test suite
         env:
           HERMES_HTTP_TEST: "1"
+          HERMES_GPT_TEST_JEV_ADAPTER_ROOT: ${{ github.workspace }}/.qa-tmp/jev-mcp
         run: python -m pytest -q -o addopts='' --tb=short
       - name: Run runner regression tests
         run: >-
@@ -51,6 +70,7 @@ jobs:
         run: >-
           python -m py_compile
           server.py
+          jev_bridge.py
           codex_core.py
           codex_mcp.py
           mcp_compat.py
@@ -89,6 +109,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: NousResearch/hermes-agent
+          # Last passing loader contract; upstream HEAD removed _find_all_skills.
+          ref: cca83848ec79a4a6a2ecc10285725559bf72c97c
           path: hermes-agent-src
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -138,6 +160,7 @@ jobs:
       - run: >-
           python -m ruff check
           mcp_compat.py codex_mcp.py test_mcp_sdk_migration.py test_mcp_compat.py
+          jev_bridge.py test_jev_bridge.py
           test_mcp_transport_mode.py test_codex_mcp.py test_hermetic_environment.py test_operator_codex.py
           fabric_artifacts.py fabric_write_guard.py
           operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py

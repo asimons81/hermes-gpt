@@ -24,6 +24,8 @@
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
 
+Unreleased source also includes an optional [Jev decision bridge](docs/jev.md): three default-off tools reuse the pinned community `jev-mcp` adapter over local stdio. No gateway change or new authority is introduced. Owner key provisioning and deployment are separate setup steps; this is not a live-integration claim.
+
 ## What v0.14.0 adds
 
 **Acceptance and recovery** strengthens Autopilot's completion checks and handles confirmed deliverable failures after successful execution.

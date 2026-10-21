@@ -25,6 +25,8 @@ Both retain JSON, stateless Streamable HTTP when started with `--http` and
 the existing host/origin restrictions. SDK 2 uses its public app-version
 parameter; only SDK 1 needs the legacy private version assignment.
 
+The real Agent-loader CI fixture is pinned to Hermes Agent `cca83848ec79a4a6a2ecc10285725559bf72c97c`, the last passing upstream revision with the loader contract this package consumes. Newer Agent revisions require separate compatibility verification; a passing fixture test does not establish compatibility with arbitrary upstream HEAD.
+
 ## Transport matrix
 
 | Transport | Path | Notes |
@@ -39,6 +41,8 @@ Server transport security (`TransportSecuritySettings`) enforces an explicit
 host/origin allowlist: loopback by default plus `HERMES_GPT_ALLOWED_HOSTS`
 extensions and the OAuth issuer when configured. Public unauthenticated
 hosting is unsupported (product invariant).
+
+The unreleased, default-off [Jev bridge](jev.md) adds three tools only when `HERMES_GPT_ENABLE_JEV=1`. It inherits this outer transport/authentication boundary and forwards only the fixed decision calls to a pinned local stdio adapter. It does not mount another endpoint or change the curated Codex surface.
 
 ## Trusted-client authentication metadata
 
