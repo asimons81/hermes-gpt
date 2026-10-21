@@ -1573,7 +1573,7 @@ V09_CONNECTOR_ADDITIONS = [
 # + 4 mission-budget envelope tools (sibling t_78e597c6) + 4 placement-scoring
 # tools (sibling t_167ac591) + 4 failure-semantics tools (t_49bbc143) + 4
 # supervised-mission-controller tools (t_ad1e6d07).
-V09_CONNECTOR_TOOL_COUNT = 137
+V09_CONNECTOR_TOOL_COUNT = 138
 
 
 def test_v09_connector_surface_acceptance(monkeypatch):
@@ -1614,7 +1614,7 @@ def test_history_enabled_connector_surface_acceptance(monkeypatch):
         "hermes_bot_chat_get",
     }
 
-    assert len(enabled_names) == len(set(enabled_names)) == 142
+    assert len(enabled_names) == len(set(enabled_names)) == V09_CONNECTOR_TOOL_COUNT + 5
     assert set(enabled_names) - set(disabled_names) == expected_history_tools
     assert set(disabled_names) - set(enabled_names) == set()
 

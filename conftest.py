@@ -17,6 +17,7 @@ import operator_skill_resolution as _skill_resolution
 
 _ISOLATED_ENV_VARS = (
     "HERMES_GPT_ENABLE_JEV",
+    "HERMES_GPT_REVIEW_ASSIST",
     "HERMES_GPT_TOOL_PROFILE",
     "HERMES_GPT_JEV_ADAPTER_ROOT",
     "HERMES_GPT_JEV_NODE",
