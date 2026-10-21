@@ -109,6 +109,10 @@ python -m twine check dist/*
 python tools/check_package_hygiene.py dist/*
 ```
 
+Compare MCP SDK objects in wire (alias) form, never by SDK attribute name. The SDK 2 family renamed attributes (for example `readOnlyHint` became `read_only_hint`, `serverInfo` became `server_info`), so a test that reads attributes breaks when the SDK changes. Use the `wire` fixture from `conftest.py`, which returns `model.model_dump(by_alias=True, exclude_none=True)`, and assert on the protocol names such as `readOnlyHint` and `serverInfo`. Run the suite with both `.venv` and `.venv-sdk2` before claiming it is green.
+
+The tool surface is pinned by `test_tool_inventory.py` (default names) and `test_tool_registry_neutrality.py` (ordered wire-form digests across gate and profile combinations). After an intentional surface change, such as a new tool or a changed schema, annotation or docstring, regenerate the golden with `python test_tool_registry_neutrality.py` under both interpreters and review the diff. Never regenerate it to hide an unintended change.
+
 Do not weaken or skip a failing safety test just to make a change pass.
 
 ## Release discipline

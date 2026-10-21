@@ -16,7 +16,7 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.15.0** (source prepared for release). GitHub and PyPI publication of 0.15.0 must be verified on each channel before it is described as available. The last verified published versions are the [GitHub v0.14.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0) and the [PyPI 0.14.0 package](https://pypi.org/project/hermes-gpt/0.14.0/); verify both channels independently when updating. Declared artifact size/digest checks and validation recovery require v0.14.0 or newer. The owner inbox, review assist and connector tool profiles require v0.15.0 or newer.
+Repository version: **0.16.0** (source prepared for release on `release/v0.16.0`). GitHub and PyPI publication of 0.16.0 must be verified on each channel before it is described as available; the [v0.15.0 release notes](release-notes-v0.15.0.md) record that release's publication. Verify each channel independently when updating. The notification relay, Owner inbox acknowledgements and Flight Deck inbox actions, the one-call Mission launch, and `hermes-gpt update --version` require v0.16.0 or newer. Declared artifact size/digest checks and validation recovery require v0.14.0 or newer. The owner inbox, review assist and connector tool profiles require v0.15.0 or newer.
 
 Unreleased changes on `master` can retain the same package version. The Jev bridge, owner inbox and review assist ship in 0.15.0 but are default off, or read-only where noted; the version string alone does not prove a feature is installed or active. Verify the artifact/source revision and tool inventory using [runtime provenance](runtime-checkout.md).
 
@@ -43,7 +43,9 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`finance.md`](finance.md) | current | bounded ChatGPT-to-Hermes Finance bridge, finance evidence/decision contracts, persistence boundary, activation, and verification |
 | [`missions.md`](missions.md) | current | v0.9 first-class Mission lifecycle, bounded context/skills manifests, attachments, reconciliation, and Owner approval |
 | [`autopilot.md`](autopilot.md) | current | v0.14 Autopilot: gates, declared artifact acceptance, delivery grace, bounded recovery, approval frontier, budgets, and status |
-| [`owner-inbox.md`](owner-inbox.md) | current (v0.15.0) | read-only Owner inbox: Missions awaiting approval, Autopilot waiting for Owner, controller attention spool, source health (`complete`), no new authority |
+| [`owner-inbox.md`](owner-inbox.md) | current (v0.15.0; acknowledgements and Flight Deck actions in v0.16.0) | Owner inbox: Missions awaiting approval, Autopilot waiting for Owner, controller attention, Work Contracts awaiting review acceptance, source health (`complete`), stable item ids, acknowledgements; gated actions only |
+| [`attention-delivery.md`](attention-delivery.md) | current (v0.16.0, default off) | notification-only relay of new Owner inbox items to Hermes or iMessage targets; administrator env config, delivery state, safety boundary |
+| [`attention-delivery.md`](attention-delivery.md) | current (v0.16, default off) | notification-only relay of new Owner inbox items to Hermes or iMessage targets; administrator env config, delivery state, safety boundary |
 | [`live-events.md`](live-events.md) | current | v0.9 durable event cursor/long-poll and authenticated WebSocket wake-up stream |
 | [`flight-deck-missions.md`](flight-deck-missions.md) | current | v0.9 read-only Mission/delegation Flight Deck views with durable live refresh |
 | [`delegations.md`](delegations.md) | current | v0.9 normalized delegation lifecycle across Pi/OpenCode/Codex/Fabric with durable lineage and reconciliation |
@@ -55,7 +57,8 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`session-control.md`](session-control.md) | current | gated asynchronous session continue/send jobs |
 | [`ui-security-boundary.md`](ui-security-boundary.md) | current | conversational UI browser security boundary and opt-in UI mount |
 | [`flight-deck-coverage.md`](flight-deck-coverage.md) | current | Flight Deck browser coverage and mutation safety decisions |
-| [`release-notes-v0.15.0.md`](release-notes-v0.15.0.md) | current release record | v0.15 Owner Loop: owner inbox, advisory review assist, Jev bridge, connector tool profiles, file-backup switch, 138-tool default surface |
+| [`release-notes-v0.16.0.md`](release-notes-v0.16.0.md) | current release record (prepared; publication must be verified) | v0.16 Close the Loop: attention delivery relay, Owner inbox review source and acknowledgements, Flight Deck inbox actions, action-route cross-site refusal, one-call Mission launch, safe package upgrade |
+| [`release-notes-v0.15.0.md`](release-notes-v0.15.0.md) | historical release record | v0.15 Owner Loop: owner inbox, advisory review assist, Jev bridge, connector tool profiles, file-backup switch |
 | [`release-notes-v0.14.0.md`](release-notes-v0.14.0.md) | historical release record | declared acceptance checks, durable delivery grace, bounded artifact-failure recovery, and supervision |
 | [`release-notes-v0.13.0.md`](release-notes-v0.13.0.md) | historical release record | v0.13 Autopilot behavior and initial release verification |
 | [`release-notes-v0.8.0.md`](release-notes-v0.8.0.md) | historical release record | shipped v0.8 Fabric behavior, G6 acceptance boundary, and known limitation |

@@ -23,9 +23,14 @@ import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
+import operator_autopilot as autopilot
+import operator_mission_plan as plan
+import operator_mission_runtime as mission
+import operator_owner_inbox as op_owner_inbox
 import operator_policy as op
 import ui_api
 import ui_ops
+from test_operator_autopilot_scheduler import MID, _mk, _node, _states, make_env
 
 OWNER_ACK = op.OWNER_ACK_REQUIRED_VALUE
 
@@ -535,3 +540,303 @@ def test_action_cron_run_long_running_dispatched_202(client, monkeypatch, tmp_pa
     assert calls and calls[0]["job_id"] == "j1"
     assert calls[0]["dry_run"] is False
     assert calls[0]["hermes_root"]  # resolved server-side, never client-supplied
+
+
+# ---------------------------------------------------------------------------
+# Owner-inbox actions (v0.16): the same spec mechanism and the same gated
+# operator functions as MCP. Real functions run unless a test says otherwise.
+# ---------------------------------------------------------------------------
+
+NEW_TOOLS = (
+    "hermes_mission_approve",
+    "hermes_plan_node_transition",
+    "hermes_autopilot_stop",
+    "hermes_owner_inbox_ack",
+)
+ZERO_ITEM = "0" * 24
+
+
+def _gate(node_id: str, parents=()) -> dict:
+    return _node(node_id, parents, kind="approval", owner="owner")
+
+
+def _post(client, tool: str, args: dict, **extra):
+    body = {"tool": tool, "args": args, **extra}
+    return client.post("/api/ops/action", json=body)
+
+
+def _walk(root, node_id: str, targets) -> None:
+    for target in targets:
+        out = json.loads(plan.hermes_plan_node_transition(MID, node_id, target, confirm=True, dry_run=False, hermes_root=root))
+        assert out["success"] is True, out
+
+
+def _gate_at_awaiting(root) -> None:
+    _walk(root, "gate", ("dispatched", "running", "awaiting_review", "validated", "awaiting_approval"))
+
+
+@pytest.fixture
+def ops_root(tmp_path, monkeypatch):
+    """A workspace Mission plan with an approval gate, rooted at HERMES_HOME."""
+    root, backend = make_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("HERMES_HOME", str(root))
+    return root, backend
+
+
+@pytest.mark.parametrize("tool", NEW_TOOLS)
+def test_new_actions_reject_unknown_args(client, tool):
+    args = {"hermes_root": "/tmp/evil", "runner": "smuggled"}
+    resp = _post(client, tool, args)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_ARGS"
+    assert "hermes_root" in resp.json()["error"]["message"]
+
+
+def test_ack_has_no_confirm_argument(client):
+    resp = _post(client, "hermes_owner_inbox_ack", {"item_ids": [ZERO_ITEM], "confirm": True})
+    assert resp.status_code == 400 and resp.json()["error"]["code"] == "INVALID_ARGS"
+
+
+@pytest.mark.parametrize("item_ids", [[], [ZERO_ITEM] * 51, "not-a-list"])
+def test_ack_bounds_item_ids_before_the_gate(client, monkeypatch, item_ids):
+    _set_env(monkeypatch, WORKSPACE_ENV)
+    resp = _post(client, "hermes_owner_inbox_ack", {"item_ids": item_ids})
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_ARGS"
+
+
+def test_ack_rejects_malformed_ids_without_echoing_them(client, monkeypatch):
+    _set_env(monkeypatch, WORKSPACE_ENV)
+    resp = _post(client, "hermes_owner_inbox_ack", {"item_ids": ["<script>SECRET-VALUE</script>"]})
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_OWNER_INBOX_ACK"
+    assert "SECRET-VALUE" not in resp.text
+
+
+def test_ack_read_only_is_refused_by_the_tool(client):
+    resp = _post(client, "hermes_owner_inbox_ack", {"item_ids": [ZERO_ITEM]}, dry_run=False)
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "LEVEL_REQUIRED"
+
+
+def test_ack_dry_run_writes_nothing_then_confirm_writes_and_hides(client, ops_root):
+    root, _ = ops_root
+    autopilot._write_run(MID, root, state="waiting_for_owner", attempt=1, max_concurrency=1)  # noqa: SLF001
+    item_id = client.get("/api/ops/owner-inbox").json()["data"]["items"][0]["item_id"]
+    ack_store = root / op_owner_inbox.ACK_STORE_RELATIVE
+
+    dry = _post(client, "hermes_owner_inbox_ack", {"item_ids": [item_id]})
+    assert dry.status_code == 200
+    assert dry.json()["data"]["dry_run"] is True
+    assert dry.json()["data"]["result"]["planned"] == [item_id]
+    assert not ack_store.exists()
+
+    real = _post(client, "hermes_owner_inbox_ack", {"item_ids": [item_id]}, dry_run=False)
+    assert real.status_code == 200
+    assert real.json()["data"]["dry_run"] is False
+    assert item_id in ack_store.read_text(encoding="utf-8")
+    assert client.get("/api/ops/owner-inbox").json()["data"]["items"] == []
+
+
+def test_mission_approve_owner_off_is_refused_by_the_tool(client, ops_root):
+    root, _ = ops_root  # workspace level from make_env: Owner Mode is not active
+    _mk(root, [_node("a")])
+    resp = _post(client, "hermes_mission_approve", {"mission_id": MID, "approval_reference": "ref-1", "confirm": True}, dry_run=False)
+    assert resp.status_code == 400
+    err = resp.json()["error"]
+    assert err["code"] == "MISSION_APPROVAL_REJECTED"
+    assert "owner" in err["message"].lower()
+    md = json.loads(mission.hermes_mission_get(MID, hermes_root=root))
+    assert md["status"] != "completed"
+    assert not (md.get("approval") or {}).get("approved")
+
+
+def test_mission_approve_dry_run_with_owner_is_the_tools_own_refusal(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    _mk(root, [_node("a")])  # exists, but is not awaiting_approval
+    _set_env(monkeypatch, OWNER_ENV)
+    resp = _post(client, "hermes_mission_approve", {"mission_id": MID, "approval_reference": "ref-1"})
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "MISSION_APPROVAL_REJECTED"
+    assert resp.json()["error"]["message"] == "mission must be awaiting_approval before Owner approval"
+
+
+def test_mission_approve_confirm_calls_real_function_with_server_root(client, monkeypatch, tmp_path):
+    calls: list[dict] = []
+
+    def record(**kwargs):
+        calls.append(kwargs)
+        return json.dumps({"success": True, "tool": "hermes_mission_approve", "changed": kwargs.get("dry_run") is False})
+
+    _set_env(monkeypatch, OWNER_ENV)
+    monkeypatch.setattr(ui_ops._MUTATION_TOOLS["hermes_mission_approve"], "fn", record)
+
+    dry = _post(client, "hermes_mission_approve", {"mission_id": MID, "approval_reference": "ref-1"})
+    assert dry.status_code == 200 and dry.json()["data"]["dry_run"] is True
+    assert calls[-1].get("dry_run", True) is True and "confirm" not in calls[-1]
+
+    real = _post(client, "hermes_mission_approve", {"mission_id": MID, "approval_reference": "ref-1", "confirm": True}, dry_run=False)
+    assert real.status_code == 200 and real.json()["data"]["dry_run"] is False
+    assert calls[-1]["confirm"] is True and calls[-1]["dry_run"] is False
+    assert calls[-1]["approval_reference"] == "ref-1"
+    assert calls[-1]["hermes_root"] == ui_ops._resolve_root()  # noqa: SLF001 - server-resolved, never client-sent
+
+
+def test_node_transition_approves_an_approval_gate_with_owner(client, ops_root, monkeypatch):
+    root, backend = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_node("a"), _gate("gate", ["a"]), _node("c", ["gate"])])
+    _gate_at_awaiting(root)
+    args = {"mission_id": MID, "node_id": "gate", "target_state": "completed", "reason": "reviewed"}
+
+    dry = _post(client, "hermes_plan_node_transition", args)
+    assert dry.status_code == 200
+    assert dry.json()["data"]["requires_confirm"] is True
+    assert dry.json()["data"]["result"]["from_state"] == "awaiting_approval"
+    assert _states(root)["gate"] == "awaiting_approval"
+
+    real = _post(client, "hermes_plan_node_transition", {**args, "confirm": True}, dry_run=False)
+    assert real.status_code == 200 and real.json()["data"]["dry_run"] is False
+    assert _states(root)["gate"] == "completed"
+
+
+def test_node_transition_rejects_a_high_impact_node_too(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_node("h", auth="high_impact")])
+    _walk(root, "h", ("blockable", "dispatched", "running", "awaiting_review", "validated", "awaiting_approval"))
+    resp = _post(
+        client, "hermes_plan_node_transition",
+        {"mission_id": MID, "node_id": "h", "target_state": "failed", "reason": "rejected", "confirm": True},
+        dry_run=False,
+    )
+    assert resp.status_code == 200
+    assert _states(root)["h"] == "failed"
+
+
+@pytest.mark.parametrize("target", ["paused", "blockable", "dispatched", "running", "validated", "pending", "awaiting_approval"])
+def test_node_transition_refuses_targets_that_do_not_resolve_the_gate(client, ops_root, monkeypatch, target):
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_node("a"), _gate("gate", ["a"])])
+    _gate_at_awaiting(root)
+    resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "gate", "target_state": target, "confirm": True}, dry_run=False)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "APPROVAL_TRANSITION_REFUSED"
+    assert _states(root)["gate"] == "awaiting_approval"
+
+
+def test_node_transition_refuses_a_non_gated_node(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_node("a"), _gate("gate", ["a"])])
+    resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "a", "target_state": "failed", "confirm": True}, dry_run=False)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "APPROVAL_TRANSITION_REFUSED"
+    assert "not an approval or high_impact" in resp.json()["error"]["message"]
+    assert _states(root)["a"] == "pending"
+
+
+def test_node_transition_refuses_a_gate_not_awaiting_approval(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_node("a"), _gate("gate", ["a"])])
+    resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "gate", "target_state": "completed", "confirm": True}, dry_run=False)
+    assert resp.status_code == 400
+    assert "not awaiting approval" in resp.json()["error"]["message"]
+    assert _states(root)["gate"] == "pending"
+
+
+def test_node_transition_owner_off_is_refused_before_any_plan_read(client, ops_root):
+    root, _ = ops_root  # workspace level, no Owner Mode: the owner gate runs first
+    _mk(root, [_node("a"), _gate("gate", ["a"])])
+    resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "gate", "target_state": "completed", "confirm": True}, dry_run=False)
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "LEVEL_REQUIRED"
+    assert resp.json()["error"].get("required") == "owner"
+
+
+def test_autopilot_stop_is_not_behind_the_machine_gate(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    monkeypatch.delenv(autopilot.AUTOPILOT_ENV, raising=False)
+    autopilot._write_run(MID, root, state="waiting_for_owner", attempt=1, max_concurrency=1)  # noqa: SLF001
+    dry = _post(client, "hermes_autopilot_stop", {"mission_id": MID})
+    assert dry.status_code == 200
+    assert dry.json()["data"]["result"]["would_stop"] is True
+    assert autopilot._read_run(MID, root)["state"] == "waiting_for_owner"  # noqa: SLF001
+
+    real = _post(client, "hermes_autopilot_stop", {"mission_id": MID, "confirm": True}, dry_run=False)
+    assert real.status_code == 200
+    assert autopilot._read_run(MID, root)["state"] == "stopped"  # noqa: SLF001
+
+
+def test_new_actions_inherit_bearer_and_origin_protection(monkeypatch):
+    """The browser actions sit behind the same outer Bearer and CORS middleware as the rest of /api."""
+    import oauth_auth
+    import server
+    import ui_security
+
+    token = "test-static-bearer-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    monkeypatch.setenv(ui_security.UI_ENABLED_ENV, "1")
+    monkeypatch.setenv(oauth_auth.AUTH_TOKEN_ENV, token)
+    monkeypatch.delenv(op.OPERATOR_ENABLED_ENV, raising=False)
+    built = server.build_server(http=True)
+    client = TestClient(server.build_asgi_app(built, http=True), base_url="http://127.0.0.1")
+    for tool in NEW_TOOLS:
+        resp = _post(client, tool, {"item_ids": [ZERO_ITEM]} if tool == "hermes_owner_inbox_ack" else {"mission_id": MID})
+        assert resp.status_code == 401, tool
+    authed = client.post(
+        "/api/ops/action",
+        json={"tool": "hermes_owner_inbox_ack", "args": {"item_ids": [ZERO_ITEM]}},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert authed.status_code != 401
+    foreign = client.post(
+        "/api/ops/action",
+        json={"tool": "hermes_owner_inbox_ack", "args": {"item_ids": [ZERO_ITEM]}},
+        headers={"Authorization": f"Bearer {token}", "Origin": "https://evil.example"},
+    )
+    assert "access-control-allow-origin" not in {k.lower() for k in foreign.headers}
+
+
+# --- Cross-site request refusal on the action route (v0.16) ----------------
+
+
+def _unknown_tool_body() -> dict:
+    return {"tool": "hermes_not_a_tool", "args": {}}
+
+
+def test_action_refuses_non_json_content_type(client):
+    resp = client.post(
+        "/api/ops/action",
+        content=json.dumps(_unknown_tool_body()),
+        headers={"Content-Type": "text/plain"},
+    )
+    assert resp.status_code == 415
+    assert resp.json()["error"]["code"] == "UNSUPPORTED_MEDIA_TYPE"
+
+
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+def test_action_refuses_cross_site_fetch_metadata(client, site):
+    resp = client.post("/api/ops/action", json=_unknown_tool_body(), headers={"Sec-Fetch-Site": site})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "CROSS_SITE_REFUSED"
+
+
+@pytest.mark.parametrize("origin", ["https://evil.example", "http://127.0.0.1:9999", "null"])
+def test_action_refuses_foreign_origin(client, origin):
+    resp = client.post("/api/ops/action", json=_unknown_tool_body(), headers={"Origin": origin})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "CROSS_SITE_REFUSED"
+
+
+def test_action_allows_same_origin_browser_request(client):
+    host = client.base_url.netloc.decode() if isinstance(client.base_url.netloc, bytes) else client.base_url.netloc
+    resp = client.post(
+        "/api/ops/action",
+        json=_unknown_tool_body(),
+        headers={"Origin": f"http://{host}", "Sec-Fetch-Site": "same-origin"},
+    )
+    # Passes the cross-site guard and reaches normal tool resolution.
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "UNKNOWN_TOOL"

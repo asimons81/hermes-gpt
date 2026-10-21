@@ -113,6 +113,7 @@ DEFAULT_TOOL_INVENTORY = [
     "hermes_operator_snapshot",
     "hermes_operator_status",
     "hermes_owner_inbox",
+    "hermes_owner_inbox_ack",
     "hermes_owner_patch",
     "hermes_owner_run_command",
     "hermes_owner_write_file",

@@ -28,8 +28,8 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - First-class Missions, unified delegation lineage, durable live-event delivery, bounded Finance bridge behavior, and restart-safe durable job supervision must all be green.
 - `python -m pytest test_operator_autopilot.py test_operator_autopilot_scheduler.py test_operator_autopilot_advance.py test_operator_autopilot_frontier.py test_operator_autopilot_recovery.py test_operator_autopilot_limits.py test_operator_autopilot_wakeup.py test_operator_autopilot_status.py test_operator_mission_supersede.py test_operator_plan_rework.py test_ui_autopilot.py test_operator_autopilot_deliverables.py test_operator_autopilot_acceptance.py`
   - Autopilot must stay default off (tools registered only with `HERMES_GPT_AUTOPILOT=1`), must never dispatch or advance an approval or `high_impact` node, must never approve or complete a Mission, must complete nodes only on observed evidence, must hold new dispatch when the budget envelope is not verifiably within its limit, and must keep the same worker across an MCP server restart. The `superseded_by` marker tests (a forged or stale marker has no effect) must be green.
-- `python -m pytest -q test_v015_registration.py test_tool_inventory.py test_tool_profiles.py test_operator_owner_inbox.py test_operator_review_assist.py test_ui_owner_inbox.py`
-  - Owner inbox read-only behavior, review-assist gates and evidence isolation, tool profiles, and the default/gated tool inventory must be green.
+- `python -m pytest -q test_v015_registration.py test_v016_registration.py test_tool_inventory.py test_tool_profiles.py test_operator_owner_inbox.py test_operator_review.py test_operator_review_assist.py test_ui_owner_inbox.py test_operator_attention_delivery.py`
+  - Owner inbox read-only behavior and acknowledgement, the whole review-acceptance store read for contract validation, review-assist gates and evidence isolation, attention relay gating, tool profiles, and the default/gated tool inventory must be green.
 - Run the Windows/Linux Python 3.10-3.12 CI matrix.
 - Run `npm ci`, `npm test`, and `npm run build` in `web/`; verify installed `/ui/ops/missions` navigation and read-only Autopilot supervision.
 
@@ -57,10 +57,11 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - `docs/runtime-checkout.md`
   - `docs/jev.md`
   - `docs/owner-inbox.md`
+  - `docs/attention-delivery.md`
   - `docs/review-assist.md`
   - `docs/vnext-capability-manifest-and-mission-ledger.md`
   - `docs/retention-policy.md`
-  - current release notes
+  - `docs/release-notes-v0.16.0.md` (and the current release notes for any later release)
 - Run `python tools/check_package_hygiene.py dist/*` and require exit `0` / `CLEAN`.
 - Confirm package artifacts contain no absolute private machine paths, RFC1918/Tailscale addresses, machine hostnames, live operational metrics, or private release-planning packets.
 
@@ -83,6 +84,9 @@ Use this checklist before publishing a Hermes GPT release artifact.
 - Confirm Owner Mode still denies secret paths.
 - Confirm `--profile remote` requires configured authentication and the existing TLS/loopback-proxy boundary. With neither authentication nor the two-part unsafe acknowledgement, startup must refuse; the unsafe no-auth experiment path is not release-safe.
 - Confirm README still states public unauthenticated Operator exposure is unsupported.
+- Confirm attention delivery is default off: `HERMES_GPT_ATTENTION_DELIVERY` must be exactly `1`, targets and executables come only from administrator environment variables (no MCP tool sets them), and the relay is notification-only. Its messages never carry approvals or commands, and no MCP tool sends. `hermes_attention_delivery_status` is the only MCP surface and is read-only.
+- Confirm `POST /api/ops/action` refuses cross-site requests before parsing the body: a non-JSON `Content-Type` returns `415 UNSUPPORTED_MEDIA_TYPE`, and a foreign `Sec-Fetch-Site` or `Origin` returns `403 CROSS_SITE_REFUSED`.
+- Confirm browser approvals still enforce Owner gates server-side. Mission approval needs Owner Mode in `hermes_mission_approve`, browser approval-node transitions need Owner Mode in the `ui_ops` precheck and are limited to approval and `high_impact` nodes, Autopilot stop and inbox acknowledgement need workspace level with direct apply mode, and none of them bypasses the tool's own gate.
 
 ## 6. Retention
 
@@ -141,5 +145,5 @@ Only after the checks above pass:
 - restart/reconnect any live MCP deployments whose tool schema changed;
 - for ChatGPT MCP apps/connectors, refresh or rescan the app actions after any tool-schema change and review/enable newly discovered actions before acceptance. ChatGPT may retain a frozen approved tool snapshot even after the MCP server and tunnel restart; if the workspace/plan does not expose an action refresh, recreate/re-publish the app connection;
 - verify the refreshed ChatGPT action count/set against the live MCP `tools/list`, then prove representative newly added tools from a new chat;
-- run the automated connector acceptance gate `python -m pytest -q test_server.py::test_v09_connector_surface_acceptance` (Finance enabled, optional env gates neutralized): it must report the exact expected tool count (138 for the v0.15 default surface, 137 through v0.14 plus `hermes_owner_inbox`; the v0.12 slice-2 budget-enforcement and controller-L2 rungs add no tools and stay invisible with their machine gates unset) with all release additions present, no duplicates, and `serverInfo.version` equal to `versioning.VERSION` for this checkout;
+- run the automated connector acceptance gate `python -m pytest -q test_server.py::test_v09_connector_surface_acceptance` (Finance enabled, optional env gates neutralized): it must report the exact expected tool count (139 with Finance enabled (`HERMES_GPT_ENABLE_FINANCE=1`, which the gate sets) and every other optional gate neutralized: 137 through v0.14, plus `hermes_owner_inbox` in v0.15 and `hermes_owner_inbox_ack` in v0.16. With every optional gate unset the count is 138; the v0.12 slice-2 budget-enforcement and controller-L2 rungs add no tools and stay invisible with their machine gates unset) with all release additions present, no duplicates, and `serverInfo.version` equal to `versioning.VERSION` for this checkout;
 - confirm the advertised `serverInfo/version` seen by a real MCP client handshake (not just the SDK default) matches the version being published before accepting the connector.

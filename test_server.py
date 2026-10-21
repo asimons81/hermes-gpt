@@ -1573,7 +1573,8 @@ V09_CONNECTOR_ADDITIONS = [
 # + 4 mission-budget envelope tools (sibling t_78e597c6) + 4 placement-scoring
 # tools (sibling t_167ac591) + 4 failure-semantics tools (t_49bbc143) + 4
 # supervised-mission-controller tools (t_ad1e6d07).
-V09_CONNECTOR_TOOL_COUNT = 138
+# v0.15 default surface (137 + hermes_owner_inbox) plus hermes_owner_inbox_ack in v0.16.
+V09_CONNECTOR_TOOL_COUNT = 139
 
 
 def test_v09_connector_surface_acceptance(monkeypatch):
@@ -1590,7 +1591,7 @@ def test_v09_connector_surface_acceptance(monkeypatch):
     assert len(set(names)) == len(names), "duplicate tool registration"
 
     # serverInfo.version must track the checkout version, not the SDK version.
-    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.15.0"
+    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.16.0"
 
 
 def test_history_enabled_connector_surface_acceptance(monkeypatch):
@@ -1623,10 +1624,11 @@ def test_history_enabled_connector_surface_acceptance(monkeypatch):
         schema = enabled_by_name[name].model_dump(by_alias=True)["inputSchema"]
         assert schema["properties"]["profile"]["default"] == "default"
 
-    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.15.0"
+    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.16.0"
 
 
-AUTOPILOT_TOOLS = {"hermes_autopilot_start", "hermes_autopilot_status", "hermes_autopilot_stop"}
+# Autopilot-gated surface: the three Autopilot tools plus the v0.16 one-call launch.
+AUTOPILOT_TOOLS = {"hermes_autopilot_start", "hermes_autopilot_status", "hermes_autopilot_stop", "hermes_mission_launch"}
 
 
 def test_autopilot_tools_register_only_behind_their_machine_gate(monkeypatch):

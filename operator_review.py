@@ -18,6 +18,7 @@ import os
 import re
 import threading
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,10 @@ TOOL_VERSION = "0.7.0"
 
 REVIEW_EVIDENCE_DIR = "review-evidence"
 REVIEW_EVIDENCE_FILENAME = "review-acceptances.jsonl"
+# Per-line bound for the review-evidence store; longer lines are skipped.
+REVIEW_LINE_MAX_BYTES = 64 * 1024
+# Matching records per contract that a validator or inbox will read.
+ACCEPTANCE_FOR_CONTRACT_MAX = 1000
 
 _ACCEPT_LOCK = threading.Lock()
 
@@ -76,29 +81,81 @@ def _validate_refs(evidence_refs: list[str]) -> list[str]:
     return out
 
 
+def _iter_acceptance_records(path: Path, needle: bytes | None = None):
+    """Yield review-acceptance records from the store, oldest first.
+
+    Streams the whole file line by line. A line longer than
+    ``REVIEW_LINE_MAX_BYTES`` is skipped without being buffered, as is any line
+    that is not a JSON object with the review schema, so a corrupt line can
+    never count as an acceptance. When ``needle`` is given, lines that do not
+    contain it are skipped before JSON parsing. ``OSError`` propagates.
+    """
+    with path.open("rb") as fh:
+        while True:
+            raw = fh.readline(REVIEW_LINE_MAX_BYTES + 1)
+            if not raw:
+                return
+            if len(raw) > REVIEW_LINE_MAX_BYTES:
+                if not raw.endswith(b"\n"):
+                    while True:  # discard the remainder of the oversized line
+                        rest = fh.readline(REVIEW_LINE_MAX_BYTES)
+                        if not rest or rest.endswith(b"\n"):
+                            break
+                continue
+            if needle is not None and needle not in raw:
+                continue
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if isinstance(rec, dict) and rec.get("schema") == REVIEW_SCHEMA:
+                yield rec
+
+
 def read_review_acceptances(hermes_root: Path, limit: int = 200) -> list[dict[str, Any]]:
-    """Read review-acceptance records (newest last). Bounded scan."""
+    """Return the newest ``limit`` review-acceptance records, oldest first.
+
+    This is a recent-records view (the Flight Deck review list). It is not
+    evidence: validation and the owner inbox use ``acceptance_records_for``.
+    Returns ``[]`` when the store is missing or unreadable.
+    """
     path = review_evidence_path(hermes_root)
     if not path.exists():
         return []
-    records: list[dict[str, Any]] = []
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(rec, dict) and rec.get("schema") == REVIEW_SCHEMA:
-                    records.append(rec)
-                if len(records) >= limit:
-                    break
+        return list(deque(_iter_acceptance_records(path), maxlen=limit))
     except OSError:
         return []
-    return records
+
+
+def acceptance_records_for(
+    hermes_root: Path,
+    contract_sha256: str,
+    limit: int = ACCEPTANCE_FOR_CONTRACT_MAX,
+) -> list[dict[str, Any]]:
+    """Every review-acceptance record for one contract, oldest first.
+
+    Reads the whole store, so an acceptance written late is never hidden by
+    older unrelated records. Raises ``OSError`` when the store is unreadable
+    and ``ValueError`` when more than ``limit`` records match, so callers fail
+    closed rather than act on a partial list.
+    """
+    path = review_evidence_path(hermes_root)
+    if not path.exists():
+        return []
+    sha = str(contract_sha256)
+    needle = sha.encode("utf-8")
+    out: list[dict[str, Any]] = []
+    for rec in _iter_acceptance_records(path, needle):
+        if rec.get("contract_sha256") != sha:
+            continue
+        if len(out) >= limit:
+            raise ValueError("more review acceptances than the per-contract limit")
+        out.append(rec)
+    return out
 
 
 def _write_acceptance(hermes_root: Path, record: dict[str, Any]) -> None:
@@ -291,7 +348,7 @@ def hermes_review_accept(
 
 def acceptance_exists(hermes_root: Path, contract_sha256: str, reviewer: str, assignee: str) -> bool:
     """True when a SATISFIED acceptance by a distinct reviewer exists."""
-    for rec in read_review_acceptances(hermes_root):
+    for rec in acceptance_records_for(hermes_root, contract_sha256):
         if rec.get("contract_sha256") != contract_sha256:
             continue
         if rec.get("verdict") != "SATISFIED":

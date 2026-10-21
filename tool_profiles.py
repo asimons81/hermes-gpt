@@ -67,6 +67,7 @@ CHAT_LEAN_TOOLS = frozenset(
         "hermes_autopilot_start",
         "hermes_autopilot_status",
         "hermes_autopilot_stop",
+        "hermes_mission_launch",
         # Events and live events
         "hermes_events_query",
         "hermes_events_tail",
@@ -85,8 +86,11 @@ CHAT_LEAN_TOOLS = frozenset(
         "hermes_jev_yes_no",
         "hermes_jev_choose",
         "hermes_jev_score",
-        # Named for a change that adds them; not registered today, harmless to list.
+        # Owner inbox: list (always), acknowledge (workspace direct), attention relay status (gated).
         "hermes_owner_inbox",
+        "hermes_owner_inbox_ack",
+        "hermes_attention_delivery_status",
+        # Named for a change that adds them; not registered today, harmless to list.
         "hermes_review_assess",
     }
 )
