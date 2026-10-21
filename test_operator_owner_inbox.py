@@ -82,7 +82,7 @@ def _waiting_run(root: Path, mid: str = AUTO_MID) -> None:
 def _snapshot(root: Path) -> dict[str, tuple]:
     out: dict[str, tuple] = {}
     for path in sorted(root.rglob("*")):
-        rel = str(path.relative_to(root))
+        rel = path.relative_to(root).as_posix()  # stable keys on Windows too
         st = path.stat()
         digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
         out[rel] = (path.is_dir(), st.st_size, st.st_mtime_ns, digest)

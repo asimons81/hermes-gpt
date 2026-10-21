@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import stat
 import subprocess
 import zipfile
@@ -153,7 +154,7 @@ class FakeVenv:
 
     def __init__(self, root: Path, *, version: str = "0.15.0", requires=("packaging>=23",), direct_url=None):
         self.root = root
-        self.python = root / "bin" / "python"
+        self.python = updater._venv_python(root)  # bin/python, or Scripts/python.exe on Windows
         self.python.parent.mkdir(parents=True)
         self.python.write_text("#!/bin/sh\n", encoding="utf-8")
         self.version = version
@@ -285,7 +286,8 @@ def test_apply_happy_path_runs_exact_sequence_and_writes_receipt(tmp_path):
     assert not smoke_cwd.is_relative_to(venv.root)
     assert not smoke_cwd.is_relative_to(Path(updater.__file__).resolve().parent)
 
-    assert stat.S_IMODE(rollback.stat().st_mode) == 0o700
+    if os.name != "nt":  # POSIX permission bits; Windows ignores chmod modes
+        assert stat.S_IMODE(rollback.stat().st_mode) == 0o700
     assert (rollback / "hermes_gpt-0.15.0-py3-none-any.whl").is_file()
     assert "hermes-gpt==0.15.0" in (rollback / "freeze-before.txt").read_text(encoding="utf-8")
     receipt = json.loads((rollback / "RECEIPT.json").read_text(encoding="utf-8"))
@@ -484,7 +486,7 @@ def test_restart_uses_systemd_user_on_linux(tmp_path, monkeypatch):
 def test_restart_is_refused_on_unsupported_platforms(tmp_path, monkeypatch):
     monkeypatch.setattr(updater.sys, "platform", "win32")
     venv, pypi = build_env(tmp_path)
-    (venv.root / "Scripts").mkdir()
+    (venv.root / "Scripts").mkdir(exist_ok=True)
     (venv.root / "Scripts" / "python.exe").write_text("", encoding="utf-8")
     result = updater.apply_package_upgrade(
         target_version="0.16.0", venv=venv.root, rollback_dir=tmp_path / "rollback", service="hermes-gpt",
