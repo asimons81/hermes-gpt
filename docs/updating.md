@@ -4,6 +4,36 @@
 
 For documentation authority rules, see [docs/README.md](README.md).
 
+## Upgrade a package-installed service safely
+
+Current behavior: `hermes-gpt update --apply --version X.Y.Z` upgrades the `hermes-gpt` package inside one existing virtual environment, verifies the import from a neutral directory, optionally restarts one named service, and writes a rollback snapshot. The package path runs only when `--version` is given with `--apply`. Without it, `hermes-gpt update` and `hermes-gpt update --apply` keep their check-first behavior for Git checkouts and pip installs.
+
+```sh
+hermes-gpt update --apply --version 0.16.0 \
+  --venv /absolute/path/to/venv \
+  --rollback-dir /absolute/path/to/new-empty-rollback-dir \
+  [--service NAME] [--wheel /absolute/path/to/hermes_gpt-0.16.0-py3-none-any.whl] \
+  [--allow-dependency-changes] [--allow-prerelease]
+```
+
+- `--version` must be a canonical release (for example `0.16.0`). Prereleases need `--allow-prerelease`.
+- `--venv` must be absolute and contain `bin/python` (or `Scripts/python.exe` on Windows).
+- `--rollback-dir` must be absolute. It must not exist or must be empty; the updater never overwrites a previous snapshot.
+- `--service` is validated against `[A-Za-z0-9_.@-]{1,128}`. On macOS it runs `launchctl kickstart -k gui/<uid>/<service>`; on Linux it runs `systemctl --user restart <service>`. No other service is restarted, and other platforms are refused before any change.
+- `--wheel` installs a local `py3-none-any` wheel instead of downloading one from PyPI.
+
+Sequence: validate inputs; read the installed version and `direct_url.json` through the venv's own Python; refuse if the installed version is the target or newer; obtain the target wheel and verify its sha256 against PyPI's digest; compare `Requires-Dist` with the installed metadata; snapshot `pip freeze` and the current wheel; install with `pip install --no-deps --no-cache-dir <wheel>`; run `pip check`; confirm the other packages are unchanged in the freeze; run `python -I -c "import versioning, server; print(versioning.VERSION)"` from a neutral directory; then restart the named service if one was given. Any failure after the install reinstalls the snapshot wheel with `--no-deps --force-reinstall` and reports `rolled_back`.
+
+Refusal codes (nothing is installed): `INVALID_VERSION`, `PRERELEASE_REFUSED`, `ALREADY_AT_TARGET`, `DOWNGRADE_REFUSED`, `VENV_NOT_ABSOLUTE`, `VENV_INVALID`, `ROLLBACK_DIR_NOT_ABSOLUTE`, `ROLLBACK_DIR_NOT_EMPTY`, `SERVICE_NAME_INVALID`, `UNSUPPORTED_PLATFORM`, `HASH_MISMATCH`, `WHEEL_MISMATCH`, `DEPENDENCIES_CHANGED` (the result lists the differences; re-run with `--allow-dependency-changes` only after reviewing them), and `ROLLBACK_ARTIFACT_UNAVAILABLE` (for example a directory or VCS install, where no exact previous wheel exists). Failures after the install report `INSTALL_FAILED`, `PIP_CHECK_FAILED`, `FREEZE_CHANGED`, `IMPORT_VERSION_MISMATCH`, or `RESTART_FAILED`. The command exits non-zero on any refusal or rollback.
+
+What it never touches: launchers, launchd plists, systemd units, environment files, credential or token stores, OAuth grants, network exposure, or any service other than `--service`. Dependency changes are installed only with `--allow-dependency-changes`. A venv shared by several services changes for all of them; use a separate venv when only one service should move. A pre-existing `pip check` failure in the venv also triggers rollback, so fix that first.
+
+Verify afterwards: the updater cannot authenticate to the service, so the result's `next_step` is a manual check. Read `serverInfo.version` through your MCP client after the restart, confirm the expected tool inventory, and refresh the client's cached tool list. The local import check only proves the venv resolves the target version.
+
+Outputs: the JSON result contains `steps`, `applied`, `rolled_back`, and the paths below. Inside `--rollback-dir` the updater writes `RECEIPT.json` (versions, wheel names and sha256 values, steps, timestamps; no environment values or credentials), `freeze-before.txt`, the previous wheel, and `ROLLBACK.md` with the exact rollback commands.
+
+Rollback by hand (after a successful upgrade): run the reinstall and import commands in `ROLLBACK.md`, restart the service, then verify `serverInfo.version` again. If the upgrade changed dependencies, `ROLLBACK.md` also restores the recorded set from `freeze-before.txt`.
+
 ## Check first
 
 ```powershell
