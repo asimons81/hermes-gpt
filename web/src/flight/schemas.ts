@@ -1,5 +1,6 @@
 // Mission surface schemas for the generic SurfacePanel (v0.7 §14 mapping).
 import type { SurfaceSchema } from './SurfacePanel';
+import type { OwnerInboxItem, OwnerInboxPayload, OwnerInboxSourceState } from './types';
 
 export const SURFACE_SCHEMAS: Record<string, SurfaceSchema> = {
   overview: {
@@ -116,3 +117,83 @@ export const SURFACE_SCHEMAS: Record<string, SurfaceSchema> = {
     sections: [{ key: 'records', label: 'Records', kind: 'list', max: 300 }],
   },
 };
+
+// ---------------------------------------------------------------------------
+// Owner inbox payload validation. The browser never renders an unvalidated
+// inbox: any shape drift throws OwnerInboxSchemaError and the panel shows an
+// error state instead of a list (and never a false "nothing waiting").
+// ---------------------------------------------------------------------------
+
+export class OwnerInboxSchemaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OwnerInboxSchemaError';
+  }
+}
+
+const SOURCE_STATES: readonly string[] = ['ok', 'unavailable', 'empty'];
+const REQUIRES: readonly string[] = ['owner', 'workspace', 'review'];
+
+function fail(path: string): never {
+  throw new OwnerInboxSchemaError(`owner inbox payload invalid at ${path}`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
+function parseItem(value: unknown, path: string): OwnerInboxItem {
+  if (!isRecord(value)) fail(path);
+  const { kind, mission_id, summary, since, suggested_tool, requires } = value;
+  if (typeof kind !== 'string' || kind === '') fail(`${path}.kind`);
+  if (typeof mission_id !== 'string') fail(`${path}.mission_id`);
+  if (typeof summary !== 'string') fail(`${path}.summary`);
+  if (since !== null && typeof since !== 'string') fail(`${path}.since`);
+  if (suggested_tool !== null && typeof suggested_tool !== 'string') fail(`${path}.suggested_tool`);
+  if (typeof requires !== 'string' || !REQUIRES.includes(requires)) fail(`${path}.requires`);
+  return {
+    kind,
+    mission_id,
+    summary,
+    since,
+    suggested_tool,
+    requires: requires as OwnerInboxItem['requires'],
+  };
+}
+
+/** Validate a GET /api/ops/owner-inbox `data` payload. Throws on any mismatch. */
+export function parseOwnerInbox(payload: unknown): OwnerInboxPayload {
+  if (!isRecord(payload)) fail('$');
+  const { items, count, truncated, limit, sources, complete, skipped_sources, read_only, generated_at } = payload;
+  if (!Array.isArray(items)) fail('items');
+  const parsedItems = items.map((item, index) => parseItem(item, `items[${index}]`));
+  if (typeof count !== 'number' || !Number.isInteger(count) || count !== parsedItems.length) fail('count');
+  if (typeof truncated !== 'boolean') fail('truncated');
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 200) fail('limit');
+  if (parsedItems.length > limit) fail('items.length');
+  if (!isRecord(sources)) fail('sources');
+  const parsedSources: Record<string, OwnerInboxSourceState> = {};
+  for (const [name, state] of Object.entries(sources)) {
+    if (typeof state !== 'string' || !SOURCE_STATES.includes(state)) fail(`sources.${name}`);
+    parsedSources[name] = state as OwnerInboxSourceState;
+  }
+  if (typeof complete !== 'boolean') fail('complete');
+  if (!isStringArray(skipped_sources)) fail('skipped_sources');
+  if (read_only !== true) fail('read_only');
+  if (typeof generated_at !== 'string') fail('generated_at');
+  return {
+    items: parsedItems,
+    count,
+    truncated,
+    limit,
+    sources: parsedSources,
+    complete,
+    skipped_sources,
+    read_only: true,
+    generated_at,
+  };
+}
