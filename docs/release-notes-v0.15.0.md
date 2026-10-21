@@ -2,6 +2,8 @@
 
 Release date: October 21, 2026.
 
+> **STATUS: PUBLISHED.** GitHub release [v0.15.0](https://github.com/asimons81/hermes-gpt/releases/tag/v0.15.0) is live with the wheel, sdist, and `SHA256SUMS` attached, and [`hermes-gpt==0.15.0`](https://pypi.org/project/hermes-gpt/0.15.0/) is on PyPI (both verified 2026-10-21). Verify each channel independently.
+
 v0.15.0 makes Owner decisions faster without adding any new authority. It lists what is waiting on the Owner in one read-only place, adds an advisory review score that never counts as evidence, lets chat clients use a smaller tool surface, and makes file backups safer to configure. Every new mutating path keeps its existing gates.
 
 ## Owner inbox (read-only)

@@ -11,9 +11,9 @@
 
 ## Current status
 
-- **Repository version:** 0.15.0 (source prepared for release; GitHub and PyPI publication must be verified before relying on it)
-- **GitHub release:** verify v0.15.0 on the [releases page](https://github.com/asimons81/hermes-gpt/releases). The last verified release is [v0.14.0](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0)
-- **PyPI release:** the badge above is the source of truth; the last verified version in this document is [0.14.0](https://pypi.org/project/hermes-gpt/0.14.0/)
+- **Repository version:** 0.15.0
+- **Published GitHub release:** [v0.15.0](https://github.com/asimons81/hermes-gpt/releases/tag/v0.15.0)
+- **Verified PyPI release:** [0.15.0](https://pypi.org/project/hermes-gpt/0.15.0/); check the badge for later updates
 - **Python requirement:** 3.10+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
 - **Deployment posture:** local-dev / trusted-machine only
@@ -199,7 +199,7 @@ python -m pip install .
 
 The locked UI build requires Node `^20.19.0 || >=22.12.0` (Node 24 works); it is also required separately when enabling the [Jev bridge](docs/jev.md). Installing a package does not install Hermes Agent or activate optional gates. Release wheels include built UI assets; an unbuilt source checkout can serve MCP while `/ui` reports missing assets. See [UI configuration](docs/ui-security-boundary.md).
 
-The v0.14.0 wheel and sdist are also attached to the [GitHub v0.14.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0). See [v0.14 release notes](docs/release-notes-v0.14.0.md) for acceptance and recovery, and [Autopilot](docs/autopilot.md) for setup and limits. The v0.11.0 release notes cover the opt-in Gemini Spark client profile, MCP Python SDK 2.x support, and profile-aware Bot Chat; the v0.10.0 release notes cover the vNext slice-1 surfaces (MissionPlan DAG, derived capability-manifest and mission-ledger views, budget envelope, placement scoring, failure semantics, and the shadow controller); the v0.8.0 release notes cover the Fabric surfaces (`hermes-gpt-fabric-peer`, capability-aware routing, remote evidence admission, reconciliation); the v0.9 surfaces (Missions `hermes_mission_*`, delegations `hermes_delegation_*`, live events `hermes_live_events_*`, `hermes_job_status/wait`) are documented in [docs/missions.md](docs/missions.md), [docs/delegations.md](docs/delegations.md), and [docs/live-events.md](docs/live-events.md). Operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
+The v0.15.0 wheel and sdist are attached to the [GitHub v0.15.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.15.0), with `SHA256SUMS`; see [v0.15.0 release notes](docs/release-notes-v0.15.0.md) for the Owner loop. The v0.14.0 wheel and sdist are also attached to the [GitHub v0.14.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0). See [v0.14 release notes](docs/release-notes-v0.14.0.md) for acceptance and recovery, and [Autopilot](docs/autopilot.md) for setup and limits. The v0.11.0 release notes cover the opt-in Gemini Spark client profile, MCP Python SDK 2.x support, and profile-aware Bot Chat; the v0.10.0 release notes cover the vNext slice-1 surfaces (MissionPlan DAG, derived capability-manifest and mission-ledger views, budget envelope, placement scoring, failure semantics, and the shadow controller); the v0.8.0 release notes cover the Fabric surfaces (`hermes-gpt-fabric-peer`, capability-aware routing, remote evidence admission, reconciliation); the v0.9 surfaces (Missions `hermes_mission_*`, delegations `hermes_delegation_*`, live events `hermes_live_events_*`, `hermes_job_status/wait`) are documented in [docs/missions.md](docs/missions.md), [docs/delegations.md](docs/delegations.md), and [docs/live-events.md](docs/live-events.md). Operator diagnostics and recovery tools (`hermes_operator_doctor`, `hermes_operator_snapshot`, `hermes_release_doctor`, `hermes_operator_recover`) are documented in [docs/operator-mode.md](docs/operator-mode.md).
 
 ## Default local MCP surface
 
