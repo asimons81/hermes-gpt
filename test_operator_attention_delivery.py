@@ -789,6 +789,7 @@ def test_main_interval_bounds(relay):
     assert delivery.main(["--watch", "--interval", "3601"]) == 2
 
 
+@POSIX_ONLY  # os.kill(SIGTERM) on Windows terminates the test process
 def test_main_watch_stops_cleanly_on_sigterm(relay, monkeypatch, capsys):
     calls = []
 
