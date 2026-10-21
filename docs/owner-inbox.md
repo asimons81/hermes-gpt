@@ -82,7 +82,7 @@ The inbox never calls these tools.
 ## Limits and boundaries
 
 - Not an approval queue. Approving or rejecting still happens only through the tools above.
-- Not a notification system. Nothing is pushed; the inbox is pulled.
+- Not a notification system. Nothing is pushed by this inbox; the inbox is pulled. An optional, default-off relay can push new items as notifications: see [attention-delivery.md](attention-delivery.md).
 - Registered as the MCP tool `hermes_owner_inbox(limit=50)` in every profile, including `chat-lean`. The MCP input is `limit` only; `hermes_root` is not exposed. Its annotations are `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, `openWorldHint=false`.
 - `limit` above 200 is rejected, not clamped.
 

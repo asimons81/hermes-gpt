@@ -44,6 +44,7 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`missions.md`](missions.md) | current | v0.9 first-class Mission lifecycle, bounded context/skills manifests, attachments, reconciliation, and Owner approval |
 | [`autopilot.md`](autopilot.md) | current | v0.14 Autopilot: gates, declared artifact acceptance, delivery grace, bounded recovery, approval frontier, budgets, and status |
 | [`owner-inbox.md`](owner-inbox.md) | current (v0.15.0) | read-only Owner inbox: Missions awaiting approval, Autopilot waiting for Owner, controller attention spool, source health (`complete`), no new authority |
+| [`attention-delivery.md`](attention-delivery.md) | current (v0.16, default off) | notification-only relay of new Owner inbox items to Hermes or iMessage targets; administrator env config, delivery state, safety boundary |
 | [`live-events.md`](live-events.md) | current | v0.9 durable event cursor/long-poll and authenticated WebSocket wake-up stream |
 | [`flight-deck-missions.md`](flight-deck-missions.md) | current | v0.9 read-only Mission/delegation Flight Deck views with durable live refresh |
 | [`delegations.md`](delegations.md) | current | v0.9 normalized delegation lifecycle across Pi/OpenCode/Codex/Fabric with durable lineage and reconciliation |
