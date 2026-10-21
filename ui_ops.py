@@ -50,6 +50,8 @@ import operator_mission_plan as op_plan
 import operator_mission_runtime as op_mission_rt
 import operator_autopilot as op_autopilot
 import ui_security
+from urllib.parse import urlsplit
+
 from versioning import VERSION
 
 # The 12 Mission Control surfaces (must match operator_mission.MISSION_SURFACES).
@@ -708,8 +710,38 @@ def _map_mutation_result(tool: str, spec: _MutationSpec, payload: dict[str, Any]
     return _json_resp(_err(code, str(message)[:500], 400, extra={"tool": tool, "details": payload}), 400)
 
 
+def _cross_site_refusal(request: Request) -> JSONResponse | None:
+    """Refuse browser requests that could have been forged by another site.
+
+    Loopback no-auth mode has no credential to protect the action route, so a
+    foreign page could otherwise send a "simple" cross-site POST. A JSON
+    Content-Type cannot be sent cross-site without a CORS preflight, and a
+    browser's Origin / Sec-Fetch-Site headers identify the initiating site.
+    Non-browser clients that send neither header are unaffected.
+    """
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/json":
+        return _json_resp(_err("UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json", 415), 415)
+    fetch_site = request.headers.get("sec-fetch-site", "").strip().lower()
+    if fetch_site and fetch_site not in {"same-origin", "none"}:
+        return _json_resp(_err("CROSS_SITE_REFUSED", "cross-site action requests are refused", 403), 403)
+    origin = request.headers.get("origin")
+    if origin is not None:
+        host = request.headers.get("host", "").strip().lower()
+        try:
+            origin_host = urlsplit(origin).netloc.lower()
+        except ValueError:
+            origin_host = ""
+        if not host or origin_host != host:
+            return _json_resp(_err("CROSS_SITE_REFUSED", "cross-site action requests are refused", 403), 403)
+    return None
+
+
 async def _action(request: Request) -> JSONResponse:
     """POST /api/ops/action — execute an existing gated hermes_* tool path."""
+    refusal = _cross_site_refusal(request)
+    if refusal is not None:
+        return refusal
     try:
         body = await request.json()
     except Exception:  # noqa: BLE001

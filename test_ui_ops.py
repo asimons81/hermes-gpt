@@ -797,3 +797,46 @@ def test_new_actions_inherit_bearer_and_origin_protection(monkeypatch):
         headers={"Authorization": f"Bearer {token}", "Origin": "https://evil.example"},
     )
     assert "access-control-allow-origin" not in {k.lower() for k in foreign.headers}
+
+
+# --- Cross-site request refusal on the action route (v0.16) ----------------
+
+
+def _unknown_tool_body() -> dict:
+    return {"tool": "hermes_not_a_tool", "args": {}}
+
+
+def test_action_refuses_non_json_content_type(client):
+    resp = client.post(
+        "/api/ops/action",
+        content=json.dumps(_unknown_tool_body()),
+        headers={"Content-Type": "text/plain"},
+    )
+    assert resp.status_code == 415
+    assert resp.json()["error"]["code"] == "UNSUPPORTED_MEDIA_TYPE"
+
+
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+def test_action_refuses_cross_site_fetch_metadata(client, site):
+    resp = client.post("/api/ops/action", json=_unknown_tool_body(), headers={"Sec-Fetch-Site": site})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "CROSS_SITE_REFUSED"
+
+
+@pytest.mark.parametrize("origin", ["https://evil.example", "http://127.0.0.1:9999", "null"])
+def test_action_refuses_foreign_origin(client, origin):
+    resp = client.post("/api/ops/action", json=_unknown_tool_body(), headers={"Origin": origin})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "CROSS_SITE_REFUSED"
+
+
+def test_action_allows_same_origin_browser_request(client):
+    host = client.base_url.netloc.decode() if isinstance(client.base_url.netloc, bytes) else client.base_url.netloc
+    resp = client.post(
+        "/api/ops/action",
+        json=_unknown_tool_body(),
+        headers={"Origin": f"http://{host}", "Sec-Fetch-Site": "same-origin"},
+    )
+    # Passes the cross-site guard and reaches normal tool resolution.
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "UNKNOWN_TOOL"

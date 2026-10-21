@@ -175,13 +175,20 @@ route, from the outer middleware in `server.build_asgi_app`:
   receive `Access-Control-Allow-Origin`. A foreign `Origin` receives no ACAO
   header, so its page cannot read the response.
 
-There is no CSRF token and no `Origin` check inside `POST /api/ops/action`.
-The action route does not require a JSON `Content-Type`, and its body parser
-does not enforce one. A cross-site page can therefore send a simple request to
-a loopback Flight Deck without auth. The gates above (Operator enabled,
-level, apply mode, Owner Mode, the confirm gate) are then the only protection.
-This is a known limit of the current design. It is not changed in v0.16. See
-the report for the follow-up.
+- **Cross-site refusal (v0.16).** Before parsing the body,
+  `POST /api/ops/action` refuses:
+  - any `Content-Type` other than `application/json` (`415 UNSUPPORTED_MEDIA_TYPE`).
+    A page on another site cannot send a JSON body cross-site without a CORS
+    preflight, and the preflight is not granted;
+  - a `Sec-Fetch-Site` header other than `same-origin` or `none`
+    (`403 CROSS_SITE_REFUSED`);
+  - an `Origin` header whose host and port differ from the request's `Host`,
+    including `null` (`403 CROSS_SITE_REFUSED`).
+
+  Clients that are not browsers and send neither header are unaffected. These
+  checks protect the loopback no-auth default as well. They are in addition to
+  the Operator gates (enabled, level, apply mode, Owner Mode, confirm), never a
+  replacement for them.
 
 ## 7. Env vars (architecture.md §15)
 
