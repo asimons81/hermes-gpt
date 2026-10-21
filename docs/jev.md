@@ -14,6 +14,8 @@ Every tool accepts `state` and `instructions` as text. Choice requires a `criter
 
 Jev judges the supplied evidence; it does not search, chat, execute actions, approve work, or grant authority. Calls send the supplied text to TypeSafe and may incur API charges. Do not send credentials or sensitive operational records. The bridge never gathers session history, memory, files, or gateway state automatically.
 
+Advisory review triage built on `jev_score` (default off; separate gate `HERMES_GPT_REVIEW_ASSIST=1`) is documented in [`review-assist.md`](review-assist.md). Its results are advisory only and are never Work Contract evidence or review acceptance.
+
 ## Owner setup prerequisites
 
 These are operator setup steps; the bridge does not install or configure itself. Do not enable the gate or restart a deployment until the owner is ready.
