@@ -2,12 +2,23 @@
 
 ## Unreleased
 
-- Added `hermes_owner_inbox_ack` (always registered; workspace Operator level in direct apply mode, dry run by default). It hides Owner-inbox items by id and never approves or changes a Mission, plan, contract, or delegation.
-- Added `hermes_mission_launch`, the one-call Mission launch, registered only with `HERMES_GPT_AUTOPILOT=1`. Dry run by default; apply needs `confirm=true`. See [docs/autopilot.md](docs/autopilot.md#one-call-launch-v016).
-- Added the read-only `hermes_attention_delivery_status` tool, registered only with `HERMES_GPT_ATTENTION_DELIVERY=1`. It reports the relay's state and sends nothing. The relay is also available as the `hermes-gpt-attention-relay` console script. See [docs/attention-delivery.md](docs/attention-delivery.md).
-- Fixed the owner inbox `hermes_owner_inbox` MCP tool, which failed on its success path because of a positional argument.
-- Fixed contract review: the validator and the owner inbox read the whole review-acceptance store for the contract, so an acceptance written after many unrelated records now counts.
-- Tool count: the default connector surface is 139 tools. `HERMES_GPT_AUTOPILOT=1` adds 4, `HERMES_GPT_ATTENTION_DELIVERY=1` adds 1, `HERMES_GPT_ENABLE_JEV=1` adds 3, and `hermes_review_assess` adds 1 more when both Jev and review-assist gates are set.
+## 0.16.0 - 2026-10-21
+
+Close the loop: what waits on the Owner now reaches them and can be resolved in one place, with no new authority.
+
+- Added the default-off attention delivery relay. It sends new Owner inbox items as short notifications to administrator-configured targets (`HERMES_GPT_ATTENTION_TARGETS`, up to 8 `backend:target` entries). The `hermes` backend runs `hermes send` and reuses the platforms already configured in Hermes Agent; the doc's examples are telegram, discord, slack, and signal. The `imessage` backend sends through `imsg rpc`. The relay adds per-item dedupe, one digest per target when many items are new, per-target exponential backoff, and a minimal child environment, and it holds no platform credentials. It never approves, advances, or replies. Run it as `python -m operator_attention_delivery` or the `hermes-gpt-attention-relay` console script. See [docs/attention-delivery.md](docs/attention-delivery.md).
+- Added the read-only `hermes_attention_delivery_status` tool, registered only with `HERMES_GPT_ATTENTION_DELIVERY=1`. It reports the relay's state and sends nothing.
+- Added a Work Contract review source to the Owner inbox. A successful delegation whose contract still needs review acceptance appears as `contract_review_pending`. Inbox items now carry stable `item_id`s derived from the item kind, Mission, and a timestamp-free key, so an id does not change when nothing changed.
+- Added acknowledgements and `hermes_owner_inbox_ack`. It is always registered, requires workspace level and direct apply mode for a write, and is dry run by default. An acknowledgement hides an item from the inbox and from the relay. It never approves or changes a Mission, plan, Work Contract, or delegation.
+- Added Flight Deck inbox actions: Approve Mission, approve or reject an approval-frontier node, Stop Autopilot, and Acknowledge. Each calls the existing gated tool through `POST /api/ops/action`, with a dry-run request before the confirm. Browser node transitions require Owner mode and are limited to approval and `high_impact` nodes. See [docs/owner-inbox.md](docs/owner-inbox.md#flight-deck-actions).
+- Security: `POST /api/ops/action` refuses cross-site requests. A non-JSON body returns `415 UNSUPPORTED_MEDIA_TYPE`, and a foreign `Sec-Fetch-Site` or `Origin` returns `403 CROSS_SITE_REFUSED`. These checks apply on loopback too and do not replace the Operator gates. See [UI security boundary](docs/ui-security-boundary.md#6-mutations-remain-auditable-and-gated).
+- Added `hermes_mission_launch`, a one-call launch that creates a Mission, derives its plan, optionally sets a budget, and starts Autopilot. It is registered only with `HERMES_GPT_AUTOPILOT=1`, is dry run by default, requires `confirm=true` to apply, stops at the first refusal, and never approves a Mission. Finding: a Mission with no budget envelope is not held by the budget gate. Only a crossed, invalid, or unreadable envelope holds dispatch. See [docs/autopilot.md](docs/autopilot.md#one-call-launch-v016).
+- Added `hermes-gpt update --apply --version X.Y.Z` for a safe package-installed upgrade inside one named virtual environment. It verifies the wheel digest, refuses downgrades, snapshots the previous wheel, checks the import, and rolls back on failure. See [docs/updating.md](docs/updating.md).
+- Fixed contract review. The validator and the owner inbox now read the whole review-acceptance store, so a late acceptance counts. Previously a busy store could leave a contract unsatisfied after 200 acceptances. `read_review_acceptances`, the Flight Deck recent-records list, now returns the newest records.
+- Fixed the `hermes_owner_inbox` MCP tool, whose success path failed because of a positional argument.
+- Added an SDK-neutral `wire` fixture in `conftest.py`. It returns MCP objects in protocol alias form, so tests assert on names such as `readOnlyHint` and do not depend on SDK attribute names.
+- Tool registration is now declared as per-subsystem tables (behavior-neutral).
+- Tool count: 138 tools with every optional gate unset. The connector acceptance surface, which sets `HERMES_GPT_ENABLE_FINANCE=1`, has 139. `HERMES_GPT_AUTOPILOT=1` adds 4 (the three Autopilot tools and `hermes_mission_launch`), `HERMES_GPT_ATTENTION_DELIVERY=1` adds 1, `HERMES_GPT_ENABLE_JEV=1` adds 3, and `hermes_review_assess` adds 1 more when both `HERMES_GPT_ENABLE_JEV=1` and `HERMES_GPT_REVIEW_ASSIST=1` are set.
 
 ## 0.15.0 - 2026-10-21
 
