@@ -171,10 +171,10 @@ The inbox never calls these tools.
 ## Limits and boundaries
 
 - Not an approval queue. Approving or rejecting still happens only through the tools above.
-- Not a notification system. Nothing is pushed; the inbox is pulled. The acknowledgement store is intended to be read by a notification relay through `acknowledged_ids`; that relay is not part of this release.
+- Not a notification system. Nothing is pushed by this inbox; the inbox is pulled. An optional, default-off relay can push new items as notifications: see [attention-delivery.md](attention-delivery.md). The relay skips items already acknowledged through `hermes_owner_inbox_ack`.
+
 - `limit` above 200 is rejected, not clamped.
 - The acknowledgement read window is the last 1 MiB. An acknowledgement older than that window no longer hides its item. A long-lived store needs compaction or a larger window before it reaches that size; this is a known limit.
 - Review evidence is read with a 5000-record bound and the validator's own reader skips non-JSON lines. A corrupt review-acceptance line is ignored by both, so it cannot count as an acceptance.
-- The MCP surface is not changed in this branch. `hermes_owner_inbox(limit=50)` is registered in every profile, including `chat-lean`, and exposes `limit` only. Its annotations are `readOnlyHint=true`, `destructiveHint=false`, `idempotentHint=true`, `openWorldHint=false`. The `server.py` wrapper passes `hermes_root` positionally, so it must pass it by keyword once `include_acknowledged` is in the signature. `hermes_owner_inbox_ack` and `include_acknowledged` are not exposed over MCP here; their registration belongs to the server change that ships them.
 
 Historical context: the Autopilot `waiting_for_owner` state and the Mission `awaiting_approval` state are described in [autopilot.md](autopilot.md) and [missions.md](missions.md). The Flight Deck Mission views are in [flight-deck-missions.md](flight-deck-missions.md). The review-acceptance record is described in the Work Contract and review docs.
