@@ -6,7 +6,7 @@ v0.15.0 makes Owner decisions faster without adding any new authority. It lists 
 
 ## Owner inbox (read-only)
 
-`hermes_owner_inbox` lists Missions awaiting approval, Autopilot runs waiting for the Owner, and recent controller attention (budget breaker, RED health, no capable target). It is always registered and is read-only: it approves, advances, and writes nothing. Each item names the existing gated tool to use next. Check `sources` and `complete` before treating an empty list as "nothing pending". Work Contracts awaiting review acceptance are not yet covered and are listed in `skipped_sources`. A read-only Flight Deck route, `GET /api/ops/owner-inbox`, returns the same projection. See [owner inbox](owner-inbox.md).
+`hermes_owner_inbox` lists Missions awaiting approval, Autopilot runs waiting for the Owner, and recent controller attention (budget breaker, RED health, no capable target). It is always registered and is read-only: it approves, advances, and writes nothing. Each item names the existing gated tool to use next. Check `sources` and `complete` before treating an empty list as "nothing pending". Work Contracts awaiting review acceptance are not yet covered and are listed in `skipped_sources`. A read-only Flight Deck route, `GET /api/ops/owner-inbox`, returns the same projection, and the Deck overview links to a read-only Owner inbox panel (`/ops/owner-inbox`) that shows unavailable or skipped sources instead of an empty-inbox reassurance. See [owner inbox](owner-inbox.md).
 
 ## Advisory review assist (default off)
 
