@@ -39,6 +39,7 @@ hermes-gpt-fabric-peer = "operator_fabric_g4c:peer_main"
 include-package-data = true
 py-modules = [
   "server",
+  "jev_bridge",
   "oauth_auth",
   "operator_policy",
   "operator_cron",
@@ -110,6 +111,7 @@ py-modules = [
 "share/hermes-gpt/docs" = [
   "docs/README.md",
   "docs/oauth.md",
+  "docs/jev.md",
   "docs/operator-mode.md",
   "docs/finance.md",
   "docs/missions.md",

@@ -40,6 +40,8 @@ host/origin allowlist: loopback by default plus `HERMES_GPT_ALLOWED_HOSTS`
 extensions and the OAuth issuer when configured. Public unauthenticated
 hosting is unsupported (product invariant).
 
+The unreleased, default-off [Jev bridge](jev.md) adds three tools only when `HERMES_GPT_ENABLE_JEV=1`. It inherits this outer transport/authentication boundary and forwards only the fixed decision calls to a pinned local stdio adapter. It does not mount another endpoint or change the curated Codex surface.
+
 ## Trusted-client authentication metadata
 
 Every tool advertises its security scheme via MCP tool metadata

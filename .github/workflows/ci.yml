@@ -25,6 +25,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check out pinned Jev adapter for offline interoperability tests
+        uses: actions/checkout@v4
+        with:
+          repository: asimons81/jev-mcp
+          ref: fc4d4bef26af92d1d5a3b9e05bffb46d90a37eae
+          path: .qa-tmp/jev-mcp
+          persist-credentials: false
+      - run: npm ci --ignore-scripts --prefix .qa-tmp/jev-mcp
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
@@ -32,6 +43,7 @@ jobs:
       - name: Run full test suite
         env:
           HERMES_HTTP_TEST: "1"
+          HERMES_GPT_TEST_JEV_ADAPTER_ROOT: ${{ github.workspace }}/.qa-tmp/jev-mcp
         run: python -m pytest -q -o addopts='' --tb=short
       - name: Run runner regression tests
         run: >-
