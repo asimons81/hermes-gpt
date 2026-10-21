@@ -80,7 +80,7 @@ Advisories are never evidence. The following modules must not read `review_advis
 
 A validation verdict is identical before and after an advisory is written. An advisory cannot satisfy a contract, approve work, relax permissions or change a delegation state.
 
-The operator audit log does not record advisory calls. Audit rows that share a contract's `task_id` feed the validator's forbidden-action scan and its `audit_count`, so an advisory audit row would change validation results.
+Every call requires the `read_only` Operator level and writes one operator audit record (`tool: hermes_review_assess`, success, a truncated contract digest and the outcome code). The record deliberately carries no `task_id`: the validator's forbidden-action scan and `audit_count` only read rows with the contract's `task_id`, so advisory calls cannot change validation results. No state, instructions or artifact text is audited.
 
 ## Offline verification
 

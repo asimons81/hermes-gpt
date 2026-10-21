@@ -260,6 +260,25 @@ def _payload(code: str) -> str:
     return json.dumps({"success": False, "code": code, "message": _MESSAGES.get(code, "")}, ensure_ascii=False, indent=2)
 
 
+def _audit(contract_sha256: Any, artifact: Any, result: str) -> None:
+    """Record the call without a ``task_id`` so the contract forbidden-action
+    scan (which only reads records carrying the contract's task_id) ignores it."""
+    try:
+        outcome = json.loads(result)
+        sha = contract_sha256 if isinstance(contract_sha256, str) and _SHA_RE.fullmatch(contract_sha256) else "invalid"
+        op.audit_record(
+            tool="hermes_review_assess",
+            level=op.OperatorPolicy().level or "read_only",
+            apply_mode="read_only",
+            dry_run=True,
+            success=bool(outcome.get("success")),
+            changed=False,
+            summary=f"advisory contract={sha[:16]} artifact={'yes' if artifact else 'no'} code={outcome.get('code', 'OK')}",
+        )
+    except Exception:  # noqa: BLE001 - audit must never break the advisory call
+        pass
+
+
 async def hermes_review_assess(
     contract_sha256: str,
     artifact: str | None = None,
@@ -268,10 +287,22 @@ async def hermes_review_assess(
     """Advisory Jev score of a Work Contract's state; never evidence or acceptance.
 
     Sends the contract's completion criteria, and the bounded text of one
-    expected artifact when ``artifact`` (a basename) is given, to TypeSafe.
+    expected artifact when ``artifact`` (a basename) is given, to TypeSafe
+    (may incur API charges). Requires the read_only Operator level.
     """
     if not enabled():
         return _payload("DISABLED")
+    try:
+        op.OperatorPolicy().require_level("read_only")
+    except PermissionError:
+        result = _payload("DENIED")
+    else:
+        result = await _assess(contract_sha256, artifact, hermes_root)
+    _audit(contract_sha256, artifact, result)
+    return result
+
+
+async def _assess(contract_sha256: Any, artifact: Any, hermes_root: Path | None) -> str:
     try:
         if not isinstance(contract_sha256, str) or not _SHA_RE.fullmatch(contract_sha256):
             raise _Refusal("INVALID_INPUT")

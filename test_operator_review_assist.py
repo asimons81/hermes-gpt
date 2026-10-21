@@ -520,3 +520,18 @@ def test_validation_manifest_is_identical_before_and_after_advisory_write(env, m
     _use_jev(monkeypatch)
     assert _assess(sha, "report.md", env.root)["success"] is True
     assert run() == before
+
+
+def test_every_call_is_audited_without_a_contract_task_id(env, monkeypatch):
+    sha = _seed(env)
+    (env.ws / "report.md").write_text(MARKER, encoding="utf-8")
+    _use_jev(monkeypatch)
+    assert _assess(sha, "report.md", env.root)["success"] is True
+    assert _assess(sha, "missing.md", env.root)["success"] is False
+
+    records = [r for r in op.audit_tail(50) if r.get("tool") == "hermes_review_assess"]
+    assert [r["success"] for r in records] == [True, False]
+    for record in records:
+        # The contract forbidden-action scan only reads records with the contract's task_id.
+        assert not record.get("task_id")
+        assert MARKER not in json.dumps(record)
