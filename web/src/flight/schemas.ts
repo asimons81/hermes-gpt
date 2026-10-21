@@ -146,16 +146,20 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
+const ITEM_ID_RE = /^[0-9a-f]{24}$/;
+
 function parseItem(value: unknown, path: string): OwnerInboxItem {
   if (!isRecord(value)) fail(path);
-  const { kind, mission_id, summary, since, suggested_tool, requires } = value;
+  const { item_id, kind, mission_id, summary, since, suggested_tool, requires, plan_id, frontier_node_ids } = value;
+  if (typeof item_id !== 'string' || !ITEM_ID_RE.test(item_id)) fail(`${path}.item_id`);
   if (typeof kind !== 'string' || kind === '') fail(`${path}.kind`);
   if (typeof mission_id !== 'string') fail(`${path}.mission_id`);
   if (typeof summary !== 'string') fail(`${path}.summary`);
   if (since !== null && typeof since !== 'string') fail(`${path}.since`);
   if (suggested_tool !== null && typeof suggested_tool !== 'string') fail(`${path}.suggested_tool`);
   if (typeof requires !== 'string' || !REQUIRES.includes(requires)) fail(`${path}.requires`);
-  return {
+  const item: OwnerInboxItem = {
+    item_id,
     kind,
     mission_id,
     summary,
@@ -163,6 +167,16 @@ function parseItem(value: unknown, path: string): OwnerInboxItem {
     suggested_tool,
     requires: requires as OwnerInboxItem['requires'],
   };
+  // Structured autopilot fields are optional: absent on every other kind.
+  if (plan_id !== undefined) {
+    if (typeof plan_id !== 'string') fail(`${path}.plan_id`);
+    item.plan_id = plan_id;
+  }
+  if (frontier_node_ids !== undefined) {
+    if (!isStringArray(frontier_node_ids)) fail(`${path}.frontier_node_ids`);
+    item.frontier_node_ids = frontier_node_ids;
+  }
+  return item;
 }
 
 /** Validate a GET /api/ops/owner-inbox `data` payload. Throws on any mismatch. */

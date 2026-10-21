@@ -1,12 +1,12 @@
 # Owner inbox
 
-Status: the read-only inbox **shipped in v0.15.0**. The Work Contract review source, stable item ids and acknowledgements are **v0.16 changes on branch `feat/v016-inbox-ack`**; they are not part of a release until the release notes say so. Verify the installed version and tool inventory before relying on any of them (see [runtime provenance](runtime-checkout.md)).
+Status: the read-only inbox **shipped in v0.15.0**. The Work Contract review source, stable item ids and acknowledgements are **v0.16 changes on branch `feat/v016-inbox-ack`**. The per-item Flight Deck actions (see [Flight Deck actions](#flight-deck-actions)) are **v0.16 changes on branch `feat/v016-deck-actions`**. None of these is part of a release until the release notes say so. Verify the installed version and tool inventory before relying on any of them (see [runtime provenance](runtime-checkout.md)).
 
 ## Current behavior
 
 The Owner inbox lists everything currently waiting on the Owner in one place. It is a **read-only projection** over existing read paths. `build_inbox` writes nothing, heals nothing, approves nothing, and advances nothing. It adds no authority: every suggested action is an existing tool, and that tool's own gates (Owner level, dry-run first, confirm, audit) still apply.
 
-The inbox has one write path of its own: `hermes_owner_inbox_ack`, which appends an acknowledgement. An acknowledgement only **hides an item** from the inbox and from notifications. It never approves, transitions, or changes any Mission, plan, Work Contract, or delegation. See [Acknowledgements](#acknowledgements).
+The projection (`build_inbox`, `hermes_owner_inbox`, `GET /api/ops/owner-inbox`) never writes. The inbox has one write path of its own: `hermes_owner_inbox_ack`, which appends an acknowledgement. An acknowledgement only **hides an item** from the inbox and from notifications. It never approves, transitions, or changes any Mission, plan, Work Contract, or delegation. See [Acknowledgements](#acknowledgements). Acting on an item is a separate step through the existing gated tools, from an MCP client or from the Flight Deck; see [Flight Deck actions](#flight-deck-actions).
 
 Code: `operator_owner_inbox.py`.
 
@@ -18,7 +18,7 @@ Python entry points (exact names):
 - `acknowledged_ids(hermes_root: Path | None = None) -> set[str]`. Returns the acknowledged item ids. It raises `OSError` or `ValueError` when the store is unreadable.
 - `ACK_STORE_RELATIVE = "missions/attention_acks.jsonl"`. Relative to the Hermes root.
 
-Flight Deck route: `GET /api/ops/owner-inbox?limit=N` in `ui_ops.py`. It returns the same projection in the `{"ok": true, "data": ...}` envelope, redacted by `ui_security`. There is no POST. The route calls `build_inbox` with the defaults, so **acknowledged items are hidden** and the route has no `include_acknowledged` parameter. It respects the `approvals` entry of the Mission allowlist (`HERMES_GPT_MISSION_ALLOWED_SURFACES`: unset allows, a list allows only listed surfaces, empty denies). A bad `limit` returns `400 INVALID_LIMIT`.
+Flight Deck route: `GET /api/ops/owner-inbox?limit=N` in `ui_ops.py`. It returns the same projection in the `{"ok": true, "data": ...}` envelope, redacted by `ui_security`. The route has no POST. The Flight Deck acts on items through `POST /api/ops/action`, the same gated path as the other browser mutations. The route calls `build_inbox` with the defaults, so **acknowledged items are hidden** and the route has no `include_acknowledged` parameter. It respects the `approvals` entry of the Mission allowlist (`HERMES_GPT_MISSION_ALLOWED_SURFACES`: unset allows, a list allows only listed surfaces, empty denies). A bad `limit` returns `400 INVALID_LIMIT`.
 
 ### Result shape
 
@@ -41,6 +41,13 @@ Flight Deck route: `GET /api/ops/owner-inbox?limit=N` in `ui_ops.py`. It returns
   "generated_at": "<ISO-8601>"
 }
 ```
+
+`autopilot_waiting_owner` items also carry two structured fields, used by the Flight Deck to offer per-node actions:
+
+- `plan_id`: the Mission's plan key. A Mission has at most one plan, stored under `mission_id` in `mission_plans`, so `plan_id` equals `mission_id`.
+- `frontier_node_ids`: the full sorted list of frontier node ids, not truncated to the 8 shown in `summary`.
+
+Neither field is part of the stable `item_id`, so adding or changing them does not change an item's identity. Other kinds do not carry these fields.
 
 Items are sorted newest first and capped at `limit`. `truncated` is true when more items existed. Acknowledged items are removed before the cap is applied, so they do not use up `limit`. `hidden_acknowledged` counts the acknowledged items removed from this result; it is `0` when `include_acknowledged=true`. `skipped_sources` is currently always empty; every source is read.
 
@@ -158,15 +165,53 @@ Acknowledging never approves, transitions, or changes a Mission, plan, Work Cont
 
 Use the existing gated tools, not the inbox:
 
-- `mission_awaiting_approval`: inspect with `hermes_mission_get`, then `hermes_mission_approve` (Owner mode, dry-run first, `confirm=true` for a direct write).
-- `autopilot_waiting_owner`: inspect with `hermes_autopilot_status`. Resolve the frontier with `hermes_plan_node_transition` or `hermes_mission_approve`, under the same gates.
+- `mission_awaiting_approval`: inspect with `hermes_mission_get`, then `hermes_mission_approve` (Owner mode, dry-run first, `confirm=true` for a direct write). The Flight Deck offers this as Approve Mission….
+- `autopilot_waiting_owner`: inspect with `hermes_autopilot_status`. Resolve the frontier with `hermes_plan_node_transition` or `hermes_mission_approve`, under the same gates. The Flight Deck offers per-node approve and reject, and Stop Autopilot….
 - `budget_breaker`: inspect with `hermes_budget_check`.
 - `red_health`, `no_capable_target`: inspect with `hermes_controller_status`.
 - `contract_review_pending`: inspect with `hermes_delegation_get` for the full `contract_sha256`, then `hermes_review_accept`. That tool needs Owner Mode with a reviewer distinct from the assignee. It is dry-run by default, and a direct write needs `dry_run=false` with `confirm=true`. The item clears once the acceptance exists; the delegation state changes only after `hermes_delegation_reconcile`.
 
 Once a condition is handled, the item can be acknowledged with `hermes_owner_inbox_ack` to hide it. Acknowledging is not handling: it does not resolve the underlying condition.
 
-The inbox never calls these tools.
+The projection never calls these tools. The Flight Deck actions below call the same existing tools through `POST /api/ops/action`, under the same gates.
+
+## Flight Deck actions
+
+Status: v0.16, branch `feat/v016-deck-actions`.
+
+Each inbox item in the Flight Deck offers the actions below. Every action uses the existing gated tool named in the table, through `POST /api/ops/action`. The server-side allowlist, argument checks, level checks, dry-run, confirm gate, and audit are those of the tool. The browser adds no authority. See [ui-security-boundary.md](ui-security-boundary.md#6-mutations-remain-auditable-and-gated) for the allowlist.
+
+Two requests per action:
+
+1. A dry-run POST with `dry_run: true` and no `confirm`. The Flight Deck shows the tool's own plan.
+2. A separate confirm gesture. It sends `dry_run: false`, and `confirm: true` inside `args` only for tools that take a `confirm` argument. `hermes_owner_inbox_ack` takes none.
+
+| Item kind | Browser action | Tool | Server-side gate and checks |
+| --- | --- | --- | --- |
+| `mission_awaiting_approval` | Approve Mission… (the Owner enters an approval reference, 1 to 256 characters) | `hermes_mission_approve` (`mission_id`, `approval_reference`, `confirm`, `dry_run`) | The tool's own `require_owner`: Owner Mode, `HERMES_GPT_OPERATOR_LEVEL=owner`, `HERMES_GPT_OWNER_ACTIVE=1`, the owner acknowledgement, and direct apply mode for a write. Mission must be `awaiting_approval`, and its children terminal with a verified success. Owner Mode off returns the tool's refusal (`400 MISSION_APPROVAL_REJECTED`) and approves nothing. |
+| `autopilot_waiting_owner` | Approve node `<id>`… and Reject node `<id>`…, one pair per frontier node | `hermes_plan_node_transition` (`mission_id`, `node_id`, `target_state`, `reason`, `confirm`, `dry_run`) | Browser precheck, before the tool runs, described below. Then the tool's own transition check. |
+| `autopilot_waiting_owner` | Stop Autopilot… | `hermes_autopilot_stop` (`mission_id`, `confirm`, `dry_run`) | Workspace level and direct apply mode, as the tool requires. Not behind `HERMES_GPT_AUTOPILOT`: stopping is never gated behind the machine gate. |
+| every item | Acknowledge | `hermes_owner_inbox_ack` (`item_ids`: one id) | Workspace level and direct apply mode for a write, dry-run by default. Acknowledging hides the item only; it never resolves the condition. See [Acknowledgements](#acknowledgements). |
+
+Other kinds (`contract_review_pending`, `budget_breaker`, `red_health`, `no_capable_target`) have no browser action beyond Acknowledge. They show guidance text naming the MCP tool. `contract_review_pending` is not wired because the inbox item does not carry the fields `hermes_review_accept` needs (`contract_sha256`, `task_id`, `assignee`, `reviewer`, `verdict`, `evidence_refs`, `approval_reference`).
+
+### Approval-frontier restriction on `hermes_plan_node_transition`
+
+The browser may call `hermes_plan_node_transition` only to resolve an approval frontier. Before the tool runs, `ui_ops.py` reads the plan read-only (`hermes_plan_get`) and refuses the request unless every check passes:
+
+1. The browser path requires Owner Mode (`require_owner`). This is stricter than the tool's own workspace gate: over MCP the same tool needs only workspace and direct mode.
+2. `target_state` is `completed` (approve) or `failed` (reject). These are the targets the plan state machine allows from `awaiting_approval`, derived as `NODE_TRANSITIONS["awaiting_approval"] - {"paused"}` in `operator_mission_plan.py`. `paused` is legal in the state machine but does not resolve the frontier, so it is excluded.
+3. The node exists in the plan, and it is an `approval` node or has `capability_req.authorization_class == "high_impact"`.
+4. The node is currently `awaiting_approval`, the gated state.
+5. The plan `version` read in check 3 is passed as `expected_plan_version`. If the plan was replaced in between, the tool refuses with `PLAN_VERSION_CONFLICT`.
+
+A failed check returns `400 APPROVAL_TRANSITION_REFUSED` with a fixed message. The owner check returns `403 LEVEL_REQUIRED` with `required: "owner"`. Nothing is written in any refusal case.
+
+### Refusals and refetch
+
+- A refusal shows the server's `code: message` in the item, verbatim. The message is the tool's own sanitized `safe_message`, produced by `operator_policy` before it reaches the envelope.
+- An applied action refetches the inbox. A dry run, or a confirm that did not apply, does not refetch.
+- An applied action is shown as `APPLIED`, with no second confirm for the same plan.
 
 ## Limits and boundaries
 

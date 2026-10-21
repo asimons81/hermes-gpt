@@ -99,14 +99,89 @@ degraded or the level is below `workspace`; read-only lanes stay).
 
 ## 6. Mutations remain auditable and gated
 
-This card adds NO mutation surface. Every mutation the UI offers goes
-through the existing gated `hermes_*` tool path (`POST /api/ops/action`,
-flight card t_1135e15b): read-only default, dry-run-first, confirm gate
-preserved (409 `CONFIRM_REQUIRED`), Owner Mode never bypasses secret-path
-protections, and every call is written to the operator audit JSONL. The
-boundary only guarantees the response is redacted and the envelope
-(`ok`/`error`, gate codes) is never weakened — `test_error_envelope_
-preserves_gate_codes` asserts that.
+Every mutation the UI offers goes through one endpoint, `POST /api/ops/action`
+(`ui_ops.py`), which executes an existing gated `hermes_*` tool. The browser
+has no bypass: read-only default, dry-run-first, confirm gate preserved (409
+`CONFIRM_REQUIRED`), Owner Mode never bypasses secret-path protections, and
+every call is written to the operator audit JSONL. The boundary guarantees the
+response is redacted and the envelope (`ok`/`error`, gate codes) is never
+weakened (`test_error_envelope_preserves_gate_codes`).
+
+### 6.1 Browser mutation allowlist (current)
+
+`ui_ops._MUTATION_TOOLS` is the complete browser allowlist. A request for any
+other tool name returns `404 UNKNOWN_TOOL`. Each entry lists the arguments the
+browser may send. Anything else returns `400 INVALID_ARGS`, so `hermes_root`,
+runners and other internal kwargs cannot be smuggled in. The root is always
+resolved server-side.
+
+| Tool | Browser args (exact) | Required level (403 hint) | Confirm / apply |
+| --- | --- | --- | --- |
+| `hermes_review_accept` | `contract_sha256`, `task_id`, `assignee`, `reviewer`, `verdict`, `evidence_refs`, `approval_reference`, `dry_run`, `confirm` | owner | `confirm` |
+| `hermes_swarm_stage_advance` | `workflow_id`, `stage_id`, `confirm`, `dry_run` | workspace | `confirm` |
+| `hermes_swarm_approve` | `workflow_id`, `confirm`, `dry_run` | owner | `confirm` |
+| `hermes_cron_run` | `profile`, `job_id`, `dry_run`, `timeout` | cron | long-running (202) |
+| `hermes_cron_pause` | `profile`, `job_id`, `reason`, `dry_run` | cron | none |
+| `hermes_cron_create` | `profile`, `schedule`, `prompt`, `name`, `skills`, `deliver`, `repeat`, `script`, `workdir`, `no_agent`, `context_from`, `enabled_toolsets`, `model_provider`, `model_name`, `dry_run` | cron | none |
+| `hermes_cron_copy` | `source_profile`, `target_profile`, `job_id`, `dry_run` | cron | none |
+| `hermes_cron_move` | `source_profile`, `target_profile`, `job_id`, `pause_source`, `test_run_target`, `dry_run` | cron | none |
+| `hermes_codex_cancel` | `job_id`, `confirm`, `dry_run` | workspace | `confirm` |
+| `hermes_operator_recover` | `profile`, `apply` | workspace | `apply` flag |
+| `hermes_swarm_reconcile` | `apply` | workspace | `apply` flag |
+| `hermes_oauth_revoke` | `confirm`, `dry_run`, `rotate_key` | owner | `confirm` |
+| `hermes_mission_approve` (v0.16) | `mission_id`, `approval_reference`, `confirm`, `dry_run` | owner | `confirm` |
+| `hermes_plan_node_transition` (v0.16) | `mission_id`, `node_id`, `target_state`, `reason`, `confirm`, `dry_run` | owner (browser precheck; the tool itself needs workspace) | `confirm` |
+| `hermes_autopilot_stop` (v0.16) | `mission_id`, `confirm`, `dry_run` | workspace | `confirm` |
+| `hermes_owner_inbox_ack` (v0.16) | `item_ids` (1 to 50), `dry_run` | workspace | none (no `confirm` argument) |
+
+The required level is the hint returned with `403 LEVEL_REQUIRED`. The gate
+itself is the tool's own check, except for the v0.16 precheck described next.
+
+The v0.16 entries add gates in front of the tool, under the same two-request
+flow:
+
+- **`hermes_plan_node_transition`** is restricted to resolving an approval
+  frontier. A precheck (`_precheck_approval_transition`) reads the plan
+  read-only and refuses unless the node is an `approval` node or has
+  `authorization_class == high_impact`, is currently `awaiting_approval`, and
+  the target is `completed` (approve) or `failed` (reject). The plan `version`
+  it reads is passed as `expected_plan_version`, so a concurrent plan
+  replacement is refused by the tool's compare-and-swap. The browser path also
+  requires Owner Mode, which is stricter than the tool's own workspace gate.
+  Refusals return `400 APPROVAL_TRANSITION_REFUSED` (fixed messages) or
+  `403 LEVEL_REQUIRED`, and write nothing. Details: [owner-inbox.md](owner-inbox.md#flight-deck-actions).
+- **`hermes_mission_approve`** calls the same function as MCP
+  (`operator_mission_runtime.hermes_mission_approve`). Owner Mode is enforced
+  there, server-side. With Owner Mode off, the browser gets that function's own
+  refusal and nothing is approved. No browser-only path exists.
+- **`hermes_autopilot_stop`** is never gated behind `HERMES_GPT_AUTOPILOT`.
+- **`hermes_owner_inbox_ack`** writes only an acknowledgement. It never
+  approves, transitions or changes a Mission, plan, Work Contract or delegation.
+
+Owner approval from the browser still requires Owner Mode on the server
+(`HERMES_GPT_OPERATOR_ENABLED=1`, `HERMES_GPT_OPERATOR_LEVEL=owner`,
+`HERMES_GPT_OWNER_ACTIVE=1`, and the owner acknowledgement `HERMES_GPT_OWNER_ACK`). The browser has
+no way to set these: they are read from the server environment.
+
+### 6.2 Request protections
+
+Browser actions get the same request protections as every other `/api/*`
+route, from the outer middleware in `server.build_asgi_app`:
+
+- **Bearer auth.** When a static bearer or OAuth is configured, a request
+  without a valid token gets `401`. With neither configured (the loopback
+  default), no auth check applies.
+- **CORS.** Only `https://chatgpt.com` and the configured OAuth issuer origin
+  receive `Access-Control-Allow-Origin`. A foreign `Origin` receives no ACAO
+  header, so its page cannot read the response.
+
+There is no CSRF token and no `Origin` check inside `POST /api/ops/action`.
+The action route does not require a JSON `Content-Type`, and its body parser
+does not enforce one. A cross-site page can therefore send a simple request to
+a loopback Flight Deck without auth. The gates above (Operator enabled,
+level, apply mode, Owner Mode, the confirm gate) are then the only protection.
+This is a known limit of the current design. It is not changed in v0.16. See
+the report for the follow-up.
 
 ## 7. Env vars (architecture.md §15)
 
