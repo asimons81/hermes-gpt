@@ -25,7 +25,7 @@ Hermes GPT has two update paths:
 
 GitHub releases and PyPI are separate distribution channels and can temporarily report different current versions. A newer GitHub release does not mean an installed-package update will be available before that version is published to PyPI.
 
-Agents should determine whether they are operating a checkout or an installed package before describing update availability.
+Agents should determine whether they are operating a checkout or an installed package before describing update availability. Unreleased commits may retain the published version number: the package updater cannot distinguish two source revisions both labeled `0.14.0`. Retain the artifact hash/source commit and verify the running tool inventory; see [runtime provenance](runtime-checkout.md). A manual source/wheel install and service restart are separate operator actions. If multiple services share one environment, review the shared impact or use an isolated environment before upgrading it.
 
 ## Git checkout updates
 

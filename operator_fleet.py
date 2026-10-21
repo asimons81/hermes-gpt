@@ -58,7 +58,10 @@ _MAX_ITEMS = 64
 _BUILTIN_PROFILES = {
     "nous-girl": frozenset({"default"}),
     "rza": frozenset({"default", "gza", "masta-killa", "inspectah-deck", "ghostface-killah", "method-man", "raekwon"}),
-    "gaming-4090": frozenset({"default"}),
+    "gaming-4090": frozenset({"default", "media", "gpu-dev"}),
+    "macbook-m5": frozenset({"default", "apple", "apple-design", "apple-dev", "apple-qa", "apple-release"}),
+    "mac-mini-m5": frozenset({"default"}),
+    "omarchy": frozenset({"default"}),
 }
 _PUBLIC_ACTION_RE = re.compile(
     r"\b(?:"

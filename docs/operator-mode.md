@@ -1,6 +1,6 @@
 # Operator Mode for Hermes GPT
 
-Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.13.0 behavior, including the durable Mission lifecycle, unified delegation lineage, live-event bus, and Fabric-backed cross-machine Swarm execution, plus the vNext slice-1 additive surfaces (MissionPlan DAG, derived capability-manifest / mission-ledger views, budget envelope, placement scoring, failure classification + recovery matrix, and the shadow/observe mission controller) and the vNext slice-2 gated execution rungs (budget D3 hard-block enforcement behind `HERMES_GPT_BUDGET_HARD_BLOCK=1`, and the controller L2 rung behind `HERMES_GPT_CONTROLLER_EXECUTE=1`). The slice-1 surfaces are decision-only; the slice-2 rungs are default-off, add no tools, and keep every existing surface byte-identical until their gates are armed. They are documented further in [vnext-capability-manifest-and-mission-ledger.md](vnext-capability-manifest-and-mission-ledger.md) and [design/](design/).
+Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.14.0 behavior, including the durable Mission lifecycle, unified delegation lineage, live-event bus, and Fabric-backed cross-machine Swarm execution, plus the vNext slice-1 additive surfaces (MissionPlan DAG, derived capability-manifest / mission-ledger views, budget envelope, placement scoring, failure classification + recovery matrix, and the shadow/observe mission controller) and the vNext slice-2 gated execution rungs (budget D3 hard-block enforcement behind `HERMES_GPT_BUDGET_HARD_BLOCK=1`, and the controller L2 rung behind `HERMES_GPT_CONTROLLER_EXECUTE=1`). The slice-1 surfaces are decision-only; the slice-2 rungs are default-off, add no tools, and keep every existing surface byte-identical until their gates are armed. They are documented further in [vnext-capability-manifest-and-mission-ledger.md](vnext-capability-manifest-and-mission-ledger.md) and [design/](https://github.com/asimons81/hermes-gpt/tree/master/docs/design).
 
 For documentation authority and historical-artifact rules, see [docs/README.md](README.md).
 
@@ -214,6 +214,8 @@ Live events are notifications, not proof. Mission, Swarm, Work Contract, runner,
 ## Work Contracts
 
 Work Contracts add a structured, verifiable work-order layer through `hermes_contract_*`.
+
+Since v0.14, `expected_artifacts` entries can include optional `max_bytes` and lowercase `sha256` acceptance checks in addition to `min_bytes`. Local hashing is bounded to 8 MiB and changing/unreadable content fails closed; remote evidence still requires coordinator verification and immutable contract binding. Size/digest checks do not replace semantic review. Autopilot nodes expose the same bounds through optional `artifact_requirements`; confirmed failed artifacts after successful execution use a durable delivery grace and existing bounded recovery. See [Autopilot](autopilot.md#declared-deliverable-acceptance-v014).
 
 | Tool | Authority | Purpose |
 | --- | --- | --- |
@@ -700,3 +702,5 @@ unavailable, times out, or reports failure.
 
 Autopilot is an optional, default-off runtime that drives one Mission through its MissionPlan. It is enabled by the machine gate `HERMES_GPT_AUTOPILOT=1`, which registers `hermes_autopilot_start`, `hermes_autopilot_status`, and `hermes_autopilot_stop`; with the gate unset none of them exist. Starting needs `workspace` level, direct apply mode, `dry_run=false`, and `confirm=true` (a dry run previews and writes nothing); stopping never needs the machine gate. It adds no authority: every dispatch goes through the existing placement, Work Contract, and delegation surfaces, it never dispatches or advances an approval or `high_impact` node, and it cannot approve a Mission. See [autopilot.md](autopilot.md).
 
+
+Autopilot carries node artifact requirements into Work Contracts, refuses replacement of plans with unfinished work (`PLAN_IN_FLIGHT`), and exposes bounded recovery deferral in Mission reconciliation. See [autopilot.md](autopilot.md) for the exact acceptance and recovery rules. Its read-only browser panel is included in release wheels; browser access still requires the existing UI/authentication gates.

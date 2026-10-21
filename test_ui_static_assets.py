@@ -8,7 +8,9 @@ roots and never touch real user data.
 from __future__ import annotations
 
 import re
+from importlib.metadata import PackagePath
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from starlette.testclient import TestClient
@@ -19,6 +21,25 @@ import operator_policy as op
 import server
 import ui_api
 import ui_security
+
+
+def test_installed_wheel_resolves_its_bundled_ui(monkeypatch, tmp_path):
+    import importlib.metadata
+
+    root = tmp_path / "installed"
+    index = root / "share" / "hermes-gpt" / "web" / "index.html"
+    index.parent.mkdir(parents=True)
+    index.write_text("<div id=root></div>")
+    monkeypatch.delenv(ui_security.UI_DIR_ENV, raising=False)
+    monkeypatch.setattr(ui_security, "__file__", str(tmp_path / "site-packages" / "ui_security.py"))
+    package = SimpleNamespace(files=[PackagePath("share/hermes-gpt/web/index.html")], locate_file=lambda entry: root / entry)
+    monkeypatch.setattr(importlib.metadata, "distribution", lambda name: package)
+    assert ui_security.ui_dir() == index.parent
+
+
+def test_explicit_ui_override_wins_over_the_bundle(monkeypatch, tmp_path):
+    monkeypatch.setenv(ui_security.UI_DIR_ENV, str(tmp_path / "custom"))
+    assert ui_security.ui_dir() == tmp_path / "custom"
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-import { Link, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom';
 
 import { ChatPage } from './chat/ChatPage';
 import { AccountPanel } from './flight/AccountPanel';
@@ -51,4 +51,8 @@ export function App(): JSX.Element {
     <Route path="/account" element={<div className="fd-shell"><FlightNav /><main className="fd-main" role="main"><AccountPanel /></main></div>} />
     <Route path="*" element={<Navigate to="/chat" replace />} />
   </Routes>;
+}
+
+export function RoutedApp(): JSX.Element {
+  return <BrowserRouter basename="/ui"><App /></BrowserRouter>;
 }

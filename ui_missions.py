@@ -163,7 +163,9 @@ def _project_summary(summary: Any) -> dict[str, Any]:
     projected = {key: summary.get(key) for key in _SUMMARY_KEYS if key in summary}
     projected["workers"] = [
         {"node_id": w.get("node_id"), "state": w.get("state"), "attempt": w.get("attempt"),
-         "delegation_state": w.get("delegation_state")}
+         "delegation_state": w.get("delegation_state"),
+         "validation": delegations.validation_summary(w.get("validation")),
+         "validation_failure_since": w.get("validation_failure_since", "")}
         for w in (summary.get("workers") or []) if isinstance(w, dict)
     ]
     projected["attention"] = [

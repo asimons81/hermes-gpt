@@ -52,6 +52,7 @@ import operator_swarm as op_swarm
 import operator_recovery as op_recovery
 import operator_autopilot as op_autopilot
 import operator_finance as op_finance
+import jev_bridge
 from versioning import VERSION
 
 
@@ -3278,6 +3279,22 @@ def register_tools(server: FastMCP) -> None:
         server.add_tool(hermes_web_extract, meta=tool_meta())
     if op_finance.finance_enabled(_default_hermes_root()):
         server.add_tool(hermes_finance_analyze, meta=tool_meta())
+
+    # External typed judgments are opt-in and never alter Operator authority.
+    if jev_bridge.enabled():
+        for tool in (
+            jev_bridge.hermes_jev_yes_no,
+            jev_bridge.hermes_jev_choose,
+            jev_bridge.hermes_jev_score,
+        ):
+            server.add_tool(
+                tool,
+                meta=tool_meta(),
+                annotations=ToolAnnotations(
+                    readOnlyHint=True, destructiveHint=False,
+                    idempotentHint=False, openWorldHint=True,
+                ),
+            )
 
     # --- Operator / Owner Mode tools -----------------------------------
     #

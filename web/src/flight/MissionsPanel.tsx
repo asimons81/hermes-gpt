@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { api, ApiError } from '../api/client';
+import { AutopilotPanel } from './AutopilotPanel';
 import { EmptyState, ErrorState, LoadingState, PanelCard, StatusChip, safeText } from './ui';
 
 type Tone = 'ok' | 'review' | 'flight' | 'warn' | 'deny' | 'neutral';
@@ -143,6 +144,7 @@ export function MissionDetail() {
     {!payload && !error ? <LoadingState label="Loading Mission…" /> : null}
     {error ? <ErrorState message={error} /> : null}
     {mission ? <>
+      <AutopilotPanel key={missionId} missionId={missionId} revision={mission.version} />
       <PanelCard title="Mission">
         <div className="fd-grid fd-grid--2"><div><span className="fd-label">Mission ID</span><div>{safeText(mission.mission_id, 120)}</div></div><div><span className="fd-label">Owner</span><div>{safeText(mission.owner_profile || 'default', 80)}</div></div><div><span className="fd-label">Version</span><div>{String(mission.version ?? '—')}</div></div><div><span className="fd-label">Updated</span><div>{fmtTime(mission.updated_at)}</div></div></div>
         {mission.objective ? <><span className="fd-label">Objective</span><p>{safeText(mission.objective, 900)}</p></> : null}

@@ -1,6 +1,26 @@
 # Changelog
 
-## 0.13.0 - 2026-09-29
+## Unreleased
+
+- Correct the default main-server inventory and source UI build instructions; replace host-specific runtime notes with a generic provenance/rollback guide, ship linked operational guides, and clarify unreleased-source versus package/runtime state. Keep example profiles generic and allow new example PowerShell scripts without unignoring private launchers.
+
+- Add a default-off Jev decision bridge: three tools reuse the pinned community `jev-mcp` adapter over bounded local stdio, retaining Hermes GPT's authentication and Operator/Owner gates. Includes mocked Python/Node interoperability, subprocess cleanup and authorization regression tests. Key provisioning, gate activation and deployment remain owner setup; see [docs/jev.md](docs/jev.md).
+
+## 0.14.0 - 2026-10-03
+
+Acceptance and recovery: declare deliverable checks before dispatch and recover from positively observed artifact failures within existing limits.
+
+- MissionPlan nodes can specify optional `artifact_requirements` for existing artifact basenames: positive `min_bytes`, optional `max_bytes`, and optional lowercase `sha256`. Requirements participate in the node signature, survive bounded rework unchanged, and flow into each attempt's Work Contract. Existing nodes/contracts retain their prior canonical hashes when optional fields are absent.
+- Work Contracts enforce size bounds and expected hashes against local files or contract-bound coordinator-verified remote artifact metadata. Local hash reads are binary, bounded to 8 MiB, reject changing/nonregular files, and fail closed on unreadable evidence.
+- Delegations persist bounded validation check enums and a restart-safe 30-second artifact delivery grace. Successful execution with confirmed bad artifacts and all other required checks passing becomes `failed` with outcome `validation_failed` after grace; Autopilot can use its existing bounded semantic replan path. Missing run observations, pending review, denied authority, cancellation ambiguity, and unreadable artifacts never trigger this recovery.
+- Flight Deck explains per-attempt completion checks, artifact failure reasons, delivery grace, and pending validation without adding browser mutation actions. Completed/failed task evidence stays visible when its current lineage can be resolved.
+- No new MCP tools, no default gate changes, and no approval bypass. Autopilot remains default off and final Mission approval remains Owner-only.
+
+## 0.13.0 - 2026-10-03
+
+- Release hardening: enforce required nonempty node artifacts in isolated attempt workspaces; prevent plan replacement from orphaning unfinished work; preserve bounded, classifier-approved recovery during independent Mission reconciliation without hiding failed evidence.
+- Flight Deck now renders Autopilot progress, workers, budgets, recovery limits, and owner attention; release packages include the built browser assets. CI exercises the Python/MCP matrix on Windows and Linux.
+- Windows process observation leaves terminal publication unblocked; durable state handles transient file-sharing contention and fails closed on persistent read denial. Pi RPC pipe reading is portable and enforces timeouts even for partial JSONL lines.
 
 Autopilot: one durable, default-off runtime that drives a Mission through its MissionPlan without a human re-triggering every node, and never crosses an approval boundary. It is a caller of the existing Mission, plan, placement, Work Contract, delegation, budget, and live-event surfaces, not a new authority. See [docs/autopilot.md](docs/autopilot.md).
 

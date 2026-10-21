@@ -400,7 +400,7 @@ def test_lease_is_released_even_when_a_tick_raises(env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_plan_replaced_before_dispatch_aborts_with_no_remote_side_effect(env, monkeypatch):
+def test_plan_replacement_before_dispatch_is_refused_by_the_shared_lease(env, monkeypatch):
     root, backend = env
     _mk(root, [_node("a"), _node("b")])
     real = contract_mod.hermes_contract_define
@@ -409,25 +409,25 @@ def test_plan_replaced_before_dispatch_aborts_with_no_remote_side_effect(env, mo
     def replace_plan_once(*args, **kwargs):
         if not fired["n"]:
             fired["n"] += 1
-            _put_plan(root, [_node("a"), _node("b")])
+            assert _j(plan.hermes_plan_create(MID, confirm=True, dry_run=False, hermes_root=root))["code"] == "PLAN_IN_FLIGHT"
         return real(*args, **kwargs)
 
     monkeypatch.setattr(contract_mod, "hermes_contract_define", replace_plan_once)
     out = _tick(root, max_concurrency=8)
-    assert out["skipped"] == "plan_version_conflict"
-    assert out["dispatched"] == [] and backend.calls == []
-    assert _states(root) == {"a": "pending", "b": "pending"}
-    # Next tick re-reads the new version and proceeds normally.
-    assert _tick(root, max_concurrency=8)["dispatched"] == ["a", "b"]
+    assert out["dispatched"] == ["a", "b"]
+    assert _j(plan.hermes_plan_get(MID, hermes_root=root))["version"] == 1
+    assert _states(root) == {"a": "dispatched", "b": "dispatched"}
 
 
-def test_plan_replaced_during_dispatch_never_marks_new_plan_node_dispatched(env):
+def test_plan_replacement_during_dispatch_is_refused_before_it_can_orphan_work(env):
     root, backend = env
     _mk(root, [_node("a")])
-    backend.on_call = lambda n: _put_plan(root, [_node("a")])
+    refusals = []
+    backend.on_call = lambda n: refusals.append(_j(plan.hermes_plan_create(MID, confirm=True, dry_run=False, hermes_root=root)))
     out = _tick(root)
-    assert out["skipped"] == "plan_version_conflict" and out["dispatched"] == []
-    assert _states(root) == {"a": "pending"}  # the stale transition was refused by the CAS
+    assert refusals[0]["code"] == "PLAN_IN_FLIGHT"
+    assert out["dispatched"] == ["a"] and _states(root) == {"a": "dispatched"}
+    assert _j(plan.hermes_plan_get(MID, hermes_root=root))["version"] == 1
 
 
 # ---------------------------------------------------------------------------

@@ -115,21 +115,8 @@ def _check_result(
 
 
 def _is_process_alive(pid: int | None) -> bool:
-    """Best-effort check whether ``pid`` is alive. Never raises."""
-    if pid is None:
-        return False
-    try:
-        import psutil  # type: ignore
-
-        return psutil.pid_exists(pid)
-    except Exception:
-        try:
-            os.kill(pid, 0)
-            return True
-        except (OSError, ProcessLookupError):
-            return False
-        except Exception:
-            return False
+    """Best-effort read-only process probe; never signal a Windows console."""
+    return op_workspace._is_pid_alive(pid)
 
 
 def _read_config_safe(profile_home: Path) -> dict[str, Any]:

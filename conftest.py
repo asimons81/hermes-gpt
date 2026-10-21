@@ -16,6 +16,11 @@ import pytest
 import operator_skill_resolution as _skill_resolution
 
 _ISOLATED_ENV_VARS = (
+    "HERMES_GPT_ENABLE_JEV",
+    "HERMES_GPT_JEV_ADAPTER_ROOT",
+    "HERMES_GPT_JEV_NODE",
+    "TYPESAFE_API_KEY",
+    "TYPESAFE_MODEL",
     "HERMES_GPT_OPERATOR_ENABLED",
     "HERMES_GPT_OPERATOR_LEVEL",
     "HERMES_GPT_OPERATOR_APPLY_MODE",

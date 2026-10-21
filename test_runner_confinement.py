@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -21,6 +21,17 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
 def test_confinement_disabled_by_default():
     assert confinement.confinement_enabled() is False
     assert confinement.confinement_available() is False
+
+
+def test_unsupported_confinement_tool_fails_closed(monkeypatch):
+    monkeypatch.setenv(confinement.CONFINEMENT_ENABLE_ENV, "1")
+    monkeypatch.setattr(confinement, "confinement_tool", lambda: "/unsupported/sandbox")
+
+    def unsupported(*args, **kwargs):
+        raise RuntimeError("unsupported confinement platform")
+
+    monkeypatch.setattr(confinement, "_wrap_argv_with_tool", unsupported)
+    assert confinement.confinement_available(writable=False) is False
 
 
 def test_confinement_requires_os_tool(monkeypatch: pytest.MonkeyPatch):
@@ -188,7 +199,7 @@ def test_macos_profile_escapes_workspace_literal():
 
 
 def test_macos_writable_profile_denies_host_reads_outside_runtime_and_workspace(tmp_path: Path):
-    ws = tmp_path / "ws"
+    ws = PurePosixPath(tmp_path.as_posix()) / "ws"
     profile = confinement._macos_sandbox_profile(str(ws), writable=True)
     assert "(deny file-read*)" in profile
     assert f'(allow file-read* (subpath "{ws}"))' in profile
@@ -216,8 +227,8 @@ def test_macos_node_runtime_root_scopes_homebrew_keg(tmp_path: Path, monkeypatch
 
 
 def test_macos_read_only_profile_denies_host_reads_and_workspace_writes(tmp_path: Path):
-    ws = tmp_path / "ws"
-    runtime = tmp_path / "runtime"
+    ws = PurePosixPath(tmp_path.as_posix()) / "ws"
+    runtime = PurePosixPath(tmp_path.as_posix()) / "runtime"
     profile = confinement._macos_sandbox_profile(
         str(ws),
         writable=False,

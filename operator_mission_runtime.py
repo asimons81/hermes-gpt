@@ -116,15 +116,25 @@ def _db_path(hermes_root: Path | None) -> Path:
     return _root(hermes_root) / "missions" / "missions.db"
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit/rollback normally, then release the database file immediately."""
+
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 def _connect(path: Path, *, write: bool) -> sqlite3.Connection:
     if write:
         path.parent.mkdir(parents=True, exist_ok=True)
-        db = sqlite3.connect(path)
+        db = sqlite3.connect(path, factory=_ClosingConnection)
         _init_db(db)
     else:
         if not path.is_file():
             raise FileNotFoundError(path)
-        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, factory=_ClosingConnection)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
     return db
@@ -936,6 +946,21 @@ def _desired_mission_status(mission: dict[str, Any], observed: list[dict[str, An
         return "completed"
     return current
 
+
+def _pending_recovery(root: Path, mission_id: str, observed: list[dict[str, Any]]) -> list[str]:
+    import operator_autopilot as autopilot
+
+    failed = [item for item in observed if item["state"] == "failed"]
+    if not failed:
+        return []
+    try:
+        if all(item["kind"] == "delegation" and autopilot.recovery_pending(mission_id, str(item["ref"]), root)
+               for item in failed):
+            return [str(item["ref"]) for item in failed]
+    except (LookupError, ValueError, TypeError, KeyError, OSError, sqlite3.Error, PermissionError):
+        pass  # unreadable recovery state cannot delay a terminal failure
+    return []
+
 def hermes_mission_reconcile(
     mission_id: str,
     confirm: bool = False,
@@ -956,7 +981,10 @@ def hermes_mission_reconcile(
                 mission = _row_to_mission(db, _get_row(db, mission_id))
             observed = _observe_attachments(root, mission)
             desired = _desired_mission_status(mission, observed)
-            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_reconcile", "mission_id": mission_id, "status": mission["status"], "desired_status": desired, "observed": observed, "changed": False, "dry_run": True})
+            recovery_pending = _pending_recovery(root, mission_id, observed) if desired == "failed" else []
+            if recovery_pending:
+                desired = mission["status"]
+            return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_reconcile", "mission_id": mission_id, "status": mission["status"], "desired_status": desired, "observed": observed, "changed": False, "dry_run": True, **({"recovery_pending": recovery_pending} if recovery_pending else {})})
 
         # Completion is linearized against delegation cancellation authority.
         # Observe without holding either write lock, then hold the short-lived
@@ -999,6 +1027,9 @@ def hermes_mission_reconcile(
                 raise ValueError("Mission authority changed after child observation")
             if desired == "completed":
                 raise ValueError("Mission child observation changed during completion; retry reconciliation")
+            recovery_pending = _pending_recovery(root, mission_id, observed) if desired == "failed" else []
+            if recovery_pending:
+                desired = current
             original = {(a["kind"], a["ref"]): (a["state"], bool(a.get("verified"))) for a in mission["attachments"]}
             attachment_changed = any(original.get((item["kind"], item["ref"])) != (item["state"], bool(item["verified"])) for item in observed)
             status_changed = desired != current
@@ -1012,7 +1043,7 @@ def hermes_mission_reconcile(
             db.commit()
         _publish_live_event(live_notice, hermes_root)
         _audit("hermes_mission_reconcile", policy, dry_run=False, success=True, changed=changed, mission_id=mission_id, summary=f"mission reconciled {current}->{desired}")
-        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_reconcile", "mission_id": mission_id, "status": desired, "observed": observed, "changed": changed})
+        return json.dumps({"success": True, "schema_version": SCHEMA_VERSION, "tool": "hermes_mission_reconcile", "mission_id": mission_id, "status": desired, "observed": observed, "changed": changed, **({"recovery_pending": recovery_pending} if recovery_pending else {})})
     except (ValueError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
         return _error(exc, "MISSION_RECONCILE_FAILED", "Check mission attachments and lifecycle state.")
 

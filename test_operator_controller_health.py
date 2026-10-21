@@ -17,6 +17,7 @@ Runs standalone with the repo venv python (no pytest dependency), mirroring
 the sibling standalone matrices. Invoke: .venv/bin/python test_operator_controller_health.py
 """
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -629,7 +630,7 @@ def run_migration_backward_compat() -> None:
             )
         )
         # ...then simulate the pre-tier schema: drop the two new columns.
-        with sqlite3.connect(mdb) as raw:
+        with contextlib.closing(sqlite3.connect(mdb)) as raw:
             raw.executescript(
                 "CREATE TABLE controller_telemetry_old AS "
                 "SELECT mission_id,trigger_kind,node_id,started_at,duration_ms,"
@@ -641,6 +642,7 @@ def run_migration_backward_compat() -> None:
             raw.execute(
                 "ALTER TABLE controller_telemetry_old RENAME TO controller_telemetry"
             )
+            raw.commit()
         # A write connection migrates in place...
         with mission._connect(mdb, write=True) as db:
             ctl._init_controller_tables(db)

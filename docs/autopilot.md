@@ -1,6 +1,8 @@
-# Autopilot (v0.13)
+# Autopilot (v0.14)
 
 Autopilot runs one Mission through its MissionPlan without a human re-triggering every node: it places nodes on capable peers, runs independent nodes in parallel, observes and validates their results, retries or replans within hard bounds, and stops at every approval boundary. It is **default off** and it adds no authority. Hermes GPT remains the only authority boundary; Autopilot is a caller of the existing Mission, plan, placement, Work Contract, delegation, budget, and live-event surfaces.
+
+In v0.14.0, nodes can declare artifact size/digest requirements, and confirmed artifact failures after successful execution can enter bounded recovery after a durable delivery grace. See [Declared deliverable acceptance](#declared-deliverable-acceptance-v014) below.
 
 This is the current operational guide. `docs/design/v0.13-autopilot.md` records design intent and the findings behind it; where they disagree, the code and tests win.
 
@@ -64,6 +66,8 @@ Run states: `starting`, `running`, `waiting_for_owner`, `stopping`, `stopped`, `
 
 `hermes_autopilot_status` returns the run and worker as before, plus a derived, read-only `summary`: progress, in-flight workers, the approval frontier, the budget view, recovery counters, limits and runtime remaining, wake-up counters, and an `attention` list with `needs_owner`. Building the summary never enforces a budget or writes anything, and if it cannot be built it degrades to `{"available": false}`.
 
+An unreadable durable run is an error, not a claim that no run exists. It also prevents plan replacement until the run can be inspected. Transient Windows file-sharing contention is retried within a bounded interval; process observation does not hold the job's terminal writer lock.
+
 Attention items marked `owner` are the ones only a human can resolve: the Mission awaiting approval, a gated node, a budget that is crossed, invalid or unreadable, and an unrecovered failed node. An expired runtime or a silent worker is informational.
 
 ## Flight Deck
@@ -76,6 +80,32 @@ Run state lives under the Hermes data root in `autopilot/<mission_id>.json` (mod
 
 ## Verification
 
+- `python -m pytest test_v014_acceptance.py` checks declared requirements, durable delivery grace, bounded recovery, changing/unreadable evidence, and Windows file observations.
 - `python -m pytest test_operator_autopilot.py test_operator_autopilot_scheduler.py test_operator_autopilot_advance.py test_operator_autopilot_frontier.py test_operator_autopilot_recovery.py test_operator_autopilot_limits.py test_operator_autopilot_wakeup.py test_operator_autopilot_status.py`
 - `python -m pytest test_operator_mission_supersede.py test_operator_plan_rework.py test_ui_autopilot.py`
 - `python -m pytest test_operator_autopilot_acceptance.py` runs the end-to-end scenario with a real detached worker, a killed peer, an approval stop and resume, and an MCP server restarted mid-Mission.
+
+## Declared deliverable acceptance (v0.14)
+
+Nodes can add optional `artifact_requirements` for basenames already listed in `expected_artifacts`:
+
+```json
+"expected_artifacts": ["report.md"],
+"artifact_requirements": [{"path": "report.md", "min_bytes": 100, "max_bytes": 100000}]
+```
+
+An optional `sha256` must be a lowercase 64-character expected content digest. Unknown keys, duplicate requirement paths, paths absent from `expected_artifacts`, nonpositive minimums, and inconsistent size bounds are refused before dispatch. Requirements participate in the node signature and the Work Contract digest, and rework preserves them. Omitting the new field preserves legacy node signatures. Every declared artifact remains required and nonempty.
+
+The Work Contract validates size and optional expected digest from observed local files or contract-bound coordinator-verified remote artifact metadata. Local hash reads are bounded to 8 MiB and reject changing, unreadable, or nonregular files. Larger local files needing hashing remain unverified. No raw artifact content crosses the browser boundary. These checks prove declared size/integrity, not semantic quality. Use `sha256` only when the expected bytes are known before dispatch; for a newly generated report, use size bounds and required review instead of treating a worker-provided digest as acceptance.
+
+Once a backend is observed successful, confirmed artifact failures get a **durable 30-second delivery grace**. The interval starts on an authorized applied reconciliation and survives process restarts; read-only previews never start a durable timer. Late valid artifacts complete normally. If the interval expires with artifacts still failing and all other required checks passing, reconciliation records a failed delegation with `outcome="validation_failed"`. Autopilot can classify this as semantic failure and use its existing bounded replan allowance. Zero/exhausted allowance fails for human attention.
+
+Unreadable artifacts, missing backend observations, unresolved cancellation, denied authority, and unsatisfied required review never trigger this recovery. Validation verdict/check enums and fixed artifact failure codes are visible through delegation reads and Flight Deck; validation details, paths, bodies, and prompts are excluded from these receipts. Flight Deck remains read-only.
+
+## Deliverable isolation and plan replacement
+
+Each node's `expected_artifacts` basenames are carried into its immutable Work Contract as required, nonempty files. Each attempt has a separate workspace under the Hermes data root at `missions/artifacts/<task_id>/`; earlier attempts and other nodes cannot satisfy its local artifact check. Remote artifacts still require the existing coordinator-verified admission and contract binding. A completed execution with missing or empty artifacts remains unverified and cannot advance the node. File presence and size are acceptance checks; they do not prove the semantic quality of a deliverable.
+
+Replacing a plan is refused with `PLAN_IN_FLIGHT` while a scheduler pass, unfinished nodes/delegations, or a nonterminal Autopilot run exists. The replacement uses the same per-Mission scheduler lease, including the dispatch-before-node-write window. Stop Autopilot and resolve unfinished work before replacing a plan. Dry runs report the unfinished-work refusal without writing.
+
+Independent Mission reconciliation preserves the current Mission status while all failed attachments belong to classifier-approved, bounded Autopilot recovery. It reports their references in `recovery_pending` and retains the failed observations. This covers the interval before scheduler observation and retry backoff; it never claims success. Stopped/dead workers, expired runtime, exhausted attempts, unknown failures, terminal failed nodes, and missing or inconsistent lineage do not defer failure.

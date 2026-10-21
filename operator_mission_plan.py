@@ -33,9 +33,12 @@ Every public call is audited (refs / hashes / a bounded summary only).
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
 import re
+import secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +47,7 @@ from typing import Any
 import operator_mission_runtime as mission
 import operator_policy as op
 import operator_skill_resolution as skill_resolution
+from operator_contract import artifact_constraints
 from operator_swarm_workflows import CANONICAL_STAGE_SPECS, DEFAULT_OWNERS
 
 SCHEMA_VERSION = "0.9-plan.1"
@@ -121,6 +125,47 @@ class PlanVersionConflict(ValueError):
         super().__init__(f"plan version changed (expected {expected}, found {actual})")
         self.expected = expected
         self.actual = actual
+
+
+class PlanInFlightError(ValueError):
+    """Replacing a plan would orphan an active scheduler or unfinished work."""
+
+
+@contextlib.contextmanager
+def _replacement_lease(mission_id: str, hermes_root: Path | None):
+    # Serialize with both schedulers, including the dispatch-before-node-write
+    # window. Checking node state alone cannot close that window.
+    import operator_controller as controller
+
+    lock = f"plan-replace-{os.getpid()}-{secrets.token_hex(8)}"
+    with controller._connect(controller._db_path(hermes_root), write=True) as db:
+        lease = controller.acquire_lease(db, mission_id, "operator_request", ttl=60, lease_lock=lock)
+        if not lease.get("acquired"):
+            raise PlanInFlightError("A scheduler pass is active; stop and drain work before replacing the plan")
+        try:
+            yield
+        finally:
+            controller.release_lease(db, mission_id, lock)
+
+
+def _assert_replaceable(db: sqlite3.Connection, mission_id: str, hermes_root: Path | None) -> None:
+    import operator_autopilot as autopilot
+
+    active = db.execute(
+        "SELECT node_id FROM plan_nodes WHERE mission_id=? AND state IN "
+        "('dispatched','running','awaiting_review','validated','awaiting_approval','paused') LIMIT 1",
+        (mission_id,),
+    ).fetchone()
+    run = autopilot._read_run(mission_id, hermes_root)
+    if active or (run and run.get("state") not in autopilot.TERMINAL_STATES):
+        raise PlanInFlightError("Stop Autopilot and resolve unfinished plan nodes before replacing the plan")
+    current = mission._row_to_mission(db, mission._get_row(db, mission_id))
+    root = mission._root(hermes_root)
+    for attachment in current["attachments"]:
+        if attachment["kind"] == "delegation":
+            state, _, _ = mission._delegation_state(root, mission_id, attachment)
+            if state not in ("succeeded", "failed", "cancelled"):
+                raise PlanInFlightError("Resolve unfinished delegations before replacing the plan")
 
 
 # ---------------------------------------------------------------------------
@@ -335,8 +380,31 @@ def _node_contract_signature(node: dict[str, Any]) -> str:
         "budget": node["budget"],
         "expected_artifacts": node["expected_artifacts"],
     }
+    if node.get("artifact_requirements"):
+        skeleton["artifact_requirements"] = node["artifact_requirements"]
     enc = json.dumps(skeleton, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(enc.encode("utf-8")).hexdigest()
+
+
+def _clean_artifact_requirements(value: Any, artifacts: list[str]) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_ARTIFACTS:
+        raise ValueError("artifact_requirements must be a bounded list")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict) or set(item) - {"path", "min_bytes", "max_bytes", "sha256"}:
+            raise ValueError("artifact requirement fields must be path/min_bytes/max_bytes/sha256")
+        name = _clean_artifacts([item.get("path")])[0]
+        if name not in artifacts or name in seen:
+            raise ValueError("artifact requirement must match one unique expected_artifact")
+        minimum = item.get("min_bytes", 1)
+        if isinstance(minimum, bool) or not isinstance(minimum, int) or not 1 <= minimum <= 2**63 - 1:
+            raise ValueError("artifact min_bytes must be a positive bounded integer")
+        out.append({"path": name, "min_bytes": minimum, **artifact_constraints(item, minimum)})
+        seen.add(name)
+    return sorted(out, key=lambda item: item["path"])
 
 
 def _validate_node_dag(nodes: list[dict[str, Any]], *, uuid: set[str]) -> None:
@@ -408,6 +476,7 @@ def _canonical_node(raw: Any) -> dict[str, Any]:
     cap = _clean_capability_req(raw.get("capability_req"))
     budget = _clean_budget(raw.get("budget"))
     artifacts = _clean_artifacts(raw.get("expected_artifacts"))
+    requirements = _clean_artifact_requirements(raw.get("artifact_requirements"), artifacts)
     if kind == KIND_APPROVAL and artifacts:
         raise ValueError(f"approval node {node_id!r} must not declare expected_artifacts")
 
@@ -436,12 +505,15 @@ def _canonical_node(raw: Any) -> dict[str, Any]:
                 "capability_req": cap,
                 "budget": budget,
                 "expected_artifacts": artifacts,
+                "artifact_requirements": requirements,
             }
         ),
         "capability_req": cap,
         "budget": budget,
         "expected_artifacts": artifacts,
     }
+    if requirements:
+        node["artifact_requirements"] = requirements
     return node
 
 
@@ -730,6 +802,12 @@ def hermes_plan_create(
             raise PermissionError("direct plan creation requires confirm=true")
 
         if effective_dry:
+            path = _db_path(hermes_root)
+            if path.exists():
+                with _connect(path, write=False) as db:
+                    tables = db.execute("SELECT name FROM sqlite_master WHERE name='mission_plans'").fetchone()
+                    if tables and db.execute("SELECT 1 FROM mission_plans WHERE mission_id=?", (mission_id,)).fetchone():
+                        _assert_replaceable(db, mission_id, hermes_root)
             _audit("hermes_plan_create", policy, dry_run=True, success=True, changed=False,
                    mission_id=mission_id, extra={"node_count": len(plan["nodes"]), "plan_sha256": plan_sha})
             return json.dumps({
@@ -740,13 +818,15 @@ def hermes_plan_create(
             })
 
         path = _db_path(hermes_root)
-        with _connect(path, write=True) as db:
+        with _replacement_lease(mission_id, hermes_root), _connect(path, write=True) as db:
             _begin_write(db)
             mission._get_row(db, mission_id)  # verify mission exists (raises LookupError)
             now = _now()
             existing = db.execute(
                 "SELECT version FROM mission_plans WHERE mission_id=?", (mission_id,)
             ).fetchone()
+            if existing:
+                _assert_replaceable(db, mission_id, hermes_root)
             new_version = int(existing["version"]) + 1 if existing else int(plan.get("version", 1))
             store_plan = dict(plan)
             store_plan.pop("status", None)
@@ -784,6 +864,9 @@ def hermes_plan_create(
             "mission_id": mission_id, "version": new_version, "plan_sha256": plan_sha,
             "node_count": len(plan["nodes"]), "status": status, "changed": True, "dry_run": False,
         })
+    except PlanInFlightError as exc:
+        _audit("hermes_plan_create", policy, dry_run=dry_run, success=False, changed=False, mission_id=mission_id)
+        return _error(exc, "PLAN_IN_FLIGHT", "Stop the scheduler and resolve unfinished work before replacing the plan.")
     except skill_resolution.SkillRequirementsError as exc:
         _audit(
             "hermes_plan_create",
@@ -1140,7 +1223,11 @@ def _assert_rework_invariants(
         for key in ("kind", "owner", "capability_req", "budget", "expected_artifacts", "objective_sha256"):
             if new[key] != old[key]:
                 raise ValueError(f"rework patch may not change {key} of node {node_id!r}")
+        if new.get("artifact_requirements") != old.get("artifact_requirements"):
+            raise ValueError("rework patch may not change artifact acceptance requirements")
     clone, failed = new_by[clone_id], old_by[failed_id]
+    if clone.get("artifact_requirements") != failed.get("artifact_requirements"):
+        raise ValueError("rework clone must preserve artifact acceptance requirements")
     for key in ("kind", "owner", "capability_req", "budget", "expected_artifacts", "objective_sha256", "parents"):
         if clone[key] != failed[key]:
             raise ValueError(f"rework clone must copy {key} of the failed node")

@@ -1,4 +1,10 @@
-# Unified Delegation Lifecycle (v0.9)
+# Unified Delegation Lifecycle
+
+## v0.14 acceptance and delivery grace
+
+Delegation reads include a bounded `validation` summary (verdict, check kinds/statuses, fixed artifact failure codes) and `validation_failure_since`. No raw validation details or artifact bodies are persisted in these fields. Two metadata columns are migrated only on authorized writes; read-only calls do not migrate existing stores.
+
+Successful backend execution with confirmed bad required artifacts stays `reconciling` for a durable 30-second delivery grace. If the defect remains and every other required check passes, it becomes `failed` with `outcome="validation_failed"`. Autopilot may use its existing bounded semantic replan path. Missing/unreadable evidence, pending required review, authorization failures, and unresolved cancellation do not enter that path and never trigger optimistic redispatch. See [Autopilot acceptance](autopilot.md#declared-deliverable-acceptance-v014).
 
 Hermes GPT v0.9 adds a durable delegation lifecycle above Work Contracts and the existing execution backends. The delegation record is **lineage and state metadata**, not a second execution authority: runner, Fabric, Work Contract validation, and Operator policy remain authoritative for dispatch, observation, cancellation, and completion evidence.
 

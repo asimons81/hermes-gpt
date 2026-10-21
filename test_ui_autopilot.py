@@ -242,7 +242,8 @@ def test_summary_is_projected_through_an_allow_list(root, monkeypatch):
     monkeypatch.setattr(autopilot, "build_summary", lambda *a, **k: derived)
     summary = _get().json()["data"]["summary"]
     assert summary["needs_owner"] is True and summary["progress"]["percent"] == 33
-    assert summary["workers"] == [{"node_id": "a", "state": "dispatched", "attempt": 1, "delegation_state": "running"}]
+    assert summary["workers"] == [{"node_id": "a", "state": "dispatched", "attempt": 1, "delegation_state": "running",
+                                  "validation": {}, "validation_failure_since": ""}]
     assert summary["attention"] == [{"code": "owner_gate_node", "severity": "owner", "nodes": ["g"]}]
     text = json.dumps(summary)
     for forbidden in ("rza", "dlg-secretish", "hidden_extra", "internal_note", "scratch"):

@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.skipif(not Path("/proc/self/environ").exists(), reason="Linux /proc authority proof; portable Autopilot unit tests run on every OS")
+
 import operator_autopilot as autopilot
 import operator_job_supervisor as jobs
 import operator_mission_runtime as mission

@@ -8,6 +8,7 @@ persistence are all exercised end-to-end without any LLM call.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 import threading
@@ -95,6 +96,14 @@ def install_stub_agent(monkeypatch, **agent_kwargs):
 def isolated_ui_env(monkeypatch, tmp_path):
     """Point HERMES_HOME at a temp dir and reset module state per test."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    # Agent config/bootstrap integration is tested separately. Chat transport
+    # tests must not initialize or update an installed Agent runtime.
+    spec = importlib.util.spec_from_file_location("hermes_state", Path(__file__).with_name("hermes_state.py"))
+    shim = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "hermes_state", shim)
+    spec.loader.exec_module(shim)
+    monkeypatch.setattr(ui_chat, "_resolve_model", lambda: "test-model")
+    monkeypatch.setattr(ui_chat, "_resolve_toolsets", lambda: [])
     monkeypatch.delenv(ui_chat.UI_PROFILE_ENV, raising=False)
     monkeypatch.delenv(ui_chat.UI_TOOL_PREVIEW_BYTES_ENV, raising=False)
     monkeypatch.delenv(ui_chat.UI_MAX_CONCURRENT_ENV, raising=False)

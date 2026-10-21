@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-gpt"
-version = "0.13.0"
+version = "0.14.0"
 description = "Local-dev MCP sidecar for exposing selected Hermes Agent capabilities."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,6 +39,7 @@ hermes-gpt-fabric-peer = "operator_fabric_g4c:peer_main"
 include-package-data = true
 py-modules = [
   "server",
+  "jev_bridge",
   "oauth_auth",
   "operator_policy",
   "operator_cron",
@@ -100,18 +101,29 @@ py-modules = [
 ]
 
 [tool.setuptools.data-files]
+"share/hermes-gpt/web" = ["web/dist/*.html"]
+"share/hermes-gpt/web/assets" = ["web/dist/assets/*.js", "web/dist/assets/*.css"]
 "share/hermes-gpt" = [
   "README.md",
+  "AGENTS.md",
+  "BOUNDARY.md",
+  "RELEASE_CHECKLIST.md",
+  "LICENSE",
   "pyproject.toml",
   "CHANGELOG.md",
 ]
 "share/hermes-gpt/docs" = [
   "docs/README.md",
   "docs/oauth.md",
+  "docs/jev.md",
+  "docs/runtime-checkout.md",
+  "docs/vnext-capability-manifest-and-mission-ledger.md",
   "docs/operator-mode.md",
   "docs/finance.md",
   "docs/missions.md",
   "docs/autopilot.md",
+  "docs/release-notes-v0.13.0.md",
+  "docs/release-notes-v0.14.0.md",
   "docs/live-events.md",
   "docs/delegations.md",
   "docs/mcp-compatibility.md",

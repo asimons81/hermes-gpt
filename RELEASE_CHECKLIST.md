@@ -26,9 +26,10 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - Session-control gating, prompt non-persistence, fixed argv, concurrency bounds, timeout/result bounds, redaction, and restart orphan reconciliation must be green.
 - `python -m pytest test_operator_mission_runtime.py test_operator_delegations.py test_operator_live_events.py test_operator_finance.py test_operator_job_supervisor.py`
   - First-class Missions, unified delegation lineage, durable live-event delivery, bounded Finance bridge behavior, and restart-safe durable job supervision must all be green.
-- `python -m pytest test_operator_autopilot.py test_operator_autopilot_scheduler.py test_operator_autopilot_advance.py test_operator_autopilot_frontier.py test_operator_autopilot_recovery.py test_operator_autopilot_limits.py test_operator_autopilot_wakeup.py test_operator_autopilot_status.py test_operator_mission_supersede.py test_operator_plan_rework.py test_ui_autopilot.py test_operator_autopilot_acceptance.py`
+- `python -m pytest test_operator_autopilot.py test_operator_autopilot_scheduler.py test_operator_autopilot_advance.py test_operator_autopilot_frontier.py test_operator_autopilot_recovery.py test_operator_autopilot_limits.py test_operator_autopilot_wakeup.py test_operator_autopilot_status.py test_operator_mission_supersede.py test_operator_plan_rework.py test_ui_autopilot.py test_operator_autopilot_deliverables.py test_operator_autopilot_acceptance.py`
   - Autopilot must stay default off (tools registered only with `HERMES_GPT_AUTOPILOT=1`), must never dispatch or advance an approval or `high_impact` node, must never approve or complete a Mission, must complete nodes only on observed evidence, must hold new dispatch when the budget envelope is not verifiably within its limit, and must keep the same worker across an MCP server restart. The `superseded_by` marker tests (a forged or stale marker has no effect) must be green.
 - Run the Windows/Linux Python 3.10-3.12 CI matrix.
+- Run `npm ci`, `npm test`, and `npm run build` in `web/`; verify installed `/ui/ops/missions` navigation and read-only Autopilot supervision.
 
 ## 3. Release doctor
 
@@ -39,6 +40,7 @@ Use this checklist before publishing a Hermes GPT release artifact.
 
 ## 4. Package build and hygiene
 
+- Build the web UI first; confirm a clean wheel installation resolves the bundled Flight Deck index and assets.
 - `python -m build`
 - `python -m twine check dist/*`
 - Confirm wheel and sdist contain the current public docs expected by `pyproject.toml` / `MANIFEST.in`, including:
@@ -50,6 +52,9 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - `docs/session-control.md`
   - `docs/windows-chatgpt-codex.md`
   - `docs/updating.md`
+  - `docs/runtime-checkout.md`
+  - `docs/jev.md`
+  - `docs/vnext-capability-manifest-and-mission-ledger.md`
   - `docs/retention-policy.md`
   - current release notes
 - Run `python tools/check_package_hygiene.py dist/*` and require exit `0` / `CLEAN`.
@@ -58,7 +63,7 @@ Use this checklist before publishing a Hermes GPT release artifact.
 ## 5. Security invariants
 
 - Confirm default tools exclude write, patch, terminal, session search/history, and session control unless their explicit gates are enabled.
-- With `HERMES_GPT_ENABLE_SESSION_SEARCH=1`, confirm exactly `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, and `hermes_session_export` are exposed for session history.
+- With `HERMES_GPT_ENABLE_SESSION_SEARCH=1`, confirm `hermes_session_search`, `hermes_session_list`, `hermes_session_read`, `hermes_session_export`, and the canonical `hermes_bot_chat_get` resolver are exposed. `hermes_bot_chat_send` additionally requires `HERMES_GPT_ENABLE_SESSION_CONTROL=1`.
 - Confirm session history defaults to `user`/`assistant`; internal roles require `HERMES_GPT_ENABLE_SESSION_INTERNAL_CONTENT=1`.
 - Confirm session export stays in memory, enforces message/response bounds, creates no files or paths, and fails closed for lineage.
 - Confirm unavailable session FTS/search reports an unavailable limitation rather than falsely reporting no matches.
@@ -71,7 +76,7 @@ Use this checklist before publishing a Hermes GPT release artifact.
 - Confirm runner metadata and Operator audit records contain no raw prompts.
 - Confirm danger/bypass argv cannot be constructed through protected execution paths.
 - Confirm Owner Mode still denies secret paths.
-- Confirm `--profile remote` refuses to start without the explicit unsafe bypass.
+- Confirm `--profile remote` requires configured authentication and the existing TLS/loopback-proxy boundary. With neither authentication nor the two-part unsafe acknowledgement, startup must refuse; the unsafe no-auth experiment path is not release-safe.
 - Confirm README still states public unauthenticated Operator exposure is unsupported.
 
 ## 6. Retention
