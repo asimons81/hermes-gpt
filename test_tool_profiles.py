@@ -18,7 +18,7 @@ from test_tool_inventory import DEFAULT_TOOL_INVENTORY
 
 
 SURFACE_ENV = {server.op_finance.ENABLE_FINANCE_ENV: "1"}
-AUTOPILOT_TOOLS = {"hermes_autopilot_start", "hermes_autopilot_status", "hermes_autopilot_stop"}
+AUTOPILOT_TOOLS = {"hermes_autopilot_start", "hermes_autopilot_status", "hermes_autopilot_stop", "hermes_mission_launch"}
 RAW_HOST_TOOLS = {
     "hermes_read_file",
     "hermes_write_file",

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added `hermes_owner_inbox_ack` (always registered; workspace Operator level in direct apply mode, dry run by default). It hides Owner-inbox items by id and never approves or changes a Mission, plan, contract, or delegation.
+- Added `hermes_mission_launch`, the one-call Mission launch, registered only with `HERMES_GPT_AUTOPILOT=1`. Dry run by default; apply needs `confirm=true`. See [docs/autopilot.md](docs/autopilot.md#one-call-launch-v016).
+- Added the read-only `hermes_attention_delivery_status` tool, registered only with `HERMES_GPT_ATTENTION_DELIVERY=1`. It reports the relay's state and sends nothing. The relay is also available as the `hermes-gpt-attention-relay` console script. See [docs/attention-delivery.md](docs/attention-delivery.md).
+- Fixed the owner inbox `hermes_owner_inbox` MCP tool, which failed on its success path because of a positional argument.
+- Fixed contract review: the validator and the owner inbox read the whole review-acceptance store for the contract, so an acceptance written after many unrelated records now counts.
+- Tool count: the default connector surface is 139 tools. `HERMES_GPT_AUTOPILOT=1` adds 4, `HERMES_GPT_ATTENTION_DELIVERY=1` adds 1, `HERMES_GPT_ENABLE_JEV=1` adds 3, and `hermes_review_assess` adds 1 more when both Jev and review-assist gates are set.
+
 ## 0.15.0 - 2026-10-21
 
 Owner Loop: faster Owner decisions without new authority.

@@ -54,6 +54,8 @@ import operator_autopilot as op_autopilot
 import operator_finance as op_finance
 import operator_owner_inbox as op_owner_inbox
 import operator_review_assist as op_review_assist
+import operator_mission_launch as op_mission_launch
+import operator_attention_delivery as op_attention_delivery
 import jev_bridge
 import tool_profiles
 from versioning import VERSION
@@ -2671,6 +2673,27 @@ def hermes_owner_inbox(limit: int = 50, include_acknowledged: bool = False) -> s
     )
 
 
+def hermes_owner_inbox_ack(item_ids: list[str], dry_run: bool = True) -> str:
+    """Hide Owner-inbox items by id. Acknowledging is not handling and approves nothing.
+
+    Dry run by default. A direct write needs the workspace Operator level, direct apply mode and dry_run=false.
+    Only ids in the current inbox are acknowledged; others are reported as unknown.
+    """
+    return op_owner_inbox.hermes_owner_inbox_ack(
+        item_ids=item_ids,
+        dry_run=dry_run,
+        hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_attention_delivery_status() -> str:
+    """Read-only status of the attention delivery relay: configuration state and per-target health.
+
+    Registered only when HERMES_GPT_ATTENTION_DELIVERY=1. It reports and never sends a message.
+    """
+    return json.dumps(op_attention_delivery.status(_default_hermes_root()), sort_keys=True)
+
+
 async def hermes_review_assess(contract_sha256: str, artifact: str | None = None) -> str:
     """Advisory Jev score of a dispatched Work Contract's state. Sends text to TypeSafe; never evidence or acceptance.
 
@@ -2730,6 +2753,29 @@ def hermes_autopilot_stop(
     """Request that a Mission's Autopilot worker stop. Always allowed (the safe direction)."""
     return op_autopilot.hermes_autopilot_stop(
         mission_id, confirm=confirm, dry_run=dry_run, hermes_root=_default_hermes_root(),
+    )
+
+
+def hermes_mission_launch(
+    spec_json: str,
+    budget_json: str | None = None,
+    autopilot_limits_json: str | None = None,
+    dry_run: bool = True,
+    confirm: bool = False,
+) -> str:
+    """Objective to running Autopilot in one call: create Mission, derive plan, set budget, start Autopilot.
+
+    Dry run by default and writes nothing. Apply needs dry_run=false and confirm=true, plus the
+    workspace Operator level in direct apply mode and HERMES_GPT_AUTOPILOT=1. Approval is not
+    touched: the Mission still stops at awaiting_approval.
+    """
+    return op_mission_launch.hermes_mission_launch(
+        spec_json=spec_json,
+        budget_json=budget_json,
+        autopilot_limits_json=autopilot_limits_json,
+        dry_run=dry_run,
+        confirm=confirm,
+        hermes_root=_default_hermes_root(),
     )
 
 
@@ -3423,6 +3469,33 @@ def register_tools(server: FastMCP) -> None:
             openWorldHint=False,
         ),
     )
+    # Acknowledging hides an item only. It is always registered and gated
+    # internally (workspace level plus direct apply mode; dry run by default).
+    server.add_tool(
+        hermes_owner_inbox_ack,
+        meta=tool_meta(),
+        annotations=ToolAnnotations(
+            title="Hide Owner-inbox items by id (workspace direct; dry run by default)",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    # Attention relay status (v0.16): registered only when the relay is enabled.
+    # Read-only and never sends a message.
+    if op_attention_delivery.enabled():
+        server.add_tool(
+            hermes_attention_delivery_status,
+            meta=tool_meta(),
+            annotations=ToolAnnotations(
+                title="Attention delivery relay status (read-only; sends nothing)",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        )
 
     # First-class durable Mission runtime (v0.9). Authority is enforced by
     # operator_mission_runtime; list/get are read-only, mutations are
@@ -3516,6 +3589,18 @@ def register_tools(server: FastMCP) -> None:
         server.add_tool(hermes_autopilot_start, meta=tool_meta())
         server.add_tool(hermes_autopilot_status, meta=tool_meta())
         server.add_tool(hermes_autopilot_stop, meta=tool_meta())
+        # One-call launch (v0.16): same machine gate as the Autopilot tools.
+        server.add_tool(
+            hermes_mission_launch,
+            meta=tool_meta(),
+            annotations=ToolAnnotations(
+                title="One-call Mission launch (dry run by default; apply needs confirm and direct workspace)",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
+        )
 
     # Event history (v0.7 S4): read-only normalized timeline over durable
     # stores. Registered unconditionally; each tool enforces the per-client

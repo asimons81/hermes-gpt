@@ -34,7 +34,7 @@ For the current documentation map and source-of-truth rules, start with [docs/RE
 4. **Connector tool profiles** - `HERMES_GPT_TOOL_PROFILE` selects `full` (default), `operator` (without raw host primitives), or `chat-lean` (about 29 status and oversight tools). Profiles only remove tools and never bypass a gate. See [MCP compatibility](docs/mcp-compatibility.md#connector-tool-profiles).
 5. **Safer file backups** - `HERMES_GPT_OPERATOR_FILE_BACKUPS` disables backups only for an explicit `0`, `false`, `no`, `off`, or `disabled`; unset, empty, or unrecognized values keep them on. Thanks to @brunocasado for #85. See [Operator mode](docs/operator-mode.md#optional-file-backups).
 
-With optional gates unset the default connector surface is **138 tools**. `HERMES_GPT_AUTOPILOT=1` adds 3, `HERMES_GPT_ENABLE_JEV=1` adds 3, and `hermes_review_assess` adds 1 more when both Jev and review-assist gates are set. See [v0.15.0 release notes](docs/release-notes-v0.15.0.md) and the [CHANGELOG](CHANGELOG.md).
+With optional gates unset the default connector surface is **139 tools** (138 in v0.15.0, plus `hermes_owner_inbox_ack`). `HERMES_GPT_AUTOPILOT=1` adds 4 (the three Autopilot tools and `hermes_mission_launch`), `HERMES_GPT_ENABLE_JEV=1` adds 3, `HERMES_GPT_ATTENTION_DELIVERY=1` adds `hermes_attention_delivery_status`, and `hermes_review_assess` adds 1 more when both Jev and review-assist gates are set. See [v0.15.0 release notes](docs/release-notes-v0.15.0.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## What v0.14.0 adds
 
@@ -203,7 +203,7 @@ The v0.15.0 wheel and sdist are attached to the [GitHub v0.15.0 release](https:/
 
 ## Default local MCP surface
 
-With optional feature gates unset, the main server registers **138 tools**. The five core read-oriented tools are:
+With optional feature gates unset, the main server registers **139 tools**. The five core read-oriented tools are:
 
 - `hermes_read_file(path, offset=1, limit=500)`
 - `hermes_search_files(pattern, target="content", path=".", file_glob=None, limit=50)`

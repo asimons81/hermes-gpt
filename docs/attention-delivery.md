@@ -6,7 +6,7 @@ Status: **v0.16 source change; default off.** Verify the installed revision and 
 
 The attention delivery relay sends **new** [Owner inbox](owner-inbox.md) items to configured messaging targets. It is off unless the administrator sets `HERMES_GPT_ATTENTION_DELIVERY=1`. When off, every entry point is a no-op and returns `{"enabled": false}`.
 
-It is a **notification relay only**. It sends a short message saying something is waiting on the Owner. It does not approve, advance, reply to, or change anything, and a message never contains approvals or commands. Replying to a message does nothing. The Owner acts in Flight Deck or with the gated tools named in the message, under their normal gates.
+It is a **notification relay only**. Its MCP surface is one read-only status tool, `hermes_attention_delivery_status`, which is registered only when `HERMES_GPT_ATTENTION_DELIVERY=1` and never sends anything. It sends a short message saying something is waiting on the Owner. It does not approve, advance, reply to, or change anything, and a message never contains approvals or commands. Replying to a message does nothing. The Owner acts in Flight Deck or with the gated tools named in the message, under their normal gates.
 
 Code: `operator_attention_delivery.py`. Tests: `test_operator_attention_delivery.py`.
 
@@ -115,6 +115,7 @@ The first pass delivers every eligible item that has an `item_id` and is not sta
 ```bash
 python -m operator_attention_delivery --once                  # one pass (default)
 python -m operator_attention_delivery --watch --interval 60   # repeat until SIGTERM/SIGINT; 15-3600 s
+hermes-gpt-attention-relay --once                             # same as the module, from the installed package
 ```
 
 Exit codes: `0` on success or when disabled, `2` on configuration error (or an out-of-range `--interval`), `1` on an unexpected run failure. A pass that cannot take the state lock reports `status: skipped`, `reason: locked`.
@@ -157,7 +158,7 @@ Load it with `launchctl bootstrap gui/$(id -u) <plist>`. The example has no `Kee
 
 ## Status (read-only)
 
-`status(hermes_root)` returns the enabled flag, configuration state, each target with a masked form (phone shown as `+1•••4567`), last success and last error, failure count, next attempt, and pending count. It writes nothing. The Flight Deck and MCP surfaces do not expose it yet.
+`status(hermes_root)` returns the enabled flag, configuration state, each target with a masked form (phone shown as `+1•••4567`), last success and last error, failure count, next attempt, and pending count. It writes nothing. The MCP tool `hermes_attention_delivery_status()` returns the same JSON with no arguments; the server supplies the data root. The Flight Deck does not expose it.
 
 ## Safety boundary
 
@@ -168,12 +169,12 @@ Load it with `launchctl bootstrap gui/$(id -u) <plist>`. The example has no `Kee
 - **Redaction before send.** Summaries pass through the shared redactors and a local pass for bearer tokens, `sk-` keys, and `password=`/`token=`/`secret=`/`api_key=` assignments. Raw prompts, objectives, and transcripts are never read into a message.
 - **Fail closed.** Invalid configuration, an unreadable inbox, or an unreadable state file sends nothing.
 - **At-least-once, bounded.** An item is marked delivered only after success. If a send succeeds but the state file cannot be written, the next pass may send that item again, and the run reports `STATE_WRITE_FAILED`.
-- **Delivery is not acknowledgement.** The inbox has no acknowledgement path yet; `acknowledged` is honored only when another change sets it.
+- **Delivery is not acknowledgement.** Acknowledging an item with `hermes_owner_inbox_ack` stops future delivery of it. Delivery does not acknowledge anything.
 
 ## Limits
 
-- No reply handling, acknowledgement, or per-user routing.
-- No MCP tool or Flight Deck control; the relay runs only as a CLI.
+- No reply handling or per-user routing.
+- No delivery control over MCP or in the Flight Deck. The relay runs as a CLI, `python -m operator_attention_delivery` or the `hermes-gpt-attention-relay` console script.
 - `imsg` delivery has not been exercised live in development. Test with one of your own handles before relying on it.
 - Digest messages report counts and kinds, not per-item detail.
 

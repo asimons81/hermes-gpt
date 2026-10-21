@@ -10,7 +10,7 @@ This is the current operational guide. `docs/design/v0.13-autopilot.md` records 
 
 Autopilot needs both of these, in addition to the normal Operator policy:
 
-- the machine gate `HERMES_GPT_AUTOPILOT=1` (read live; unset means off). While it is unset the three tools below are **not registered**, so the default connector surface is unchanged by Autopilot (138 tools in v0.15.0); with it set there are three more.
+- the machine gate `HERMES_GPT_AUTOPILOT=1` (read live; unset means off). While it is unset the three tools below and `hermes_mission_launch` are **not registered**, so the default connector surface is unchanged by Autopilot (139 tools in the v0.16 default surface); with it set there are four more.
 - per call: Operator `workspace` level, direct apply mode, `dry_run=false`, and `confirm=true`. A dry run previews the start and writes nothing.
 
 ## Tools
@@ -51,7 +51,7 @@ hermes_mission_launch(spec_json, budget_json=None, autopilot_limits_json=None,
 - `budget_json` is `{"quota": <number>, "policy": {...}}`. `policy` is optional and is validated by `hermes_budget_set`.
 - `autopilot_limits_json` takes any of `max_concurrency`, `max_replans`, `max_attempts_per_node`, `max_runtime_seconds`. Omitted keys keep the `hermes_autopilot_start` defaults. Unknown keys are refused.
 
-**Current status.** This is a Python function in `operator_mission_launch.py`. It is not registered as an MCP tool in this release slice, because `server.py` is outside it. Until it is registered, call it from Python or through a registration change in the server.
+**Registration.** `hermes_mission_launch(spec_json, budget_json=None, autopilot_limits_json=None, dry_run=True, confirm=False)` is an MCP tool registered only when `HERMES_GPT_AUTOPILOT=1`, next to the Autopilot tools. The server wrapper passes `hermes_root` itself; it is not an MCP input. The logic lives in `operator_mission_launch.py`.
 
 **Dry run is the default.** `dry_run=True` runs each step in its preview form and writes nothing. Steps that need an id from an earlier step (plan, Autopilot) are validated with their own validators against a preview id, so no id is fabricated for the Owner to act on. The response has `steps` with outcomes `preview`, `would_run`, `refused`, or `skipped`, plus `would_start_autopilot` and `refusal`.
 

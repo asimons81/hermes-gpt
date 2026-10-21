@@ -136,6 +136,8 @@ Reading rules:
 
 ### Writer: `hermes_owner_inbox_ack`
 
+MCP tool: `hermes_owner_inbox_ack(item_ids, dry_run=True)`. It is always registered; the server supplies the data root. The MCP `hermes_owner_inbox` tool takes `limit` and `include_acknowledged`.
+
 Signature: `hermes_owner_inbox_ack(item_ids: list[str], dry_run: bool = True, hermes_root: Path | None = None) -> str`.
 
 **Gate:** the workspace Operator level plus direct apply mode, through `OperatorPolicy.require_level("workspace")` and `require_mutation(dry_run)`. Dry run is the default. Direct mode means `HERMES_GPT_OPERATOR_ENABLED=1`, `HERMES_GPT_OPERATOR_LEVEL` at least `workspace`, and `HERMES_GPT_OPERATOR_APPLY_MODE=direct`, with `dry_run=false`.
