@@ -16,7 +16,7 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.14.0**. The [GitHub v0.14.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0) and [PyPI 0.14.0 package](https://pypi.org/project/hermes-gpt/0.14.0/) are published; verify both channels independently when updating. Declared artifact size/digest checks and validation recovery require v0.14.0 or newer.
+Repository version: **0.14.0**. The [GitHub v0.14.0 release](https://github.com/asimons81/hermes-gpt/releases/tag/v0.14.0) and [PyPI 0.14.0 package](https://pypi.org/project/hermes-gpt/0.14.0/) are published; verify both channels independently when updating. Declared artifact size/digest checks and validation recovery require v0.14.0 or newer. Repository master also carries the unreleased campaign orchestration modules, which are not part of the 0.14.0 PyPI package; see [`campaigns.md`](campaigns.md).
 
 PyPI is an independent distribution channel. Check the PyPI badge in the root README before assuming `pip install hermes-gpt` contains a particular feature set; v0.13 Autopilot requires a published PyPI version of 0.13.0 or newer *and* `HERMES_GPT_AUTOPILOT=1`; v0.12 gated budget-enforcement and controller-L2 behavior requires a published PyPI version of 0.12.0 or newer *and* the corresponding machine gates armed; v0.11 Gemini Spark / Bot Chat / SDK 2 behavior requires a published PyPI version of 0.11.0 or newer; v0.10 vNext derived views / controller surfaces and v0.9 Mission/delegation/live-event behavior require 0.10.0 (or 0.9.0) or newer, respectively.
 
@@ -38,6 +38,7 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`finance.md`](finance.md) | current | bounded ChatGPT-to-Hermes Finance bridge, finance evidence/decision contracts, persistence boundary, activation, and verification |
 | [`missions.md`](missions.md) | current | v0.9 first-class Mission lifecycle, bounded context/skills manifests, attachments, reconciliation, and Owner approval |
 | [`autopilot.md`](autopilot.md) | current | v0.14 Autopilot: gates, declared artifact acceptance, delivery grace, bounded recovery, approval frontier, budgets, and status |
+| [`campaigns.md`](campaigns.md) | current (master-only) | master-ahead campaign orchestration — compiler, persistent controller, adoption lane, owner-approval work-class policy; no MCP tools or server wiring; declared in `py-modules` for the next package build, not in the published 0.14.0 package |
 | [`live-events.md`](live-events.md) | current | v0.9 durable event cursor/long-poll and authenticated WebSocket wake-up stream |
 | [`flight-deck-missions.md`](flight-deck-missions.md) | current | v0.9 read-only Mission/delegation Flight Deck views with durable live refresh |
 | [`delegations.md`](delegations.md) | current | v0.9 normalized delegation lifecycle across Pi/OpenCode/Codex/Fabric with durable lineage and reconciliation |
