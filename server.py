@@ -2657,13 +2657,18 @@ def hermes_controller_trigger(mission_id: str, trigger_kind: str, ref: str = "")
 # server's data root, matching the other operator wrappers.
 
 
-def hermes_owner_inbox(limit: int = 50) -> str:
+def hermes_owner_inbox(limit: int = 50, include_acknowledged: bool = False) -> str:
     """Read-only list of what is waiting on the Owner (approvals, Autopilot, controller attention).
 
     Lists items and suggests the existing gated tool to use; never approves, advances or changes anything.
+    Acknowledged items are hidden unless include_acknowledged is true.
     Check ``sources`` and ``complete`` before treating an empty list as no pending work.
     """
-    return op_owner_inbox.hermes_owner_inbox(limit, _default_hermes_root())
+    return op_owner_inbox.hermes_owner_inbox(
+        limit=limit,
+        include_acknowledged=include_acknowledged,
+        hermes_root=_default_hermes_root(),
+    )
 
 
 async def hermes_review_assess(contract_sha256: str, artifact: str | None = None) -> str:
