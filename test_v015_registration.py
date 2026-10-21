@@ -85,19 +85,20 @@ def test_neither_tool_exposes_hermes_root(monkeypatch):
 
 
 def test_owner_inbox_annotations_are_read_only_and_idempotent(monkeypatch):
-    ann = _surface(monkeypatch)[OWNER_INBOX].annotations
-    assert ann.readOnlyHint is True
-    assert ann.destructiveHint is False
-    assert ann.idempotentHint is True
-    assert ann.openWorldHint is False
+    # Wire (alias) form: SDK 1 and SDK 2 differ in attribute naming.
+    ann = _surface(monkeypatch)[OWNER_INBOX].model_dump(by_alias=True)["annotations"]
+    assert ann["readOnlyHint"] is True
+    assert ann["destructiveHint"] is False
+    assert ann["idempotentHint"] is True
+    assert ann["openWorldHint"] is False
 
 
 def test_review_assess_annotations_match_jev_style(monkeypatch):
-    ann = _surface(monkeypatch, gates=(JEV_GATE, REVIEW_GATE))[REVIEW_ASSESS].annotations
-    assert ann.readOnlyHint is True
-    assert ann.destructiveHint is False
-    assert ann.idempotentHint is False
-    assert ann.openWorldHint is True
+    ann = _surface(monkeypatch, gates=(JEV_GATE, REVIEW_GATE))[REVIEW_ASSESS].model_dump(by_alias=True)["annotations"]
+    assert ann["readOnlyHint"] is True
+    assert ann["destructiveHint"] is False
+    assert ann["idempotentHint"] is False
+    assert ann["openWorldHint"] is True
 
 
 def test_review_assess_wrapper_fails_closed_when_gates_off(monkeypatch):
