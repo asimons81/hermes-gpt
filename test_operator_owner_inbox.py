@@ -17,9 +17,12 @@ import pytest
 
 import operator_autopilot as autopilot
 import operator_controller as controller
+import operator_delegations as delegations
 import operator_mission_runtime as mission
 import operator_owner_inbox as inbox
 import operator_policy as op
+import operator_review as op_review
+import operator_runners as runners
 
 MID = "msn-inbox1"
 AUTO_MID = "msn-inboxauto"
@@ -90,10 +93,14 @@ def test_empty_root_has_no_items_and_is_complete(root):
     result = inbox.build_inbox(hermes_root=root)
     assert result["items"] == []
     assert result["count"] == 0 and result["truncated"] is False
-    assert result["sources"] == {"missions": "empty", "autopilot": "empty", "controller_attention": "empty"}
+    assert result["sources"] == {
+        "missions": "empty", "autopilot": "empty", "controller_attention": "empty",
+        "work_contract_review": "empty", "acks": "empty",
+    }
     assert result["complete"] is True
     assert result["read_only"] is True
-    assert "work_contract_review" in result["skipped_sources"]
+    assert result["skipped_sources"] == []
+    assert result["hidden_acknowledged"] == 0
 
 
 def test_awaiting_approval_mission_is_listed_with_approve_suggestion(root):
@@ -106,7 +113,10 @@ def test_awaiting_approval_mission_is_listed_with_approve_suggestion(root):
     assert item["suggested_tool"] == "hermes_mission_approve"
     assert item["requires"] == "owner"
     assert item["since"]
-    assert set(item) == {"kind", "mission_id", "summary", "since", "suggested_tool", "requires"}
+    assert set(item) == {
+        "item_id", "kind", "mission_id", "summary", "since", "suggested_tool", "requires", "acknowledged",
+    }
+    assert item["acknowledged"] is False
 
 
 def test_running_mission_is_not_listed(root):
@@ -261,3 +271,340 @@ def test_wrapper_never_approves_or_advances(root):
     finally:
         db.close()
     assert status == "awaiting_approval"
+
+
+# ---------------------------------------------------------------------------
+# Work Contract review source
+# ---------------------------------------------------------------------------
+
+REVIEW_TASK = "inbox-review-task"
+REVIEW_DLG = "dlg-inbox-review"
+CONTRACT_OBJECTIVE = "INBOX_OBJECTIVE_MUST_NOT_APPEAR"
+
+
+def _review_contract(workspace: Path, *, task_id: str, required: bool) -> dict:
+    return {
+        "schema": "hermes.work-contract/v1",
+        "task_id": task_id,
+        "assigned_agent": "coder",
+        "assigned_profile": "default",
+        "objective": CONTRACT_OBJECTIVE,
+        "allowed_scope": {"workspaces": [str(workspace)], "profiles": ["default"]},
+        "forbidden_actions": [],
+        "expected_artifacts": [],
+        "tests": [],
+        "review_requirements": {
+            "required": required,
+            "reviewer": "reviewer-two" if required else "",
+            "evidence": "",
+            "approval_required": False,
+        },
+        "completion_criteria": {
+            "run_state": {"terminal": True, "outcome_ok": ["completed"]},
+            "artifacts_present": False,
+            "tests_pass": False,
+            "review_satisfied": required,
+            "no_forbidden_actions": True,
+        },
+        "inputs": [],
+        "constraints": [],
+        # The parser requires approved_by and approval_reference. approved_by is the
+        # assignee profile, so the validator's human-approval evidence path (approver
+        # distinct from the assignee) cannot satisfy the review gate in these fixtures.
+        "authorization": {"class": "reversible_write", "approved": True, "approved_by": "default", "approval_reference": "inbox-test"},
+        "execution": {"backend": "pi_rpc", "options": {}},
+    }
+
+
+def _review_delegation(
+    root: Path, tmp_path: Path, monkeypatch, *, required: bool = True,
+    task_id: str = REVIEW_TASK, dlg: str = REVIEW_DLG,
+) -> dict:
+    """Dispatch a contract, let the backend report success, then reconcile it durably."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir(exist_ok=True)
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PATHS_ENV, str(workspace))
+    _create_mission(root)
+    monkeypatch.setattr(
+        delegations.contract_mod,
+        "hermes_contract_dispatch",
+        lambda *a, **k: json.dumps({"success": True, "changed": True, "backend": "pi_rpc", "state": "queued"}),
+    )
+    created = json.loads(delegations.hermes_delegation_dispatch(
+        json.dumps(_review_contract(workspace, task_id=task_id, required=required)),
+        mission_id=MID, delegation_id=dlg, confirm=True, dry_run=False, hermes_root=root,
+    ))
+    assert created["success"] is True, created
+    meta_path, _, _ = runners._job_paths(task_id, root)  # noqa: SLF001
+    runners._atomic_json(meta_path, {  # noqa: SLF001
+        "schema_version": runners.SCHEMA_VERSION,
+        "task_id": task_id,
+        "backend": "pi_rpc",
+        "state": "completed",
+        "outcome": "completed",
+        "created_at": "2026-08-22T00:00:00+00:00",
+        "started_at": "2026-08-22T00:00:01+00:00",
+        "ended_at": "2026-08-22T00:00:02+00:00",
+        "error": "",
+    })
+    reconciled = json.loads(delegations.hermes_delegation_reconcile(dlg, apply=True, hermes_root=root))
+    assert reconciled["success"] is True, reconciled
+    return reconciled["delegation"]
+
+
+def _accept_review(root: Path, monkeypatch, contract_sha256: str, task_id: str = REVIEW_TASK) -> None:
+    """Write a SATISFIED review acceptance by a reviewer distinct from the assignee (Owner gate)."""
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "owner")
+    monkeypatch.setenv(op.OWNER_ACTIVE_ENV, "1")
+    monkeypatch.setenv(op.OWNER_ACK_ENV, op.OWNER_ACK_REQUIRED_VALUE)
+    out = json.loads(op_review.hermes_review_accept(
+        contract_sha256, task_id, "default", "reviewer-two", "SATISFIED",
+        evidence_refs=["artifact:inbox-test"], dry_run=False, confirm=True, hermes_root=root,
+    ))
+    assert out["success"] is True, out
+
+
+def _kinds(result: dict) -> list[str]:
+    return [item["kind"] for item in result["items"]]
+
+
+def test_review_pending_item_is_listed_until_acceptance(root, tmp_path, monkeypatch):
+    delegation = _review_delegation(root, tmp_path, monkeypatch)
+    assert delegation["state"] == "reconciling"
+    assert delegation["validation"]["verdict"] == "NOT_SATISFIED"
+    before = _snapshot(root)
+    result = inbox.build_inbox(hermes_root=root)
+    assert _durable(_snapshot(root)) == _durable(before)  # the review source is a pure read
+    assert result["sources"]["work_contract_review"] == "ok"
+    assert result["skipped_sources"] == []
+    (item,) = [i for i in result["items"] if i["kind"] == "contract_review_pending"]
+    assert item["suggested_tool"] == "hermes_review_accept"
+    assert item["requires"] == "review"
+    assert item["mission_id"] == MID
+    assert delegation["contract_sha256"][:12] in item["summary"]
+    assert REVIEW_TASK in item["summary"]
+    assert CONTRACT_OBJECTIVE not in json.dumps(result)
+    assert len(item["summary"]) <= 240
+
+    _accept_review(root, monkeypatch, delegation["contract_sha256"])
+    cleared = inbox.build_inbox(hermes_root=root)
+    assert "contract_review_pending" not in _kinds(cleared)
+    assert cleared["sources"]["work_contract_review"] == "empty"
+
+
+def test_review_not_required_is_not_listed(root, tmp_path, monkeypatch):
+    delegation = _review_delegation(root, tmp_path, monkeypatch, required=False, task_id="inbox-no-review", dlg="dlg-inbox-noreview")
+    assert delegation["state"] == "succeeded"
+    result = inbox.build_inbox(hermes_root=root)
+    assert "contract_review_pending" not in _kinds(result)
+    assert result["sources"]["work_contract_review"] == "empty"
+
+
+def test_corrupt_delegation_store_makes_review_source_unavailable(root):
+    _create_mission(root)
+    _set_mission_status(root, MID, "awaiting_approval")
+    (root / "delegations").mkdir(parents=True, exist_ok=True)
+    (root / "delegations" / "delegations.db").write_bytes(b"this is not a sqlite database" * 50)
+    result = inbox.build_inbox(hermes_root=root)
+    assert result["sources"]["work_contract_review"] == "unavailable"
+    assert result["complete"] is False
+    assert result["sources"]["missions"] == "ok"
+    assert _kinds(result) == ["mission_awaiting_approval"]
+
+
+# ---------------------------------------------------------------------------
+# Stable item ids
+# ---------------------------------------------------------------------------
+
+
+def test_item_ids_are_stable_across_reads_and_distinct(root):
+    _create_mission(root)
+    _set_mission_status(root, MID, "awaiting_approval")
+    _waiting_run(root)
+    _spool(root)
+    first = inbox.build_inbox(hermes_root=root)
+    second = inbox.build_inbox(hermes_root=root)
+    ids = [i["item_id"] for i in first["items"]]
+    assert ids == [i["item_id"] for i in second["items"]]
+    assert len(ids) == 3 and len(set(ids)) == 3
+    for item_id in ids:
+        assert len(item_id) == 24 and set(item_id) <= set("0123456789abcdef")
+    (mission_item,) = [i for i in first["items"] if i["kind"] == "mission_awaiting_approval"]
+    expected = hashlib.sha256(f"mission_awaiting_approval|{MID}|awaiting_approval".encode()).hexdigest()[:24]
+    assert mission_item["item_id"] == expected
+    # Timestamps are not part of the id: a changed updated_at keeps the same id.
+    db = sqlite3.connect(root / "missions" / "missions.db")
+    try:
+        db.execute("UPDATE missions SET updated_at=? WHERE mission_id=?", ("2030-01-01T00:00:00+00:00", MID))
+        db.commit()
+    finally:
+        db.close()
+    later = inbox.build_inbox(hermes_root=root)
+    assert mission_item["item_id"] in [i["item_id"] for i in later["items"]]
+
+
+# ---------------------------------------------------------------------------
+# Acknowledgements
+# ---------------------------------------------------------------------------
+
+ACK_FILE = inbox.ACK_STORE_RELATIVE
+
+
+def _durable(snap: dict[str, tuple], *, exclude: tuple[str, ...] = ()) -> dict[str, tuple]:
+    """Durable files only: no directories, SQLite sidecars, or excluded paths."""
+    return {
+        k: v for k, v in snap.items()
+        if not v[0] and not k.endswith(("-shm", "-wal")) and k not in exclude
+    }
+
+
+def _awaiting_mission(root: Path) -> str:
+    _create_mission(root)
+    _set_mission_status(root, MID, "awaiting_approval")
+    (item,) = [i for i in inbox.build_inbox(hermes_root=root)["items"] if i["kind"] == "mission_awaiting_approval"]
+    return item["item_id"]
+
+
+def _ack(item_ids, *, dry_run: bool, root: Path) -> dict:
+    return json.loads(inbox.hermes_owner_inbox_ack(item_ids, dry_run=dry_run, hermes_root=root))
+
+
+def test_ack_dry_run_writes_nothing(root):
+    item_id = _awaiting_mission(root)
+    before = _snapshot(root)
+    out = _ack([item_id], dry_run=True, root=root)
+    assert out["success"] is True and out["dry_run"] is True and out["changed"] is False
+    assert out["planned"] == [item_id] and out["already_acknowledged"] == [] and out["unknown"] == []
+    assert not (root / ACK_FILE).exists()
+    assert _durable(_snapshot(root)) == _durable(before)
+
+
+def test_ack_refused_below_workspace_level(root, monkeypatch):
+    item_id = _awaiting_mission(root)
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "read_only")
+    out = _ack([item_id], dry_run=False, root=root)
+    assert out["success"] is False
+    assert "OWNER_INBOX_ACK_DENIED" in json.dumps(out)
+    assert not (root / ACK_FILE).exists()
+
+
+def test_ack_without_direct_apply_mode_is_a_dry_run_plan(root, monkeypatch):
+    # Same convention as hermes_mission_create: a non-direct apply mode turns a
+    # dry_run=False request into a plan, so nothing is written.
+    item_id = _awaiting_mission(root)
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "dry_run")
+    out = _ack([item_id], dry_run=False, root=root)
+    assert out["success"] is True and out["dry_run"] is True and out["changed"] is False
+    assert out["planned"] == [item_id]
+    assert not (root / ACK_FILE).exists()
+
+
+def test_real_ack_hides_item_and_include_flag_shows_it(root):
+    item_id = _awaiting_mission(root)
+    out = _ack([item_id], dry_run=False, root=root)
+    assert out["success"] is True and out["changed"] is True and out["acknowledged"] == [item_id]
+    lines = (root / ACK_FILE).read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert set(record) == {"item_id", "acked_at", "by"}
+    assert record["item_id"] == item_id and record["by"] == "owner_inbox_ack"
+
+    hidden = inbox.build_inbox(hermes_root=root)
+    assert hidden["items"] == [] and hidden["count"] == 0
+    assert hidden["hidden_acknowledged"] == 1
+    assert hidden["sources"]["acks"] == "ok" and hidden["complete"] is True
+
+    shown = inbox.build_inbox(hermes_root=root, include_acknowledged=True)
+    (item,) = shown["items"]
+    assert item["item_id"] == item_id and item["acknowledged"] is True
+    assert shown["hidden_acknowledged"] == 0
+
+    assert json.loads(inbox.hermes_owner_inbox(hermes_root=root))["count"] == 0
+    wrapped = json.loads(inbox.hermes_owner_inbox(include_acknowledged=True, hermes_root=root))
+    assert wrapped["success"] is True and wrapped["count"] == 1
+    assert inbox.acknowledged_ids(root) == {item_id}
+
+
+def test_ack_is_idempotent(root):
+    item_id = _awaiting_mission(root)
+    assert _ack([item_id], dry_run=False, root=root)["changed"] is True
+    again = _ack([item_id], dry_run=False, root=root)
+    assert again["success"] is True and again["changed"] is False
+    assert again["acknowledged"] == [] and again["already_acknowledged"] == [item_id]
+    assert len((root / ACK_FILE).read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_unknown_ids_are_reported_and_write_nothing(root):
+    _awaiting_mission(root)
+    unknown = "f" * 24
+    out = _ack([unknown], dry_run=False, root=root)
+    assert out["success"] is True and out["changed"] is False
+    assert out["unknown"] == [unknown] and out["acknowledged"] == []
+    assert not (root / ACK_FILE).exists()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param([], id="empty"),
+        pytest.param(["g" * 24], id="non-hex"),
+        pytest.param(["A" * 24], id="uppercase"),
+        pytest.param(["a" * 23], id="short"),
+        pytest.param([123], id="non-string"),
+        pytest.param(["0" * 24] * 51, id="too-many"),
+        pytest.param("0" * 24, id="not-a-list"),
+    ],
+)
+def test_malformed_ids_are_rejected(root, bad):
+    _awaiting_mission(root)
+    out = _ack(bad, dry_run=False, root=root)
+    assert out["success"] is False
+    assert "INVALID_OWNER_INBOX_ACK" in json.dumps(out)
+    assert not (root / ACK_FILE).exists()
+
+
+def test_include_acknowledged_must_be_a_bool(root):
+    with pytest.raises(ValueError):
+        inbox.build_inbox(hermes_root=root, include_acknowledged="yes")
+    bad = json.loads(inbox.hermes_owner_inbox(include_acknowledged="yes", hermes_root=root))
+    assert bad["success"] is False
+
+
+def test_corrupt_ack_store_is_unavailable_and_refuses_writes(root):
+    item_id = _awaiting_mission(root)
+    (root / ACK_FILE).parent.mkdir(parents=True, exist_ok=True)
+    (root / ACK_FILE).write_bytes(b"{not json\n")
+    result = inbox.build_inbox(hermes_root=root)
+    assert result["sources"]["acks"] == "unavailable"
+    assert result["complete"] is False
+    assert [i["item_id"] for i in result["items"]] == [item_id]
+    assert result["items"][0]["acknowledged"] is False
+    with pytest.raises(ValueError):
+        inbox.acknowledged_ids(root)
+    before = (root / ACK_FILE).read_bytes()
+    out = _ack([item_id], dry_run=False, root=root)
+    assert out["success"] is False and "OWNER_INBOX_ACK_STORE_UNAVAILABLE" in json.dumps(out)
+    assert (root / ACK_FILE).read_bytes() == before
+
+
+def test_ack_never_mutates_mission_plan_or_contract_stores(root, tmp_path, monkeypatch):
+    delegation = _review_delegation(root, tmp_path, monkeypatch)
+    _set_mission_status(root, MID, "awaiting_approval")
+    result = inbox.build_inbox(hermes_root=root)
+    ids = [i["item_id"] for i in result["items"]]
+    assert len(ids) == 2  # the mission item and the review item
+    before = _snapshot(root)
+    rows_before = _db_rows(root)
+    mission_before = json.loads(mission.hermes_mission_get(MID, hermes_root=root))
+
+    out = _ack(ids, dry_run=False, root=root)
+    assert out["success"] is True and sorted(out["acknowledged"]) == sorted(ids)
+
+    assert _durable(_snapshot(root), exclude=(ACK_FILE,)) == _durable(before, exclude=(ACK_FILE,))
+    assert _db_rows(root) == rows_before
+    mission_after = json.loads(mission.hermes_mission_get(MID, hermes_root=root))
+    assert mission_after["status"] == "awaiting_approval" == mission_before["status"]
+    assert mission_after == mission_before
+    still = json.loads(delegations.hermes_delegation_get(delegation["delegation_id"], hermes_root=root))
+    assert still["delegation"]["state"] == "reconciling"
+    assert inbox.build_inbox(hermes_root=root)["items"] == []

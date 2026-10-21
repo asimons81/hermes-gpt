@@ -41,7 +41,10 @@ def test_owner_inbox_empty_root_envelope(client):
     data = body["data"]
     assert data["items"] == [] and data["count"] == 0
     assert data["complete"] is True and data["read_only"] is True
-    assert data["sources"] == {"missions": "empty", "autopilot": "empty", "controller_attention": "empty"}
+    assert data["sources"] == {
+        "missions": "empty", "autopilot": "empty", "controller_attention": "empty",
+        "work_contract_review": "empty", "acks": "empty",
+    }
 
 
 def test_owner_inbox_lists_waiting_autopilot_run(client, isolate):
