@@ -175,6 +175,46 @@ def test_workspace_patch_can_disable_file_backups(workspace_tree, clean_env, aud
     assert list(workspace_tree.glob("README.md.bak.*")) == []
 
 
+@pytest.mark.parametrize("value", ["", "   ", "flase", "nope", "on-ish"])
+def test_workspace_patch_keeps_backups_for_empty_or_unrecognized_switch(
+    workspace_tree, clean_env, audit_override, monkeypatch, value
+):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PATHS_ENV, str(workspace_tree))
+    monkeypatch.setenv(ows.OPERATOR_FILE_BACKUPS_ENV, value)
+    target = workspace_tree / "README.md"
+    out = ows.hermes_workspace_patch(
+        path=str(target), old_string="# Project", new_string="# Typo Keeps Backup",
+        dry_run=False,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["backup"] is not None
+    assert len(list(workspace_tree.glob("README.md.bak.*"))) == 1
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", "disabled", " OFF ", "False"])
+def test_workspace_patch_recognized_false_values_disable_backups(
+    workspace_tree, clean_env, audit_override, monkeypatch, value
+):
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PATHS_ENV, str(workspace_tree))
+    monkeypatch.setenv(ows.OPERATOR_FILE_BACKUPS_ENV, value)
+    target = workspace_tree / "README.md"
+    out = ows.hermes_workspace_patch(
+        path=str(target), old_string="# Project", new_string="# Explicit Off",
+        dry_run=False,
+    )
+    parsed = json.loads(out)
+    assert parsed["success"] is True
+    assert parsed["backup"] is None
+    assert list(workspace_tree.glob("README.md.bak.*")) == []
+
+
 def test_workspace_write_file_direct_writes(workspace_tree, clean_env, audit_override, monkeypatch):
     monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
     monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
