@@ -32,6 +32,55 @@ Autopilot needs both of these, in addition to the normal Operator policy:
 | `max_attempts_per_node` | 3 | 1-10 | Attempts per node, first attempt included. |
 | `max_runtime_seconds` | 86400 | 60-604800 | After this the run starts no new work, drains what is in flight, and ends. |
 
+## One-call launch (v0.16)
+
+`hermes_mission_launch` (module `operator_mission_launch.py`) takes one MissionSpec from objective to a running Autopilot. It is a caller of the existing tools, in order, and adds no authority of its own:
+
+1. `hermes_mission_create` with `spec_json`
+2. `hermes_plan_create` with an empty `plan_json`, so the canonical plan is derived from the spec
+3. `hermes_budget_set`, only when `budget_json` is given
+4. `hermes_autopilot_start` with `autopilot_limits_json`
+
+Signature:
+
+```text
+hermes_mission_launch(spec_json, budget_json=None, autopilot_limits_json=None,
+                      dry_run=True, confirm=False, hermes_root=None)
+```
+
+- `budget_json` is `{"quota": <number>, "policy": {...}}`. `policy` is optional and is validated by `hermes_budget_set`.
+- `autopilot_limits_json` takes any of `max_concurrency`, `max_replans`, `max_attempts_per_node`, `max_runtime_seconds`. Omitted keys keep the `hermes_autopilot_start` defaults. Unknown keys are refused.
+
+**Current status.** This is a Python function in `operator_mission_launch.py`. It is not registered as an MCP tool in this release slice, because `server.py` is outside it. Until it is registered, call it from Python or through a registration change in the server.
+
+**Dry run is the default.** `dry_run=True` runs each step in its preview form and writes nothing. Steps that need an id from an earlier step (plan, Autopilot) are validated with their own validators against a preview id, so no id is fabricated for the Owner to act on. The response has `steps` with outcomes `preview`, `would_run`, `refused`, or `skipped`, plus `would_start_autopilot` and `refusal`.
+
+**Apply needs `dry_run=False` and `confirm=True`.** Without `confirm=true` the call is refused with `CONFIRM_REQUIRED` before anything is parsed or written.
+
+**Preflight (apply, and reported in dry run).** The launch checks the same conditions `hermes_autopilot_start` checks before a direct start:
+
+| Check | Refusal code |
+| --- | --- |
+| machine gate `HERMES_GPT_AUTOPILOT=1` | `AUTOPILOT_GATE_OFF` |
+| Operator enabled and at `workspace` level or higher | `OPERATOR_DISABLED`, `OPERATOR_LEVEL_INSUFFICIENT` |
+| effective apply mode `direct` (`HERMES_GPT_OPERATOR_APPLY_MODE=direct`) | `APPLY_MODE_NOT_DIRECT` |
+
+In `dry_run` apply mode, `dry_run=false` would be quietly turned into a preview by the underlying tools. The launch checks the effective mode and refuses instead, so it never reports a write that did not happen.
+
+**Refused before any write.** A launch is refused, with nothing created, when any of these hold: the preflight fails; `spec_json`, `budget_json`, or the limits are malformed or out of range; `final_approval_required` is `false` (`APPROVAL_REQUIRED_CANNOT_BE_DISABLED`); or the spec, derived plan (including required skills), or budget fails its own validator. In an apply, every step is previewed first, and the chain runs only if all of them are clean.
+
+**Approval is not touched.** The launch never approves anything and never sets `final_approval_required` to `false`. The Mission still stops at `awaiting_approval`, and completion still needs `hermes_mission_approve` in Owner mode. The launch refuses a spec that tries to disable it. `hermes_mission_create` also refuses it at workspace level, because creating an approval-free Mission requires Owner authority.
+
+**Budget is optional.** Without `budget_json`, the budget step is `skipped` and no envelope is created. Autopilot's budget gate reads a Mission with no budget account as unrestricted, so dispatch is not held. Only a crossing, invalid, or unreadable envelope holds dispatch (see [Enabling it](#enabling-it) and [What it will never do](#what-it-will-never-do)).
+
+**The derived plan is a draft.** `hermes_plan_create` stores the plan with status `draft`. Autopilot does not check plan review status, so a launched Mission dispatches its draft plan. Review the plan in dry run first if plan review matters for your Mission.
+
+**Partial failure.** Apply stops at the first refusal or error. The response lists `completed_steps`, `not_run_steps`, the `created` ids, and the `refusal` for the failing step. Nothing is rolled back: no deletion surface exists, so the Owner continues manually from the reported ids with the existing tools. A raised exception in a step is reported as `LAUNCH_STEP_ERROR` with the same partial state.
+
+**Re-running creates a new Mission.** There is no idempotency key. A second call with the same spec makes a second Mission with a new `mission_id`. Use the returned `mission_id` to find the first one. An explicit `mission_id` in the spec that already exists is refused by `hermes_mission_create` at apply, before any write, since dry run does not check for existing Missions.
+
+**Audit.** Each call writes one launch-level audit record (`tool` = `hermes_mission_launch`) with the Mission id, step outcomes, created ids, and refusal code. It has no objective, title, or other spec text. The underlying tools still write their own audit records.
+
 ## What the worker does
 
 The worker survives an MCP server restart or disconnect: it is a separate process, and every status read re-verifies it rather than trusting a cached record. Each pass (a "tick") it holds the controller's per-mission lease and:
