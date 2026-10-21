@@ -53,8 +53,15 @@ logger = logging.getLogger(__name__)
 
 #: Default spool root — must match the deployed supervisor unit
 #: (conductor-delegate-spool.service ``--spool``) and
-#: conductor ``delegate_spool.DEFAULT_SPOOL``.
-DEFAULT_SPOOL_ROOT = Path("/home/agent/.hermes/conductor-delegate-spool")
+#: conductor ``delegate_spool.DEFAULT_SPOOL``. Derived from the user's home
+#: at call time (never a hardcoded absolute home path — package-hygiene
+#: guard + portability); deployments that pin a different root set
+#: ``HERMES_GPT_DELEGATE_SPOOL_ROOT``.
+def _default_spool_root() -> Path:
+    return Path.home() / ".hermes" / "conductor-delegate-spool"
+
+
+DEFAULT_SPOOL_ROOT = _default_spool_root()
 
 #: Optional override mirroring conductor's file:// endpoint spelling.
 SPOOL_ROOT_ENV = "HERMES_GPT_DELEGATE_SPOOL_ROOT"

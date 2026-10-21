@@ -38,6 +38,10 @@ _EXPECTED_SKIPIF_COUNTS = {
     # (pytestmark skipif not Path("/proc/self/environ").exists()); portable
     # Autopilot acceptance tests must stay runnable on every OS.
     "test_operator_autopilot_acceptance.py": 1,
+    # TEST-01 editable-install freshness: the PEP-660 finder resolution
+    # check only applies when this package is installed editable in the
+    # running interpreter (dev/CI venvs: yes; bare wheel installs: no).
+    "test_editable_install_freshness.py": 1,
 }
 
 _SKIP_PATTERN = re.compile(r"\bskipif\b")
