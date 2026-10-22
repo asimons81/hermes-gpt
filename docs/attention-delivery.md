@@ -125,6 +125,8 @@ Output is one bounded JSON object per pass: `status`, `complete`, `items`, `targ
 
 ### Optional launchd service
 
+The relay reads the Owner inbox, so it needs the Operator enabled at the `read_only` level (`HERMES_GPT_OPERATOR_ENABLED=1`, `HERMES_GPT_OPERATOR_LEVEL=read_only`). Without it, the Missions source reports `unavailable`, and Missions awaiting approval are never sent. Give the relay its own read-only setting. Do not reuse a server's direct or Owner posture.
+
 `--watch` is an optional, separate service. Keep it off unless you want unattended notifications. Example user agent, with placeholder paths:
 
 ```xml
