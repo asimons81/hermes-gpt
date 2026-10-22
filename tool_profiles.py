@@ -56,6 +56,7 @@ CHAT_LEAN_TOOLS = frozenset(
         # Plans, delegations, budgets, contracts, reviews
         "hermes_plan_get",
         "hermes_plan_list",
+        "hermes_plan_approve_gate",
         "hermes_delegation_get",
         "hermes_delegation_list",
         "hermes_budget_get",

@@ -1605,7 +1605,8 @@ def _frontier_view(review: dict[str, Any], mission_status: str) -> dict[str, Any
     independent branches keep running. ``waiting`` is True only when the
     frontier is active and Autopilot has nothing else it could do, which is what
     ``waiting_for_owner`` means. Resolution stays exactly the existing owner
-    tools (``hermes_mission_approve`` / the owner's own node transitions).
+    tools (``hermes_mission_approve``, ``hermes_plan_approve_gate`` to approve a
+    gated node, or ``hermes_plan_node_transition`` to reject it).
     """
     nodes = review.get("nodes", [])
     ready = set(review.get("ready_nodes", []))

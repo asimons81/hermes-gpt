@@ -1533,6 +1533,7 @@ V09_CONNECTOR_ADDITIONS = [
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_delegation_dispatch",
     "hermes_delegation_get",
@@ -1573,8 +1574,9 @@ V09_CONNECTOR_ADDITIONS = [
 # + 4 mission-budget envelope tools (sibling t_78e597c6) + 4 placement-scoring
 # tools (sibling t_167ac591) + 4 failure-semantics tools (t_49bbc143) + 4
 # supervised-mission-controller tools (t_ad1e6d07).
-# v0.15 default surface (137 + hermes_owner_inbox) plus hermes_owner_inbox_ack in v0.16.
-V09_CONNECTOR_TOOL_COUNT = 139
+# v0.15 default surface (137 + hermes_owner_inbox) plus hermes_owner_inbox_ack in v0.16,
+# plus hermes_plan_approve_gate (Owner gate approval) in v0.16.1.
+V09_CONNECTOR_TOOL_COUNT = 140
 
 
 def test_v09_connector_surface_acceptance(monkeypatch):

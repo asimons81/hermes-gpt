@@ -47,7 +47,7 @@ def test_owner_inbox_registered_by_default(monkeypatch):
     tools = _surface(monkeypatch)
     assert OWNER_INBOX in tools
     assert REVIEW_ASSESS not in tools
-    assert len(tools) == 139
+    assert len(tools) == 140  # 139 at v0.16 + hermes_plan_approve_gate (v0.16.1)
 
 
 def test_owner_inbox_registered_under_chat_lean(monkeypatch):
@@ -74,8 +74,8 @@ def test_review_assess_present_with_both_gates(monkeypatch):
     tools = _surface(monkeypatch, gates=(JEV_GATE, REVIEW_GATE))
     assert REVIEW_ASSESS in tools
     assert OWNER_INBOX in tools
-    # 139 default + 3 Jev judgments + 1 review assess.
-    assert len(tools) == 143
+    # 140 default + 3 Jev judgments + 1 review assess.
+    assert len(tools) == 144
 
 
 def test_review_assess_present_under_chat_lean_with_both_gates(monkeypatch):
