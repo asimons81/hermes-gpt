@@ -23,6 +23,8 @@ interface GatedActionButtonProps {
   /** Called only after a real (non-dry-run) call succeeds, so the parent can refetch. */
   onApplied?: (result: unknown) => void;
   onError?: (message: string) => void;
+  /** Characters of the plan JSON shown in the dry-run preview (default 400). */
+  previewChars?: number;
 }
 
 interface PlanState {
@@ -40,6 +42,7 @@ export function GatedActionButton({
   onResult,
   onApplied,
   onError,
+  previewChars = 400,
 }: GatedActionButtonProps) {
   const [stage, setStage] = useState<'idle' | 'dryrun' | 'confirm' | 'busy' | 'done'>('idle');
   const [plan, setPlan] = useState<PlanState | null>(null);
@@ -106,7 +109,7 @@ export function GatedActionButton({
       {stage === 'dryrun' || stage === 'busy' ? (
         <div className="fd-gated-plan">
           {plan ? (
-            <pre className="fd-pre">{JSON.stringify(plan.plan, null, 2).slice(0, 400)}</pre>
+            <pre className="fd-pre">{JSON.stringify(plan.plan, null, 2).slice(0, previewChars)}</pre>
           ) : (
             <span className="fd-hint">Preparing plan…</span>
           )}
@@ -133,7 +136,7 @@ export function GatedActionButton({
       {stage === 'confirm' && plan ? (
         <div className="fd-gated-actions">
           <span className="fd-chip fd-chip--warn">CONFIRM REQUIRED</span>
-          <pre className="fd-pre">{JSON.stringify(plan.plan, null, 2).slice(0, 400)}</pre>
+          <pre className="fd-pre">{JSON.stringify(plan.plan, null, 2).slice(0, previewChars)}</pre>
           <button type="button" className="fd-btn fd-btn--ghost" onClick={() => setStage('idle')}>
             Cancel
           </button>

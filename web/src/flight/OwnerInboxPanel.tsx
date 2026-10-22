@@ -25,6 +25,8 @@ const WIRED_KINDS = new Set(['mission_awaiting_approval', 'autopilot_waiting_own
 const NODE_ID_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const APPROVAL_REFERENCE_MAX = 256;
 const SUMMARY_MAX = 240;
+// The dry-run preview lists the approve walk's steps; the default 400 cuts them off.
+const APPROVE_PREVIEW_CHARS = 1600;
 
 function sinceEpoch(item: OwnerInboxItem): number {
   if (item.since === null) return Number.NEGATIVE_INFINITY;
@@ -104,11 +106,13 @@ function AutopilotActions({ item, onApplied }: ActionProps) {
       {nodes.map((nodeId) => (
         <div key={nodeId} className="fd-stack">
           <span className="fd-mono">node {safeText(nodeId, 64)}</span>
+          {/* Approve walks the legal state path to completed server-side (hermes_plan_approve_gate). */}
           <GatedActionButton
-            tool="hermes_plan_node_transition"
-            args={{ mission_id: missionId, node_id: nodeId, target_state: 'completed' }}
+            tool="hermes_plan_approve_gate"
+            args={{ mission_id: missionId, node_id: nodeId }}
             label={`Approve node ${nodeId}…`}
             levelTag="owner"
+            previewChars={APPROVE_PREVIEW_CHARS}
             disabled={missionId === ''}
             onApplied={onApplied}
           />
