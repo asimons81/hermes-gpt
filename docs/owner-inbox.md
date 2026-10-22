@@ -168,7 +168,7 @@ Acknowledging never approves, transitions, or changes a Mission, plan, Work Cont
 Use the existing gated tools, not the inbox:
 
 - `mission_awaiting_approval`: inspect with `hermes_mission_get`, then `hermes_mission_approve` (Owner mode, dry-run first, `confirm=true` for a direct write). The Flight Deck offers this as Approve Mission….
-- `autopilot_waiting_owner`: inspect with `hermes_autopilot_status`. Resolve the frontier with `hermes_plan_node_transition` or `hermes_mission_approve`, under the same gates. The Flight Deck offers per-node approve and reject, and Stop Autopilot….
+- `autopilot_waiting_owner`: inspect with `hermes_autopilot_status`. Approve a frontier node with `hermes_plan_approve_gate` (one call; it walks the legal state path to `completed`), or reject it with `hermes_plan_node_transition` (`target_state` `failed`). `hermes_mission_approve` approves the Mission. All run under the same gates. The Flight Deck offers per-node approve and reject, and Stop Autopilot…. See [Owner gate approval](#owner-gate-approval-hermes_plan_approve_gate).
 - `budget_breaker`: inspect with `hermes_budget_check`.
 - `red_health`, `no_capable_target`: inspect with `hermes_controller_status`.
 - `contract_review_pending`: inspect with `hermes_delegation_get` for the full `contract_sha256`, then `hermes_review_accept`. That tool needs Owner Mode with a reviewer distinct from the assignee. It is dry-run by default, and a direct write needs `dry_run=false` with `confirm=true`. The item clears once the acceptance exists; the delegation state changes only after `hermes_delegation_reconcile`.
@@ -191,29 +191,59 @@ Two requests per action:
 | Item kind | Browser action | Tool | Server-side gate and checks |
 | --- | --- | --- | --- |
 | `mission_awaiting_approval` | Approve Mission… (the Owner enters an approval reference, 1 to 256 characters) | `hermes_mission_approve` (`mission_id`, `approval_reference`, `confirm`, `dry_run`) | The tool's own `require_owner`: Owner Mode, `HERMES_GPT_OPERATOR_LEVEL=owner`, `HERMES_GPT_OWNER_ACTIVE=1`, the owner acknowledgement, and direct apply mode for a write. Mission must be `awaiting_approval`, and its children terminal with a verified success. Owner Mode off returns the tool's refusal (`400 MISSION_APPROVAL_REJECTED`) and approves nothing. |
-| `autopilot_waiting_owner` | Approve node `<id>`… and Reject node `<id>`…, one pair per frontier node | `hermes_plan_node_transition` (`mission_id`, `node_id`, `target_state`, `reason`, `confirm`, `dry_run`) | Browser precheck, before the tool runs, described below. Then the tool's own transition check. |
+| `autopilot_waiting_owner` | Approve node `<id>`… and Reject node `<id>`…, one pair per frontier node | Approve: `hermes_plan_approve_gate` (`mission_id`, `node_id`, `confirm`, `dry_run`). Reject: `hermes_plan_node_transition` (`mission_id`, `node_id`, `target_state` = `failed`, `confirm`, `dry_run`) | Browser precheck for each, before the tool runs, described below. Then the tool's own check. |
 | `autopilot_waiting_owner` | Stop Autopilot… | `hermes_autopilot_stop` (`mission_id`, `confirm`, `dry_run`) | Workspace level and direct apply mode, as the tool requires. Not behind `HERMES_GPT_AUTOPILOT`: stopping is never gated behind the machine gate. |
 | every item | Acknowledge | `hermes_owner_inbox_ack` (`item_ids`: one id) | Workspace level and direct apply mode for a write, dry-run by default. Acknowledging hides the item only; it never resolves the condition. See [Acknowledgements](#acknowledgements). |
 
 Other kinds (`contract_review_pending`, `budget_breaker`, `red_health`, `no_capable_target`) have no browser action beyond Acknowledge. They show guidance text naming the MCP tool. `contract_review_pending` is not wired because the inbox item does not carry the fields `hermes_review_accept` needs (`contract_sha256`, `task_id`, `assignee`, `reviewer`, `verdict`, `evidence_refs`, `approval_reference`).
 
-### Approval-frontier restriction on `hermes_plan_node_transition`
+### Approval-frontier restriction
 
-The browser may call `hermes_plan_node_transition` only to resolve an approval frontier. Before the tool runs, `ui_ops.py` reads the plan read-only (`hermes_plan_get`) and refuses the request unless every check passes:
+Both browser resolutions of an approval frontier are restricted. `ui_ops.py` reads the plan read-only (`hermes_plan_get`) before the tool runs, derives the node from that read, and refuses the request unless every check passes. The plan `version` it reads is passed as `expected_plan_version`, so a plan replaced in between is refused by the tool's compare-and-swap (`PLAN_VERSION_CONFLICT`).
 
-1. The browser path requires Owner Mode (`require_owner`). This is stricter than the tool's own workspace gate: over MCP the same tool needs only workspace and direct mode.
-2. `target_state` is `completed` (approve) or `failed` (reject). These are the targets the plan state machine allows from `awaiting_approval`, derived as `NODE_TRANSITIONS["awaiting_approval"] - {"paused"}` in `operator_mission_plan.py`. `paused` is legal in the state machine but does not resolve the frontier, so it is excluded.
-3. The node exists in the plan, and it is an `approval` node or has `capability_req.authorization_class == "high_impact"`.
-4. The node is currently `awaiting_approval`, the gated state.
-5. The plan `version` read in check 3 is passed as `expected_plan_version`. If the plan was replaced in between, the tool refuses with `PLAN_VERSION_CONFLICT`.
+**Approve** (`hermes_plan_approve_gate`, `_precheck_approval_gate`):
 
-A failed check returns `400 APPROVAL_TRANSITION_REFUSED` with a fixed message. The owner check returns `403 LEVEL_REQUIRED` with `required: "owner"`. Nothing is written in any refusal case.
+1. Owner Mode (`require_owner`), the same check as `hermes_mission_approve`. Over MCP the tool also requires Owner Mode.
+2. The node exists, and it is an `approval` node or has `capability_req.authorization_class == "high_impact"`.
+3. The node is on the forward path to `completed`: `pending`, `blockable`, `dispatched`, `running`, `awaiting_review`, `validated`, or `awaiting_approval`.
+4. Every parent of the node is `completed`.
+
+**Reject** (`hermes_plan_node_transition`, `_precheck_approval_transition`):
+
+1. Owner Mode (`require_owner`). This is stricter than the tool's own workspace gate: over MCP the same tool needs only workspace and direct mode.
+2. `target_state` is `failed`. Approve is not a browser transition any more.
+3. The node exists, and it is an `approval` node or has `capability_req.authorization_class == "high_impact"`.
+4. The node is currently `awaiting_approval`. Over MCP the state machine also allows `pending -> failed`, but the browser reject still requires the frontier state.
+
+A failed check returns `400 APPROVAL_GATE_REFUSED` (approve) or `400 APPROVAL_TRANSITION_REFUSED` (reject), with a fixed message. The owner check returns `403 LEVEL_REQUIRED` with `required: "owner"`. Nothing is written in any refusal case.
 
 ### Refusals and refetch
 
 - A refusal shows the server's `code: message` in the item, verbatim. The message is the tool's own sanitized `safe_message`, produced by `operator_policy` before it reaches the envelope.
 - An applied action refetches the inbox. A dry run, or a confirm that did not apply, does not refetch.
 - An applied action is shown as `APPLIED`, with no second confirm for the same plan.
+
+## Owner gate approval (`hermes_plan_approve_gate`)
+
+Status: shipped in v0.16.1. An approval frontier node sits in `pending` until someone moves it, and the plan state machine reaches `completed` only through `awaiting_approval`. Before v0.16.1, approving one gate took six separate `hermes_plan_node_transition` calls, and the Flight Deck approve was refused for a `pending` gate. `hermes_plan_approve_gate` does the walk in one call.
+
+Code: `operator_mission_plan.hermes_plan_approve_gate`. Signature:
+
+```text
+hermes_plan_approve_gate(mission_id, node_id, reason="", confirm=False, dry_run=True,
+                         expected_plan_version=None)
+```
+
+- **Gates.** Owner Mode, checked as `hermes_mission_approve` checks it (`HERMES_GPT_OPERATOR_LEVEL=owner`, `HERMES_GPT_OWNER_ACTIVE=1`, the owner acknowledgement). Dry run is the default. A direct write needs direct apply mode, `dry_run=false`, and `confirm=true`.
+- **Scope.** Only gated nodes (`approval` kind, or `high_impact`). Any other node is refused with `NOT_A_GATED_NODE`. A node that is `completed`, `failed`, or `paused` is refused with `NODE_STATE_NOT_APPROVABLE`. A node with a parent that is not `completed` is refused with `GATE_NOT_REACHED`.
+- **The path.** The shortest legal path to `completed` is computed by breadth-first search over `NODE_TRANSITIONS`, with neighbours in sorted order. `paused` and `failed` are never intermediate states. From `pending` the path is `dispatched`, `running`, `awaiting_review`, `validated`, `awaiting_approval`, `completed`. From `validated` it is `awaiting_approval`, `completed`.
+- **Dry run.** Returns the planned `steps` and writes nothing.
+- **Apply.** Calls the existing `hermes_plan_node_transition` once per step, with `confirm=true`, `dry_run=false`, a reason of `owner gate approval: <reason>` (the caller's reason is bounded to 120 characters), and an `expected_plan_version` compare-and-swap. The plan is read again before each step. `expected_plan_version`, when given, must match the plan at the start (`PLAN_VERSION_CONFLICT` otherwise). Node transitions do not bump the plan version.
+- **Intermediate states are not claims.** `dispatched` through `awaiting_approval` are ordinary state-machine steps. They do not mean work ran or that review happened. The Owner's approval is the only thing this operation records. Autopilot still never advances a gated node: the approval is the owner decision it was waiting for, and once the node is `completed`, Autopilot dispatches the nodes that depended on it.
+- **No rollback.** A refused step stops the walk. The result (`GATE_STEP_FAILED`) lists `applied_steps`, `not_run_steps`, the failed step with its code, and the node's resulting `node_state`. The Owner resolves the rest with the existing tools.
+- **Audit.** One `hermes_plan_approve_gate` record per call, with the node's from-state, step and applied counts, the refusal code, and the reason bounded to 120 characters. Each applied step also writes its own `hermes_plan_node_transition` record, as before.
+
+Flight Deck: **Approve node** calls this tool, and its dry-run preview shows the steps. **Reject node** still calls `hermes_plan_node_transition` with `failed`. See [Flight Deck actions](#flight-deck-actions).
 
 ## Limits and boundaries
 

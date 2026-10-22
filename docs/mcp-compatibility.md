@@ -105,7 +105,7 @@ surface without changing any tool's behavior.
 
 | Value | Surface |
 | --- | --- |
-| unset or empty (default) | `full`: every registered tool, byte-identical to the unfiltered registration (139 tools in the pinned inventory: finance enabled, all other gates off). |
+| unset or empty (default) | `full`: every registered tool, byte-identical to the unfiltered registration (140 tools in the pinned inventory: finance enabled, all other gates off). |
 | `operator` | `full` minus the raw host primitives `hermes_read_file`, `hermes_write_file`, `hermes_patch`, `hermes_search_files`, `hermes_run_command`, and `hermes_memory`. |
 | `chat-lean` | Read-only status and oversight plus owner decisions, 30 tools with every gate off (v0.16.0; `HERMES_GPT_AUTOPILOT=1` adds the four Autopilot tools). The allowlist is `tool_profiles.CHAT_LEAN_TOOLS`. |
 

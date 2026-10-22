@@ -10,7 +10,7 @@ This is the current operational guide. `docs/design/v0.13-autopilot.md` records 
 
 Autopilot needs both of these, in addition to the normal Operator policy:
 
-- the machine gate `HERMES_GPT_AUTOPILOT=1` (read live; unset means off). While it is unset the three tools below and `hermes_mission_launch` are **not registered**, so the default connector surface is unchanged by Autopilot (139 tools in the v0.16 default surface); with it set there are four more.
+- the machine gate `HERMES_GPT_AUTOPILOT=1` (read live; unset means off). While it is unset the three tools below and `hermes_mission_launch` are **not registered**, so the default connector surface is unchanged by Autopilot (139 tools with every optional gate unset as of v0.16.1); with it set there are four more.
 - per call: Operator `workspace` level, direct apply mode, `dry_run=false`, and `confirm=true`. A dry run previews the start and writes nothing.
 
 ## Tools
@@ -93,7 +93,7 @@ Ticks are event-driven where possible (it long-polls the Mission's live events) 
 
 ## What it will never do
 
-- **Cross an approval boundary.** Approval nodes and `high_impact` nodes are never dispatched or advanced. Autopilot reports `waiting_for_owner` and dispatches nothing past that node; independent branches keep running. You resolve it with the existing tools, and Autopilot resumes.
+- **Cross an approval boundary.** Approval nodes and `high_impact` nodes are never dispatched or advanced. Autopilot reports `waiting_for_owner` and dispatches nothing past that node; independent branches keep running. You resolve it with an existing owner tool, under Owner Mode, and Autopilot resumes. To approve a gated node, call `hermes_plan_approve_gate` (v0.16.1): one call walks the legal state path to `completed`. To reject it, call `hermes_plan_node_transition` with `failed`. The Mission itself is approved with `hermes_mission_approve`. See [Owner gate approval](owner-inbox.md#owner-gate-approval-hermes_plan_approve_gate).
 - **Approve or complete the Mission.** Once every node is done it calls the existing Mission reconcile, which stops at `awaiting_approval` while final approval is required. Only `hermes_mission_approve`, in Owner mode, completes the Mission. The worker holds no Owner authority.
 - **Dispatch past a budget.** Before each new dispatch (retries included) it requires the budget envelope to be verifiably within its limit, and holds otherwise, whether or not the budget hard-block gates are armed. An unreadable or invalid envelope also holds. An account-less Mission is unrestricted. Observation of running work continues while held.
 - **Write against a replaced plan.** Its plan writes are compare-and-swap on the plan version; a replaced plan aborts the pass.
