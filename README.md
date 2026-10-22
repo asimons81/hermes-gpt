@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.14.0 — Acceptance and bounded recovery](https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.14.0-readme-hero.jpg)
+![Hermes GPT v0.16.1 — Close the Loop](https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.16.1-readme-hero.webp)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
