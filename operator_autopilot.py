@@ -1950,9 +1950,12 @@ def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
             if expired and _in_flight_count(mission_id, hermes_root) == 0:
                 # Out of time and nothing left to observe: end the run instead of
                 # idling. In-flight work is always drained first, never abandoned.
+                # Record the outcome before ending the job: a status read that sees
+                # the terminal job must also see why the run ended, not reconcile it
+                # to a reasonless "failed".
+                _write_run(mission_id, hermes_root, state="failed", last_error="max_runtime_exceeded")
                 job_supervisor.terminalize(job_id, "timed_out", summary="max_runtime_seconds exceeded",
                                            hermes_root=hermes_root)
-                _write_run(mission_id, hermes_root, state="failed", last_error="max_runtime_exceeded")
                 return 0
             frontier = tick.get("frontier")
             if frontier is not None:
@@ -1967,11 +1970,14 @@ def _worker(mission_id: str, job_id: str, hermes_root: Path | None) -> int:
                 wakeups[reason] += 1
             _write_run(mission_id, hermes_root, last_event_cursor=cursor, last_wake=reason, wakeups=dict(wakeups))
     except Exception as exc:  # noqa: BLE001 - a durable worker must fail closed, never crash silently
+        # Record why before ending the job, so status never shows a reasonless failure.
         try:
-            job_supervisor.terminalize(job_id, "failed", summary=op.redact_output(str(exc))[:500], hermes_root=hermes_root)
-        except FileNotFoundError:
-            pass
-        _write_run(mission_id, hermes_root, state="failed", last_error=op.redact_output(f"{type(exc).__name__}: {exc}")[:200])
+            _write_run(mission_id, hermes_root, state="failed", last_error=op.redact_output(f"{type(exc).__name__}: {exc}")[:200])
+        finally:
+            try:
+                job_supervisor.terminalize(job_id, "failed", summary=op.redact_output(str(exc))[:500], hermes_root=hermes_root)
+            except FileNotFoundError:
+                pass
         return 1
 
 
