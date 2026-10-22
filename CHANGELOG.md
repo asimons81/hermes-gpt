@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.16.1 - 2026-10-22
+
+- Attention delivery: iMessage sends that `imsg` cannot confirm (`retry_safe: false` / "Delivery outcome unknown") or that time out after the request was written are recorded as delivered, flagged `SENT_UNVERIFIED` in `last_warning`, and never resent. Previously each relay pass would have resent them, duplicating messages that had already arrived. Found in the first live iMessage test.
+
 ## 0.16.0 - 2026-10-21
 
 Close the loop: what waits on the Owner now reaches them and can be resolved in one place, with no new authority.

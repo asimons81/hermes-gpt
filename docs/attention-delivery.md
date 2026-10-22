@@ -28,6 +28,7 @@ Code: `operator_attention_delivery.py`. Tests: `test_operator_attention_delivery
 
 - An item is marked delivered **only after its backend reports success**.
 - A failed target records a bounded error code: `TIMEOUT`, `EXIT_<n>`, `BAD_RESPONSE`, `NOT_CONFIGURED`, or `SPAWN_FAILED`. It backs off exponentially per target (30 s, doubling, capped at 1 h) and is not retried inside the window. Other targets keep going.
+- iMessage delivery is at most once. If `imsg` reports that a send may have completed but cannot confirm it (`retry_safe: false`, for example "Delivery outcome unknown"), or the `imsg` child times out after the request was written, the item is recorded as delivered and never resent. The target's `last_warning` shows `SENT_UNVERIFIED`. This is common when the conversation with the handle is labelled SMS in Messages. Other `imsg` errors still fail and back off.
 - State lives in `missions/attention_delivery_state.json` under the Hermes data root. It is written atomically, pruned to 14 days and at most 2,000 entries per target, and protected by a single-writer lock (`missions/attention_delivery.lock`). If the state file is unreadable, nothing is sent.
 
 ## Configuration
