@@ -550,6 +550,7 @@ def test_action_cron_run_long_running_dispatched_202(client, monkeypatch, tmp_pa
 NEW_TOOLS = (
     "hermes_mission_approve",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_autopilot_stop",
     "hermes_owner_inbox_ack",
 )
@@ -682,22 +683,92 @@ def test_mission_approve_confirm_calls_real_function_with_server_root(client, mo
     assert calls[-1]["hermes_root"] == ui_ops._resolve_root()  # noqa: SLF001 - server-resolved, never client-sent
 
 
-def test_node_transition_approves_an_approval_gate_with_owner(client, ops_root, monkeypatch):
-    root, backend = ops_root
+def test_approve_gate_browser_dry_run_lists_steps_then_confirm_completes_the_gate(client, ops_root, monkeypatch):
+    root, _ = ops_root
     _set_env(monkeypatch, OWNER_ENV)
     _mk(root, [_node("a"), _gate("gate", ["a"]), _node("c", ["gate"])])
-    _gate_at_awaiting(root)
-    args = {"mission_id": MID, "node_id": "gate", "target_state": "completed", "reason": "reviewed"}
+    _walk(root, "a", ("dispatched", "running", "awaiting_review", "validated", "awaiting_approval", "completed"))
+    args = {"mission_id": MID, "node_id": "gate"}
 
-    dry = _post(client, "hermes_plan_node_transition", args)
+    dry = _post(client, "hermes_plan_approve_gate", args)
     assert dry.status_code == 200
     assert dry.json()["data"]["requires_confirm"] is True
-    assert dry.json()["data"]["result"]["from_state"] == "awaiting_approval"
-    assert _states(root)["gate"] == "awaiting_approval"
+    steps = dry.json()["data"]["result"]["steps"]
+    assert [s["to_state"] for s in steps] == ["dispatched", "running", "awaiting_review", "validated", "awaiting_approval", "completed"]
+    assert _states(root)["gate"] == "pending"
 
-    real = _post(client, "hermes_plan_node_transition", {**args, "confirm": True}, dry_run=False)
+    real = _post(client, "hermes_plan_approve_gate", {**args, "confirm": True}, dry_run=False)
     assert real.status_code == 200 and real.json()["data"]["dry_run"] is False
     assert _states(root)["gate"] == "completed"
+
+
+def test_approve_gate_browser_server_derives_the_plan_version_not_the_client(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_gate("gate")])
+    # The browser cannot send expected_plan_version: it is not an allowed argument.
+    resp = _post(client, "hermes_plan_approve_gate", {"mission_id": MID, "node_id": "gate", "expected_plan_version": 1})
+    assert resp.status_code == 400 and resp.json()["error"]["code"] == "INVALID_ARGS"
+    assert _states(root)["gate"] == "pending"
+
+
+def test_approve_gate_browser_owner_off_is_refused_before_any_write(client, ops_root):
+    root, _ = ops_root  # workspace level from make_env: Owner Mode is not active
+    _mk(root, [_gate("gate")])
+    resp = _post(client, "hermes_plan_approve_gate", {"mission_id": MID, "node_id": "gate", "confirm": True}, dry_run=False)
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "LEVEL_REQUIRED"
+    assert resp.json()["error"].get("required") == "owner"
+    assert _states(root)["gate"] == "pending"
+
+
+def test_approve_gate_browser_refuses_a_non_gated_node(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_node("a"), _gate("gate", ["a"])])
+    resp = _post(client, "hermes_plan_approve_gate", {"mission_id": MID, "node_id": "a", "confirm": True}, dry_run=False)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "APPROVAL_GATE_REFUSED"
+    assert "not an approval or high_impact" in resp.json()["error"]["message"]
+    assert _states(root)["a"] == "pending"
+
+
+def test_approve_gate_browser_refuses_a_gate_whose_parents_are_not_completed(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_node("a"), _gate("gate", ["a"])])
+    resp = _post(client, "hermes_plan_approve_gate", {"mission_id": MID, "node_id": "gate", "confirm": True}, dry_run=False)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "APPROVAL_GATE_REFUSED"
+    assert _states(root)["gate"] == "pending"
+
+
+def test_approve_gate_browser_refuses_a_failed_gate(client, ops_root, monkeypatch):
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_gate("gate")])
+    _walk(root, "gate", ("failed",))
+    resp = _post(client, "hermes_plan_approve_gate", {"mission_id": MID, "node_id": "gate", "confirm": True}, dry_run=False)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "APPROVAL_GATE_REFUSED"
+    assert _states(root)["gate"] == "failed"
+
+
+def test_node_transition_browser_no_longer_approves_a_gate(client, ops_root, monkeypatch):
+    # Approve moved to hermes_plan_approve_gate. The browser transition is reject-only.
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_node("a"), _gate("gate", ["a"])])
+    _gate_at_awaiting(root)
+    resp = _post(
+        client, "hermes_plan_node_transition",
+        {"mission_id": MID, "node_id": "gate", "target_state": "completed", "confirm": True},
+        dry_run=False,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "APPROVAL_TRANSITION_REFUSED"
+    assert "hermes_plan_approve_gate" in resp.json()["error"]["message"]
+    assert _states(root)["gate"] == "awaiting_approval"
 
 
 def test_node_transition_rejects_a_high_impact_node_too(client, ops_root, monkeypatch):
@@ -714,7 +785,7 @@ def test_node_transition_rejects_a_high_impact_node_too(client, ops_root, monkey
     assert _states(root)["h"] == "failed"
 
 
-@pytest.mark.parametrize("target", ["paused", "blockable", "dispatched", "running", "validated", "pending", "awaiting_approval"])
+@pytest.mark.parametrize("target", ["completed", "paused", "blockable", "dispatched", "running", "validated", "pending", "awaiting_approval"])
 def test_node_transition_refuses_targets_that_do_not_resolve_the_gate(client, ops_root, monkeypatch, target):
     root, _ = ops_root
     _set_env(monkeypatch, OWNER_ENV)
@@ -737,14 +808,24 @@ def test_node_transition_refuses_a_non_gated_node(client, ops_root, monkeypatch)
     assert _states(root)["a"] == "pending"
 
 
-def test_node_transition_refuses_a_gate_not_awaiting_approval(client, ops_root, monkeypatch):
+def test_node_transition_refuses_a_reject_of_a_gate_not_yet_reached(client, ops_root, monkeypatch):
     root, _ = ops_root
     _set_env(monkeypatch, OWNER_ENV)
     _mk(root, [_node("a"), _gate("gate", ["a"])])
-    resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "gate", "target_state": "completed", "confirm": True}, dry_run=False)
+    resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "gate", "target_state": "failed", "confirm": True}, dry_run=False)
     assert resp.status_code == 400
-    assert "not awaiting approval" in resp.json()["error"]["message"]
+    assert "not been reached" in resp.json()["error"]["message"]
     assert _states(root)["gate"] == "pending"
+
+
+def test_node_transition_rejects_a_reached_pending_gate(client, ops_root, monkeypatch):
+    # Autopilot leaves a reached gate in pending; the Owner can reject it directly.
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_gate("gate", [])])
+    resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "gate", "target_state": "failed", "confirm": True}, dry_run=False)
+    assert resp.status_code == 200, resp.json()
+    assert _states(root)["gate"] == "failed"
 
 
 def test_node_transition_owner_off_is_refused_before_any_plan_read(client, ops_root):

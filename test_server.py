@@ -1533,6 +1533,7 @@ V09_CONNECTOR_ADDITIONS = [
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_delegation_dispatch",
     "hermes_delegation_get",
@@ -1573,8 +1574,9 @@ V09_CONNECTOR_ADDITIONS = [
 # + 4 mission-budget envelope tools (sibling t_78e597c6) + 4 placement-scoring
 # tools (sibling t_167ac591) + 4 failure-semantics tools (t_49bbc143) + 4
 # supervised-mission-controller tools (t_ad1e6d07).
-# v0.15 default surface (137 + hermes_owner_inbox) plus hermes_owner_inbox_ack in v0.16.
-V09_CONNECTOR_TOOL_COUNT = 139
+# v0.15 default surface (137 + hermes_owner_inbox) plus hermes_owner_inbox_ack in v0.16,
+# plus hermes_plan_approve_gate (Owner gate approval) in v0.16.1.
+V09_CONNECTOR_TOOL_COUNT = 140
 
 
 def test_v09_connector_surface_acceptance(monkeypatch):
@@ -1591,7 +1593,7 @@ def test_v09_connector_surface_acceptance(monkeypatch):
     assert len(set(names)) == len(names), "duplicate tool registration"
 
     # serverInfo.version must track the checkout version, not the SDK version.
-    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.16.0"
+    assert (built.version if hasattr(built, "version") else built._mcp_server.version) == versioning.VERSION == "0.16.1"
 
 
 def test_history_enabled_connector_surface_acceptance(monkeypatch):
@@ -1624,7 +1626,7 @@ def test_history_enabled_connector_surface_acceptance(monkeypatch):
         schema = enabled_by_name[name].model_dump(by_alias=True)["inputSchema"]
         assert schema["properties"]["profile"]["default"] == "default"
 
-    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.16.0"
+    assert (enabled.version if hasattr(enabled, "version") else enabled._mcp_server.version) == versioning.VERSION == "0.16.1"
 
 
 # Autopilot-gated surface: the three Autopilot tools plus the v0.16 one-call launch.

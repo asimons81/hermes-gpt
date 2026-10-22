@@ -84,6 +84,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -171,7 +172,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "fa9e3345bf31778b4891e4cdf31eb6b54e7864f38e97932ed5613f7559a1f25c"
+   "sha256": "805dc98a176dab364dc1184ac20b8d79135b0c57e8304b6944413a35b0d5bc81"
   },
   "all_but:autopilot": {
    "auth": "noauth",
@@ -254,6 +255,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -337,7 +339,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "ca3a03d421972e3800fbcbd2397c0fd37b805b65e15d235ae2eb86068717b936"
+   "sha256": "a70c10b4275b745e5252840d19a3541ea91e797275d5a6a49573567a9f149889"
   },
   "all_but:finance": {
    "auth": "noauth",
@@ -419,6 +421,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -506,7 +509,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "69a96ac6b2d8cbf218c5b6e2bba5007a1133a7e3ef092ee8d15735e21170ceaa"
+   "sha256": "98858e5e87252e880df4cdc584c546e0ceb9bbfd858f17eda1b3ec75d89fb44f"
   },
   "all_but:jev": {
    "auth": "noauth",
@@ -585,6 +588,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -672,7 +676,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "8918e46722381a7fb581438beafad88253f667ef10a9bcdd97ceff5bb21d1034"
+   "sha256": "7ba2954698b3443339ce7b5c4396ae326c9023f4b0b4cb1fda008ecfcb485180"
   },
   "all_but:memory_write": {
    "auth": "noauth",
@@ -755,6 +759,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -842,7 +847,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "a9c46181de595436050c77226c6e78bd7b136bd20f4361d2a2da927fbfc9fe0e"
+   "sha256": "ad67c6a82033fe68c6b0409bcbf2818c3036f4ca2313193e45f9ad877d9ff02e"
   },
   "all_but:review_assist": {
    "auth": "noauth",
@@ -924,6 +929,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -1011,7 +1017,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "d7e4ba62308ac3650b6d26e2a573b2d975cd889a7ac8781531441bdd5bd85a15"
+   "sha256": "56fb14be46ceee5333b57638dc1ee3c32493de9fb18f1099e9d5a0815c33f377"
   },
   "all_but:session_control": {
    "auth": "noauth",
@@ -1089,6 +1095,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -1176,7 +1183,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "2d83558bfbbf337d586741ea1b5e0bf0c7393a70d70f6fa8d96cda1205cda763"
+   "sha256": "8ccbc87b881123cdd2cec7bffc8c2d563b6df014cf33965c4190dbb4c8ed04ea"
   },
   "all_but:session_search": {
    "auth": "noauth",
@@ -1253,6 +1260,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -1340,7 +1348,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "e3cacdf46f5b6b50bcdf209f35d9b07486c2427071e65a5c4dd0145abba88e24"
+   "sha256": "883696f6ea6be839549567f76f0b27641cc5fd72b23daa5d85f89aff1c3c43cb"
   },
   "all_but:terminal": {
    "auth": "noauth",
@@ -1422,6 +1430,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -1509,7 +1518,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "1227629c5aa08a0e062cc8b82f06014dad1476ad257d0425d449d15a3e4f394a"
+   "sha256": "b65b56d59e96473b43cb8bf95be56206b959f57c55c63c28351a012f58969099"
   },
   "all_but:vision": {
    "auth": "noauth",
@@ -1591,6 +1600,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -1678,7 +1688,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "d3634df586dea4384f71082071a02c4177f0ed3b172e960a36823270310791e4"
+   "sha256": "32a20f4f324f77ed23419a69a2ba80b2e168380b2ee2aa970a4cb9a9074d68be"
   },
   "all_but:web": {
    "auth": "noauth",
@@ -1759,6 +1769,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -1846,7 +1857,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "b0c6b6d60ac73ad70ba5c1920cf161581a5436ca482876363b9f80463bda209e"
+   "sha256": "955f8c0a9bca159e324728eff347e073b665de082d6e3bb3cf3a849265adbb37"
   },
   "all_but:write": {
    "auth": "noauth",
@@ -1927,6 +1938,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -2014,7 +2026,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "86c46d95a9d947e0d3b39ffa598a9e95d3fe098402c13f094375e0cd9401b603"
+   "sha256": "7bfb1e48136e632ab12c56891673a0c444a398c69400c491f5a2b76b11b1218e"
   },
   "all_on": {
    "auth": "noauth",
@@ -2097,6 +2109,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -2184,7 +2197,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "a9c46181de595436050c77226c6e78bd7b136bd20f4361d2a2da927fbfc9fe0e"
+   "sha256": "ad67c6a82033fe68c6b0409bcbf2818c3036f4ca2313193e45f9ad877d9ff02e"
   },
   "bearer": {
    "auth": "bearer",
@@ -2245,6 +2258,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -2328,7 +2342,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "31119669fff56dc27d92ef03b8b0a278943406d932110022a3408285fcb701c2"
+   "sha256": "4459f9120bbefed1ad481ff33b1e386adde79031cf83bbc8a58b923bbd4a2bf6"
   },
   "bearer+all_on": {
    "auth": "bearer",
@@ -2411,6 +2425,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -2498,7 +2513,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "a640faeddfad9f7618ace0cfc8d44826fae469dbb3c89a81cf87d602b24d9404"
+   "sha256": "0eff7da1c8ddb401c61efd4587240729651581d8a97a7b87d2191213a820a477"
   },
   "finance_marker_file": {
    "auth": "noauth",
@@ -2560,6 +2575,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -2643,7 +2659,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "0a1da86e906823985dbe7702c12cd7138177c3c853bf85959bdf40178e11ad75"
+   "sha256": "3cc7e0d90de829b308a1eb0e1d854544183795eb1d2afb7c925c67926de0138e"
   },
   "none": {
    "auth": "noauth",
@@ -2704,6 +2720,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -2787,7 +2804,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "43a011a0efed5c3839a2db59b4da8b05269601cc090010907a44d57da9380770"
+   "sha256": "876626b6563b3fe05c0c43007fc014d39ad355f19abae7ad4a9009d4b6469659"
   },
   "only:attention_delivery": {
    "auth": "noauth",
@@ -2849,6 +2866,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -2932,7 +2950,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "03c974ce0456fe675e82b774933340b8f8fcc7aa3de419446125509bbc97a42e"
+   "sha256": "f82e1aedd41fd28bb5b18a8556d2ba59eaf9b33775ac30a82db7d69835f73d73"
   },
   "only:autopilot": {
    "auth": "noauth",
@@ -2993,6 +3011,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -3080,7 +3099,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "381e6a534686855c6c07d969b3f8aac3b6487bfc6f0b34eae99ac089ae6cb3aa"
+   "sha256": "8a8c1edeb3df5fff3dbdeba774d3411aafa9160389cfb93533c3b94550c6383d"
   },
   "only:finance": {
    "auth": "noauth",
@@ -3142,6 +3161,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -3225,7 +3245,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "0a1da86e906823985dbe7702c12cd7138177c3c853bf85959bdf40178e11ad75"
+   "sha256": "3cc7e0d90de829b308a1eb0e1d854544183795eb1d2afb7c925c67926de0138e"
   },
   "only:jev": {
    "auth": "noauth",
@@ -3289,6 +3309,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -3372,7 +3393,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "a99b46d9a4384ed5748b8512002b895dffd5be3d59d72ce6969ca955663fe399"
+   "sha256": "aecc37643865ad2691159b1e54b66aeee4311c42db52b350ff3b5e9d321d3dc5"
   },
   "only:jev+review_assist": {
    "auth": "noauth",
@@ -3437,6 +3458,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -3520,7 +3542,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "643c6663edcf4f32b4dd5244800ec01e26695d5bd573b1058e1002a184a8c3bb"
+   "sha256": "b5622505ec94b7f437473a22da0204dbd0e93046a2f98aa866f7aa997ade7720"
   },
   "only:memory_write": {
    "auth": "noauth",
@@ -3581,6 +3603,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -3664,7 +3687,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "43a011a0efed5c3839a2db59b4da8b05269601cc090010907a44d57da9380770"
+   "sha256": "876626b6563b3fe05c0c43007fc014d39ad355f19abae7ad4a9009d4b6469659"
   },
   "only:review_assist": {
    "auth": "noauth",
@@ -3725,6 +3748,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -3808,7 +3832,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "43a011a0efed5c3839a2db59b4da8b05269601cc090010907a44d57da9380770"
+   "sha256": "876626b6563b3fe05c0c43007fc014d39ad355f19abae7ad4a9009d4b6469659"
   },
   "only:session_control": {
    "auth": "noauth",
@@ -3873,6 +3897,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -3956,7 +3981,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "f0d048e22bf79d8ef0231accd4102e939b00aaaede99e7e9fffd20eedfd64b62"
+   "sha256": "3c96387df041104c8e244698849475e45a4ca1b325fe33160954cae6930e1c3c"
   },
   "only:session_search": {
    "auth": "noauth",
@@ -4022,6 +4047,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -4105,7 +4131,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "5b6fb4888207e1d44220f419e24b7cd8fafb96869e49cd54ff3578edfc4a6b2f"
+   "sha256": "4eae5cc0f0f669d7eec06fcd4650a83b941876e76f23d87119420da2a6b62bf8"
   },
   "only:session_search+session_control": {
    "auth": "noauth",
@@ -4176,6 +4202,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -4259,7 +4286,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "f8e67ccebcda68b9a7481fcbe3178410e33299a8134c34444e1e0dbcf8127da0"
+   "sha256": "fe800763c7e35463369f69049a60fd40a7439ceb8ad1a1a62c04fc987aa90b04"
   },
   "only:terminal": {
    "auth": "noauth",
@@ -4321,6 +4348,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -4404,7 +4432,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "b9c92d8d188cd4ffaf07bb2522e024b8ab47efd55f261d17554c0afd79238aab"
+   "sha256": "85de281a58420dc8e6e943e614819f84b002cf0c72339796b0891216ac513be2"
   },
   "only:vision": {
    "auth": "noauth",
@@ -4466,6 +4494,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -4549,7 +4578,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "142751c57c8cbeea3b164492e0e69545b195756d73a4fa650e41efe64a3c421f"
+   "sha256": "acde016a8206349629663e50d935e102a70be6bc424b53473054f0b0e4f6e40b"
   },
   "only:web": {
    "auth": "noauth",
@@ -4612,6 +4641,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -4695,7 +4725,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "91041a8b70a6a37bed938e131fbb833d6666f9e23913c1543b8d03fe5fc6e6bd"
+   "sha256": "03cbf64265e2a6b1c3ca3b723549a902d9f25659fb98490d441706b088c279a5"
   },
   "only:write": {
    "auth": "noauth",
@@ -4758,6 +4788,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -4841,7 +4872,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "d6e915ba70bc26b6d6757e4fe5c1d9fb482ddf18dc10b29608db5daad25cf659"
+   "sha256": "258adad6003ad71d5f2169cfc2d57592cefb6de3241f6d588039ef65c756f7ea"
   },
   "profile:chat-lean": {
    "auth": "noauth",
@@ -4863,6 +4894,7 @@
     "hermes_mission_approve",
     "hermes_plan_get",
     "hermes_plan_list",
+    "hermes_plan_approve_gate",
     "hermes_budget_get",
     "hermes_budget_check",
     "hermes_events_query",
@@ -4877,7 +4909,7 @@
     "hermes_delegation_list",
     "hermes_review_accept"
    ],
-   "sha256": "98fea9670c1e4de828e0b0bcaf8130af780155ca4e569f36c9f9bc2625950d28"
+   "sha256": "1ba2eea90906ec0b6c578f80d52facf270d73537594b47f062bb0d7dbca87279"
   },
   "profile:chat-lean+all_on": {
    "auth": "noauth",
@@ -4908,6 +4940,7 @@
     "hermes_mission_approve",
     "hermes_plan_get",
     "hermes_plan_list",
+    "hermes_plan_approve_gate",
     "hermes_budget_get",
     "hermes_budget_check",
     "hermes_autopilot_start",
@@ -4926,7 +4959,7 @@
     "hermes_delegation_list",
     "hermes_review_accept"
    ],
-   "sha256": "95a711d68a30f9a53a3a72ddbedbc5e5303098fe34df235659a6df601fe547b0"
+   "sha256": "aa1482d74af9c2a8193fa1ae062affa1bc3dea3b9f94101c5d82e4359a765dcd"
   },
   "profile:full": {
    "auth": "noauth",
@@ -4987,6 +5020,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -5070,7 +5104,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "43a011a0efed5c3839a2db59b4da8b05269601cc090010907a44d57da9380770"
+   "sha256": "876626b6563b3fe05c0c43007fc014d39ad355f19abae7ad4a9009d4b6469659"
   },
   "profile:full+all_on": {
    "auth": "noauth",
@@ -5153,6 +5187,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -5240,7 +5275,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "a9c46181de595436050c77226c6e78bd7b136bd20f4361d2a2da927fbfc9fe0e"
+   "sha256": "ad67c6a82033fe68c6b0409bcbf2818c3036f4ca2313193e45f9ad877d9ff02e"
   },
   "profile:operator": {
    "auth": "noauth",
@@ -5298,6 +5333,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -5381,7 +5417,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "ca2796a658d96629211fe1eed29501a650d39c6b9e7df8262c4c153c9f5f49e6"
+   "sha256": "93237fb4ce8d460036b27bec4bfe16c4d5cd31bc652b6cfe2404a468d14f9138"
   },
   "profile:operator+all_on": {
    "auth": "noauth",
@@ -5458,6 +5494,7 @@
     "hermes_plan_decompose",
     "hermes_plan_review",
     "hermes_plan_node_transition",
+    "hermes_plan_approve_gate",
     "hermes_plan_set_status",
     "hermes_budget_set",
     "hermes_budget_get",
@@ -5545,7 +5582,7 @@
     "hermes_codex_job_result",
     "hermes_codex_cancel"
    ],
-   "sha256": "26f166cf27b57f1d2f4e2321da7ed7a31507e141b90f9996064ec4e94750430c"
+   "sha256": "9338f9dcc749b6b75337c46acbdccf507774ae2c45a56862a8c372891ede68c7"
   }
  },
  "schema": "tool_registry_golden/v1",
@@ -5663,6 +5700,7 @@
    "hermes_placement_get": "d788bfe68b448a5c8d19eaf151317fd3e6e81bc697f2a1725273f574337d8b22",
    "hermes_placement_list": "217bd89d65111a6c0870d07ce8193e28db6bcfba34ef394cece524fb73f3a9ba",
    "hermes_placement_score": "3a5b6d34f6812001b4af0246db229dc6425547fab8920984ede3bf8f33b6ccde",
+   "hermes_plan_approve_gate": "6a77df0e32b7b7d8d81bd460d0cde2d581e57087ff41721e3216e297716d85a4",
    "hermes_plan_create": "2445d3b3df2512fdcef420019f73776c025b6a4ddc9ad3db34726196f7a30182",
    "hermes_plan_decompose": "2f172784beb66405832e6051b50400aa084e0c01f767b9a4d863bb7c1e540873",
    "hermes_plan_get": "9a8c856a3f6ef4c0220f81311584d854d0df07ccc17369856ff7534021e0aeac",
@@ -5829,6 +5867,7 @@
    "hermes_placement_get": "7cef5ee90c54dca73d202a23fad131b43ce0d96a26b69f1c91f4c09d2b08530b",
    "hermes_placement_list": "59e31fb3d660df33d0410815ed25e6c66cecd0c98933d849827bcb4366400f18",
    "hermes_placement_score": "84c9d229553e07d5ecfde5a233929743b3af1f03ef06ee990d15e57c16e15ada",
+   "hermes_plan_approve_gate": "786ffc7ace1afc859447771100b54fa4c925221a2d41c49c91def72f58920b14",
    "hermes_plan_create": "4ddfaed4c4df3b7ab1d9dbb684a30d5b7d80d5f109efda3c31f7669f0852dcef",
    "hermes_plan_decompose": "9b7ec23c7ae26498baea7eba9af5487748d179505f69a821a1caf2eb70ad9c8b",
    "hermes_plan_get": "254dd1045ed2cae3b7d1dc5d4731732d90d5e8c6836831d8af589282b360b6fc",

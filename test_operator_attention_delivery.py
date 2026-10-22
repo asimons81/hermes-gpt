@@ -810,3 +810,61 @@ def test_main_watch_disabled_returns_immediately(monkeypatch, capsys):
         monkeypatch.delenv(name, raising=False)
     assert delivery.main(["--watch", "--interval", "60"]) == 0
     assert json.loads(capsys.readouterr().out) == {"enabled": False}
+
+
+# --- At-most-once iMessage delivery when imsg cannot confirm (v0.16.1) -------
+
+# The exact reply imsg 0.15.10 returned in a live send that did arrive.
+IMSG_OUTCOME_UNKNOWN = (
+    b'{"jsonrpc":"2.0","id":2,"error":{"code":-32001,"message":"Delivery outcome unknown",'
+    b'"data":{"operation":"send","detail":"Messages automation returned success, but no matching '
+    b'outgoing text row was observed within 8 seconds.","disposition":"may_have_completed",'
+    b'"retry_safe":false,"transport":"applescript"}}}\n'
+)
+
+
+def test_imessage_outcome_unknown_is_delivered_once_and_never_retried(relay, monkeypatch):
+    set_inbox(monkeypatch, [item("a1")])
+    relay.monkeypatch.setenv(delivery.TARGETS_ENV, "imessage:+15551234567")
+    runner = FakeRunner(lambda argv, payload: delivery.ChildOutcome(0, IMSG_OUTCOME_UNKNOWN))
+    first = delivery.run_once(relay.root, now=NOW, runner=runner)
+    assert first["errors"] == 0 and first["messages_sent"] == 1
+    assert first["targets"][0]["unverified"] == 1
+    entry = read_state(relay.root)["targets"]["imessage:+15551234567"]
+    assert "a1" in entry["delivered"]
+    assert entry["last_warning"]["code"] == "SENT_UNVERIFIED"
+    assert entry["last_error"] is None and entry["next_attempt_at"] is None
+    second = delivery.run_once(relay.root, now=NOW, runner=runner)
+    assert len(runner.calls) == 1  # no duplicate send
+    assert second["messages_sent"] == 0
+    status = delivery.status(relay.root)
+    assert status["targets"][0]["last_warning"]["code"] == "SENT_UNVERIFIED"
+
+
+def test_imessage_timeout_after_send_is_unverified_not_retried(relay, monkeypatch):
+    set_inbox(monkeypatch, [item("a1")])
+    relay.monkeypatch.setenv(delivery.TARGETS_ENV, "imessage:+15551234567")
+    runner = FakeRunner(lambda argv, payload: delivery.ChildOutcome(None, b"", timed_out=True))
+    delivery.run_once(relay.root, now=NOW, runner=runner)
+    delivery.run_once(relay.root, now=NOW, runner=runner)
+    assert len(runner.calls) == 1
+    assert read_state(relay.root)["targets"]["imessage:+15551234567"]["last_warning"]["code"] == "SENT_UNVERIFIED"
+
+
+def test_imessage_retry_safe_error_still_fails_and_backs_off(relay, monkeypatch):
+    set_inbox(monkeypatch, [item("a1")])
+    relay.monkeypatch.setenv(delivery.TARGETS_ENV, "imessage:+15551234567")
+    runner = FakeRunner(lambda argv, payload: delivery.ChildOutcome(
+        0, b'{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"invalid handle","data":{"retry_safe":true}}}\n'))
+    summary = delivery.run_once(relay.root, now=NOW, runner=runner)
+    assert summary["errors"] == 1 and summary["targets"][0]["error"] == "BAD_RESPONSE"
+    assert read_state(relay.root)["targets"]["imessage:+15551234567"]["delivered"] == {}
+
+
+def test_verified_success_clears_a_previous_warning(relay, monkeypatch):
+    relay.monkeypatch.setenv(delivery.TARGETS_ENV, "imessage:+15551234567")
+    set_inbox(monkeypatch, [item("a1")])
+    delivery.run_once(relay.root, now=NOW, runner=FakeRunner(lambda a, p: delivery.ChildOutcome(0, IMSG_OUTCOME_UNKNOWN)))
+    set_inbox(monkeypatch, [item("a1"), item("b2")])
+    delivery.run_once(relay.root, now=NOW, runner=FakeRunner())
+    assert read_state(relay.root)["targets"]["imessage:+15551234567"]["last_warning"] is None

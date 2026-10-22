@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.16.1 - 2026-10-22
+
+- Flight Deck reject works on a reached gate in any state that may fail, including the `pending` state Autopilot leaves it in. An unreached gate is still refused. The owner inbox now suggests `hermes_plan_approve_gate` for Autopilot gates.
+- Attention delivery: iMessage sends that `imsg` cannot confirm (`retry_safe: false` / "Delivery outcome unknown") or that time out after the request was written are recorded as delivered, flagged `SENT_UNVERIFIED` in `last_warning`, and never resent. Previously each relay pass would have resent them, duplicating messages that had already arrived. Found in the first live iMessage test.
+- Added `hermes_plan_approve_gate`, an Owner-only way to approve a gated plan node (an approval node or `high_impact`) to `completed` in one call. Before, approving a gate took six separate `hermes_plan_node_transition` calls, and the Flight Deck's **Approve node** was refused for a `pending` gate. The tool computes the shortest legal path from `NODE_TRANSITIONS`, applies it one step at a time through the existing transition with a plan-version compare-and-swap, and dry-runs by default. Intermediate states are ordinary state-machine steps and do not claim that review happened. A refused step stops the walk with no rollback, and the result lists the applied steps. The Flight Deck approve now uses this tool, and the browser transition is reject-only. The tool count is 139 with every optional gate unset and 140 with `HERMES_GPT_ENABLE_FINANCE=1`. See [docs/owner-inbox.md](docs/owner-inbox.md#owner-gate-approval-hermes_plan_approve_gate).
+
 ## 0.16.0 - 2026-10-21
 
 Close the loop: what waits on the Owner now reaches them and can be resolved in one place, with no new authority.

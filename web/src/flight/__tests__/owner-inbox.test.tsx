@@ -314,6 +314,61 @@ describe('OwnerInboxPanel', () => {
     expect(real.args).toEqual({ mission_id: 'msn-auto', node_id: 'gate', target_state: 'failed', confirm: true });
   });
 
+  it('autopilot item: approve node calls hermes_plan_approve_gate, dry-run lists the steps, confirm applies', async () => {
+    const steps = [
+      { step: 1, from_state: 'pending', to_state: 'dispatched' },
+      { step: 2, from_state: 'dispatched', to_state: 'running' },
+    ];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        return jsonResponse({
+          ok: true,
+          data: { tool: body.tool, dry_run: body.dry_run, requires_confirm: true, result: { success: true, dry_run: body.dry_run, steps } },
+        });
+      }
+      return envelope(payload({ items: [autopilotItem], count: 1 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<OwnerInboxPanel />);
+
+    await screen.findByText(/frontier nodes: gate/);
+    fireEvent.click(screen.getByRole('button', { name: /approve node gate/i }));
+    await screen.findByText(/DRY-RUN · NO-OP/);
+    // The preview shows the step list, not only the first fields.
+    expect(document.querySelector('.fd-pre')?.textContent).toContain('"to_state": "running"');
+
+    expect(postBodies(fetchMock)).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /confirm approve node gate/i }));
+    await waitFor(() => expect(postBodies(fetchMock)).toHaveLength(2));
+    const [dry, real] = postBodies(fetchMock);
+    expect(dry).toEqual({ tool: 'hermes_plan_approve_gate', args: { mission_id: 'msn-auto', node_id: 'gate' }, dry_run: true });
+    expect(real).toEqual({
+      tool: 'hermes_plan_approve_gate',
+      args: { mission_id: 'msn-auto', node_id: 'gate', confirm: true },
+      dry_run: false,
+    });
+    expect(await screen.findByText('APPLIED')).toBeInTheDocument();
+  });
+
+  it('autopilot item: a refused approve shows the server code and applies nothing', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return jsonResponse({ ok: false, error: { code: 'LEVEL_REQUIRED', message: 'Owner Mode is required', tool: 'hermes_plan_approve_gate' } }, 403);
+      }
+      return envelope(payload({ items: [autopilotItem], count: 1 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<OwnerInboxPanel />);
+
+    await screen.findByText(/frontier nodes: gate/);
+    fireEvent.click(screen.getByRole('button', { name: /approve node gate/i }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('LEVEL_REQUIRED: Owner Mode is required');
+    expect(screen.queryByText('APPLIED')).not.toBeInTheDocument();
+    expect(postBodies(fetchMock)).toHaveLength(1);
+  });
+
   it('autopilot item without frontier ids offers stop and acknowledge only', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => envelope(payload({ items: [{ ...autopilotItem, frontier_node_ids: [] }], count: 1 }))));
     render(<OwnerInboxPanel />);

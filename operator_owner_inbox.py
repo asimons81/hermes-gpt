@@ -72,7 +72,7 @@ KIND_NO_TARGET = "no_capable_target"
 KIND_REVIEW = "contract_review_pending"
 
 TOOL_MISSION_APPROVE = "hermes_mission_approve"
-TOOL_NODE_TRANSITION = "hermes_plan_node_transition"
+TOOL_APPROVE_GATE = "hermes_plan_approve_gate"
 TOOL_BUDGET_CHECK = "hermes_budget_check"
 TOOL_CONTROLLER_STATUS = "hermes_controller_status"
 TOOL_REVIEW_ACCEPT = "hermes_review_accept"
@@ -241,7 +241,7 @@ def _autopilot_items(root: Path) -> tuple[str, list[dict[str, Any]]]:
         if mission_status == "awaiting_approval":
             suggested: str | None = TOOL_MISSION_APPROVE
         elif nodes:
-            suggested = TOOL_NODE_TRANSITION
+            suggested = TOOL_APPROVE_GATE
         else:
             suggested = None
         text = f"Autopilot waits on Owner (state={state or 'unknown'})"

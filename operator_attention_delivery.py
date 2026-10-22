@@ -100,6 +100,9 @@ ERR_NOT_CONFIGURED = "NOT_CONFIGURED"
 ERR_SPAWN_FAILED = "SPAWN_FAILED"
 ERR_STATE = "STATE_UNREADABLE"
 ERR_STATE_WRITE = "STATE_WRITE_FAILED"
+# Sent, but the backend could not confirm delivery. Recorded as delivered (at most
+# once): retrying could duplicate a message that already arrived.
+WARN_UNVERIFIED = "SENT_UNVERIFIED"
 
 KIND_LABELS = {
     "mission_awaiting_approval": "Mission awaiting approval",
@@ -710,7 +713,8 @@ def _send_imessage(target: Target, text: str, config: AttentionConfig, run: Runn
         stop_when=lambda data: _rpc_response(data, RPC_SEND_ID, final=False) is not None,
     )
     if outcome.timed_out:
-        return False, ERR_TIMEOUT
+        # The send request was already written; Messages may have delivered it.
+        return True, WARN_UNVERIFIED
     response = _rpc_response(outcome.stdout, RPC_SEND_ID, final=True)
     if response is None:
         if outcome.overflow:
@@ -718,9 +722,23 @@ def _send_imessage(target: Target, text: str, config: AttentionConfig, run: Runn
         if outcome.returncode not in (None, 0):
             return False, _exit_code(outcome.returncode)
         return False, ERR_BAD_RESPONSE
-    if response.get("jsonrpc") != "2.0" or "error" in response or "result" not in response:
+    if response.get("jsonrpc") != "2.0":
+        return False, ERR_BAD_RESPONSE
+    if "error" in response:
+        if _imsg_may_have_completed(response.get("error")):
+            return True, WARN_UNVERIFIED
+        return False, ERR_BAD_RESPONSE
+    if "result" not in response:
         return False, ERR_BAD_RESPONSE
     return True, None
+
+
+def _imsg_may_have_completed(error: Any) -> bool:
+    """imsg reports sends it could not confirm as not retry-safe (e.g. "Delivery outcome unknown")."""
+    data = error.get("data") if isinstance(error, dict) else None
+    if not isinstance(data, dict):
+        return False
+    return data.get("retry_safe") is False or data.get("disposition") == "may_have_completed"
 
 
 def _send(target: Target, text: str, config: AttentionConfig, run: Runner) -> tuple[bool, str | None]:
@@ -737,8 +755,9 @@ def _send(target: Target, text: str, config: AttentionConfig, run: Runner) -> tu
 # ---------------------------------------------------------------------------
 
 
-def _record_success(entry: dict[str, Any], epoch: float) -> None:
+def _record_success(entry: dict[str, Any], epoch: float, warning: str | None = None) -> None:
     entry["last_success_at"] = _iso(epoch)
+    entry["last_warning"] = {"code": warning, "at": _iso(epoch)} if warning else None
     entry["last_error"] = None
     entry["failure_count"] = 0
     entry["next_attempt_at"] = None
@@ -835,8 +854,10 @@ def run_once(hermes_root: Path | None = None, *, now: Any = None, runner: Runner
                     stamp = _iso(epoch)
                     for item in new_items:
                         entry["delivered"][item["item_id"]] = stamp
-                    _record_success(entry, epoch)
+                    _record_success(entry, epoch, code)
                     report.update(status="digest", messages=1, items_delivered=len(new_items), digest=True)
+                    if code:
+                        report["unverified"] = 1
                     messages_sent += 1
                     items_delivered += len(new_items)
                 else:
@@ -845,6 +866,7 @@ def run_once(hermes_root: Path | None = None, *, now: Any = None, runner: Runner
                     errors += 1
                 continue
             sent_here = 0
+            unverified = 0
             failure: str | None = None
             for item in new_items:
                 text = _item_message(item, incomplete=incomplete, link=_link(config))
@@ -854,8 +876,11 @@ def run_once(hermes_root: Path | None = None, *, now: Any = None, runner: Runner
                     break
                 entry["delivered"][item["item_id"]] = _iso(epoch)
                 sent_here += 1
+                unverified += 1 if code else 0
+            if unverified:
+                report["unverified"] = unverified
             if sent_here:
-                _record_success(entry, epoch)
+                _record_success(entry, epoch, WARN_UNVERIFIED if unverified else None)
                 messages_sent += sent_here
                 items_delivered += sent_here
             if failure is not None:
@@ -926,6 +951,7 @@ def status(hermes_root: Path | None = None) -> dict[str, Any]:
                 "target": mask_target(target.backend, target.target),
                 "last_success_at": entry.get("last_success_at"),
                 "last_error": entry.get("last_error"),
+                "last_warning": entry.get("last_warning"),
                 "failure_count": int(entry.get("failure_count") or 0),
                 "next_attempt_at": entry.get("next_attempt_at"),
                 "pending": pending,

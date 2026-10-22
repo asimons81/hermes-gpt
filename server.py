@@ -2453,6 +2453,31 @@ def hermes_plan_node_transition(
     )
 
 
+def hermes_plan_approve_gate(
+    mission_id: str,
+    node_id: str,
+    reason: str = "",
+    confirm: bool = False,
+    dry_run: bool = True,
+    expected_plan_version: int | None = None,
+) -> str:
+    """Owner-only: approve a gated plan node (approval or high_impact) to completed in one call.
+
+    Walks the shortest legal node-state path to completed through the existing
+    node transition, one step per call. Dry run by default; a direct write needs
+    Owner Mode, direct apply mode, dry_run=false and confirm=true.
+    """
+    return op_mission_plan.hermes_plan_approve_gate(
+        mission_id,
+        node_id,
+        reason,
+        confirm=confirm,
+        dry_run=dry_run,
+        expected_plan_version=expected_plan_version,
+        hermes_root=_default_hermes_root(),
+    )
+
+
 def hermes_plan_set_status(
     mission_id: str,
     status: str,
@@ -3570,16 +3595,29 @@ def _mission_runtime_tools() -> list[ToolEntry]:
 
 def _plan_tools() -> list[ToolEntry]:
     # MissionPlan (additive DAG). Mutations touch only the plan store.
-    return _plain(
-        hermes_plan_create,
-        hermes_plan_get,
-        hermes_plan_list,
-        hermes_plan_validate,
-        hermes_plan_decompose,
-        hermes_plan_review,
-        hermes_plan_node_transition,
-        hermes_plan_set_status,
-    )
+    return [
+        *_plain(
+            hermes_plan_create,
+            hermes_plan_get,
+            hermes_plan_list,
+            hermes_plan_validate,
+            hermes_plan_decompose,
+            hermes_plan_review,
+            hermes_plan_node_transition,
+        ),
+        # Owner-only gate approval (v0.16.1): dry run by default, Owner Mode for any write.
+        ToolEntry(
+            hermes_plan_approve_gate,
+            annotations=ToolAnnotations(
+                title="Owner approval of a gated plan node to completed (dry run by default; Owner Mode)",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
+        ),
+        *_plain(hermes_plan_set_status),
+    ]
 
 
 def _budget_tools() -> list[ToolEntry]:

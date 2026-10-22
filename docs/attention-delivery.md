@@ -28,6 +28,7 @@ Code: `operator_attention_delivery.py`. Tests: `test_operator_attention_delivery
 
 - An item is marked delivered **only after its backend reports success**.
 - A failed target records a bounded error code: `TIMEOUT`, `EXIT_<n>`, `BAD_RESPONSE`, `NOT_CONFIGURED`, or `SPAWN_FAILED`. It backs off exponentially per target (30 s, doubling, capped at 1 h) and is not retried inside the window. Other targets keep going.
+- iMessage delivery is at most once. If `imsg` reports that a send may have completed but cannot confirm it (`retry_safe: false`, for example "Delivery outcome unknown"), or the `imsg` child times out after the request was written, the item is recorded as delivered and never resent. The target's `last_warning` shows `SENT_UNVERIFIED`. This is common when the conversation with the handle is labelled SMS in Messages. Other `imsg` errors still fail and back off.
 - State lives in `missions/attention_delivery_state.json` under the Hermes data root. It is written atomically, pruned to 14 days and at most 2,000 entries per target, and protected by a single-writer lock (`missions/attention_delivery.lock`). If the state file is unreadable, nothing is sent.
 
 ## Configuration
@@ -123,6 +124,8 @@ Exit codes: `0` on success or when disabled, `2` on configuration error (or an o
 Output is one bounded JSON object per pass: `status`, `complete`, `items`, `targets` (with masked targets), `messages_sent`, `items_delivered`, `errors`, and `generated_at`.
 
 ### Optional launchd service
+
+The relay reads the Owner inbox, so it needs the Operator enabled at the `read_only` level (`HERMES_GPT_OPERATOR_ENABLED=1`, `HERMES_GPT_OPERATOR_LEVEL=read_only`). Without it, the Missions source reports `unavailable`, and Missions awaiting approval are never sent. Give the relay its own read-only setting. Do not reuse a server's direct or Owner posture.
 
 `--watch` is an optional, separate service. Keep it off unless you want unattended notifications. Example user agent, with placeholder paths:
 

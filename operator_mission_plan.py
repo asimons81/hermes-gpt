@@ -40,6 +40,7 @@ import os
 import re
 import secrets
 import sqlite3
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1141,6 +1142,343 @@ def hermes_plan_node_transition(
         _audit("hermes_plan_node_transition", policy, dry_run=dry_run, success=False, changed=False,
                mission_id=mission_id, node_id=node_id)
         return _error(exc, "PLAN_NODE_TRANSITION_REJECTED", "Check node id, target state, and state-machine legality.")
+
+
+# ---------------------------------------------------------------------------
+# Owner gate approval (v0.16.1)
+# ---------------------------------------------------------------------------
+#
+# One Owner-only operation that resolves an approval frontier. A gated node
+# (kind ``approval`` or ``capability_req.authorization_class == "high_impact"``)
+# sits in ``pending`` until someone moves it, and the state machine only reaches
+# ``completed`` through ``awaiting_approval``. Instead of six separate owner
+# transitions, this walks the shortest legal path over ``NODE_TRANSITIONS`` by
+# calling the existing ``hermes_plan_node_transition`` once per step.
+#
+# The intermediate states (``dispatched`` ... ``awaiting_approval``) are ordinary
+# state-machine steps. They do not claim that any work ran or was reviewed: the
+# Owner's approval is the only thing this operation records. There is no
+# rollback. A step that is refused stops the walk and the result lists exactly
+# which steps were applied and the node's resulting state.
+
+GATE_APPROVE_TOOL = "hermes_plan_approve_gate"
+GATE_APPROVE_REASON = "owner gate approval"
+GATE_APPROVE_REASON_MAX = 120
+GATE_APPROVE_SUGGESTED_ACTION = (
+    "Re-read the plan with hermes_plan_get. Nothing is rolled back: check applied_steps "
+    "and node_state before retrying."
+)
+# Node states from which the forward path to completed can be walked.
+GATE_APPROVABLE_STATES = frozenset(
+    {"pending", "blockable", "dispatched", "running", "awaiting_review", "validated", "awaiting_approval"}
+)
+# States never used as intermediates on the way to completed.
+_GATE_PATH_EXCLUDED_INTERMEDIATES = frozenset({"paused", "failed"})
+
+
+class GateRefused(ValueError):
+    """A fixed-code refusal from ``hermes_plan_approve_gate``. Nothing was written."""
+
+    def __init__(self, code: str, message: str, extra: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.extra = dict(extra or {})
+
+
+def is_gated_node(node: dict[str, Any]) -> bool:
+    """True for an approval-kind node or one whose authorization class is high_impact."""
+    capability = node.get("capability_req") if isinstance(node.get("capability_req"), dict) else {}
+    return node.get("kind") == KIND_APPROVAL or capability.get("authorization_class") == "high_impact"
+
+
+def gate_approval_path(start: str, target: str = "completed") -> list[str]:
+    """Shortest legal node-state path from ``start`` to ``target`` over NODE_TRANSITIONS.
+
+    Breadth-first search over the transition table, visiting neighbours in
+    sorted order so the result is deterministic. ``paused`` and ``failed`` are
+    never intermediate states. Returns the successive states after ``start``.
+    Raises ValueError when no legal path exists.
+    """
+    if start not in NODE_TRANSITIONS or target not in NODE_TRANSITIONS:
+        raise ValueError("unknown node state")
+    parent: dict[str, str | None] = {start: None}
+    queue: deque[str] = deque([start])
+    while queue and target not in parent:
+        current = queue.popleft()
+        for nxt in sorted(NODE_TRANSITIONS[current]):
+            if nxt in parent or (nxt in _GATE_PATH_EXCLUDED_INTERMEDIATES and nxt != target):
+                continue
+            parent[nxt] = current
+            queue.append(nxt)
+    if target not in parent:
+        raise ValueError(f"no legal path from {start!r} to {target!r}")
+    path: list[str] = []
+    cursor: str | None = target
+    while cursor is not None and cursor != start:
+        path.append(cursor)
+        cursor = parent[cursor]
+    path.reverse()
+    return path
+
+
+def _gate_read(path: Path, mission_id: str) -> dict[str, Any]:
+    """Read-only plan view. Raises LookupError when the plan does not exist."""
+    if not path.is_file():
+        raise LookupError(f"mission plan {mission_id!r} not found")
+    with _connect(path, write=False) as db:
+        return _plan_view(db, _get_plan_row(db, mission_id))
+
+
+def _gate_node(view: dict[str, Any], node_id: str) -> dict[str, Any]:
+    node = next((n for n in view.get("nodes", []) if n.get("node_id") == node_id), None)
+    if node is None:
+        raise GateRefused("PLAN_NODE_NOT_FOUND", f"plan node {node_id!r} not found")
+    return node
+
+
+def _gate_snapshot(path: Path, mission_id: str, node_id: str) -> tuple[int | None, str | None]:
+    """Best-effort (plan_version, node_state) for reporting; (None, None) if unreadable."""
+    try:
+        view = _gate_read(path, mission_id)
+        return int(view["version"]), str(_gate_node(view, node_id)["state"])
+    except (ValueError, LookupError, KeyError, TypeError, OSError, sqlite3.Error):
+        return None, None
+
+
+def _gate_step_failed(
+    path: Path,
+    mission_id: str,
+    node_id: str,
+    base: dict[str, Any],
+    steps: list[dict[str, Any]],
+    applied: list[dict[str, Any]],
+    cause_code: str,
+    trail: dict[str, Any],
+) -> dict[str, Any]:
+    failed_index = len(applied)
+    version, node_state = _gate_snapshot(path, mission_id, node_id)
+    failed = dict(steps[failed_index])
+    failed["code"] = cause_code
+    trail["applied_count"] = len(applied)
+    trail["changed"] = bool(applied)
+    return {
+        **base,
+        "success": False,
+        "code": "GATE_STEP_FAILED",
+        "safe_message": (
+            f"step {failed['step']} ({failed['from_state']} -> {failed['to_state']}) was refused "
+            f"({cause_code}); {len(applied)} step(s) applied, not rolled back"
+        ),
+        "suggested_action": GATE_APPROVE_SUGGESTED_ACTION,
+        "failed_step": failed,
+        "applied_steps": applied,
+        "not_run_steps": steps[failed_index + 1 :],
+        "node_state": node_state,
+        "plan_version": version,
+        "changed": bool(applied),
+        "dry_run": False,
+    }
+
+
+def _approve_gate(
+    policy: op.OperatorPolicy,
+    mission_id: str,
+    node_id: str,
+    reason: str,
+    *,
+    confirm: bool,
+    dry_run: bool,
+    expected_plan_version: int | None,
+    hermes_root: Path | None,
+    trail: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        policy.require_owner(dry_run)
+    except PermissionError as exc:
+        raise GateRefused("LEVEL_REQUIRED", str(exc), {"required": "owner"}) from exc
+    if not isinstance(mission_id, str) or not MISSION_ID_RE.fullmatch(mission_id):
+        raise ValueError("mission_id is invalid")
+    if not isinstance(node_id, str) or not NODE_ID_RE.fullmatch(node_id):
+        raise ValueError("node_id is invalid")
+    reason_text = _clean_text(reason, field="reason", maximum=GATE_APPROVE_REASON_MAX)
+    trail["reason"] = reason_text
+    if expected_plan_version is not None and (
+        isinstance(expected_plan_version, bool) or not isinstance(expected_plan_version, int)
+    ):
+        raise ValueError("expected_plan_version must be an integer")
+    dry = policy.effective_dry_run(dry_run)
+    trail["dry"] = dry
+    if not dry and not confirm:
+        raise GateRefused("CONFIRM_REQUIRED", "direct gate approval requires confirm=true")
+
+    path = _db_path(hermes_root)
+    view = _gate_read(path, mission_id)
+    version = int(view["version"])
+    if expected_plan_version is not None and int(expected_plan_version) != version:
+        raise GateRefused(
+            "PLAN_VERSION_CONFLICT",
+            f"plan version changed (expected {int(expected_plan_version)}, found {version})",
+            {"expected_plan_version": int(expected_plan_version), "actual_plan_version": version},
+        )
+
+    node = _gate_node(view, node_id)
+    state = str(node["state"])
+    trail["from"] = state
+    if not is_gated_node(node):
+        raise GateRefused("NOT_A_GATED_NODE", f"node {node_id!r} is not an approval or high_impact node")
+    if state not in GATE_APPROVABLE_STATES:
+        raise GateRefused(
+            "NODE_STATE_NOT_APPROVABLE",
+            f"node {node_id!r} is {state}; only a node on the forward path to completed can be approved",
+        )
+    by_id = {n["node_id"]: n for n in view.get("nodes", [])}
+    if any(by_id.get(parent, {}).get("state") != "completed" for parent in node.get("parents", [])):
+        raise GateRefused("GATE_NOT_REACHED", f"node {node_id!r} has parents that are not completed")
+
+    steps: list[dict[str, Any]] = []
+    cursor = state
+    for nxt in gate_approval_path(state):
+        steps.append({"step": len(steps) + 1, "from_state": cursor, "to_state": nxt})
+        cursor = nxt
+    trail["step_count"] = len(steps)
+    base = {
+        "schema_version": SCHEMA_VERSION,
+        "tool": GATE_APPROVE_TOOL,
+        "mission_id": mission_id,
+        "node_id": node_id,
+        "from_state": state,
+        "to_state": "completed",
+        "steps": steps,
+        "plan_version": version,
+    }
+    if dry:
+        return {**base, "success": True, "changed": False, "dry_run": True, "applied_steps": []}
+
+    step_reason = f"{GATE_APPROVE_REASON}: {reason_text}" if reason_text else GATE_APPROVE_REASON
+    applied: list[dict[str, Any]] = []
+    cas = int(expected_plan_version) if expected_plan_version is not None else version
+    for step in steps:
+        out = json.loads(
+            hermes_plan_node_transition(
+                mission_id,
+                node_id,
+                step["to_state"],
+                step_reason,
+                confirm=True,
+                dry_run=False,
+                expected_plan_version=cas,
+                hermes_root=hermes_root,
+            )
+        )
+        if out.get("success") is not True:
+            return _gate_step_failed(
+                path, mission_id, node_id, base, steps, applied, str(out.get("code") or "STEP_REFUSED"), trail
+            )
+        applied.append(step)
+        trail["applied_count"] = len(applied)
+        trail["changed"] = True
+        # Node transitions do not bump the plan version, but re-read it before every
+        # next step so each compare-and-swap is computed against the current plan.
+        try:
+            cas = int(_gate_read(path, mission_id)["version"])
+        except (ValueError, LookupError, OSError, sqlite3.Error):
+            return _gate_step_failed(path, mission_id, node_id, base, steps, applied, "PLAN_READ_FAILED", trail)
+
+    version_after, node_state = _gate_snapshot(path, mission_id, node_id)
+    return {
+        **base,
+        "success": True,
+        "changed": True,
+        "dry_run": False,
+        "applied_steps": applied,
+        "plan_version": version_after if version_after is not None else cas,
+        "node_state": node_state,
+    }
+
+
+def hermes_plan_approve_gate(
+    mission_id: str,
+    node_id: str,
+    reason: str = "",
+    *,
+    confirm: bool = False,
+    dry_run: bool = True,
+    expected_plan_version: int | None = None,
+    hermes_root: Path | None = None,
+) -> str:
+    """Owner-only: approve a gated plan node to ``completed`` in one operation.
+
+    A gated node is an ``approval`` node or one with ``authorization_class ==
+    "high_impact"``. The node must be on the forward path (``pending`` through
+    ``awaiting_approval``) and every parent must be ``completed``. The shortest
+    legal path to ``completed`` is computed from ``NODE_TRANSITIONS`` and applied
+    one step at a time through ``hermes_plan_node_transition``, with a
+    compare-and-swap on the plan version at each step.
+
+    Gates: Owner Mode (``require_owner``, the same check as
+    ``hermes_mission_approve``), dry run by default, and ``confirm=true`` for a
+    direct write. A dry run returns the planned ``steps`` and writes nothing.
+
+    The intermediate states are ordinary state-machine steps. They are not
+    claims that work ran or that review happened. The Owner's approval is the
+    only thing this operation records. Autopilot still does not advance gated
+    nodes; this call is the owner decision it was waiting for.
+
+    No rollback: if a step is refused, the walk stops and the result lists the
+    applied steps and the node's resulting state. Audited once per call; the
+    underlying transitions keep their own audit records.
+    """
+    policy = op.OperatorPolicy()
+    trail: dict[str, Any] = {
+        "dry": policy.effective_dry_run(bool(dry_run)),
+        "changed": False,
+        "from": "",
+        "step_count": 0,
+        "applied_count": 0,
+        "reason": "",
+    }
+    try:
+        result = _approve_gate(
+            policy,
+            mission_id,
+            node_id,
+            reason,
+            confirm=confirm,
+            dry_run=dry_run,
+            expected_plan_version=expected_plan_version,
+            hermes_root=hermes_root,
+            trail=trail,
+        )
+    except GateRefused as exc:
+        result = json.loads(_error(exc, exc.code, GATE_APPROVE_SUGGESTED_ACTION, extra=exc.extra))
+        result.update({"success": False, "schema_version": SCHEMA_VERSION, "tool": GATE_APPROVE_TOOL,
+                       "changed": False, "dry_run": bool(trail["dry"])})
+        trail["refusal"] = exc.code
+    except (ValueError, TypeError, LookupError, PermissionError, OSError, sqlite3.Error) as exc:
+        result = json.loads(_error(exc, "PLAN_GATE_APPROVE_REJECTED", GATE_APPROVE_SUGGESTED_ACTION))
+        result.update({"success": False, "schema_version": SCHEMA_VERSION, "tool": GATE_APPROVE_TOOL,
+                       "changed": False, "dry_run": bool(trail["dry"])})
+        trail["refusal"] = "PLAN_GATE_APPROVE_REJECTED"
+    if result.get("success") is not True:
+        trail.setdefault("refusal", str(result.get("code") or ""))
+    _audit(
+        GATE_APPROVE_TOOL,
+        policy,
+        dry_run=bool(trail["dry"]),
+        success=result.get("success") is True,
+        changed=bool(result.get("changed")),
+        mission_id=mission_id if isinstance(mission_id, str) else "",
+        node_id=node_id if isinstance(node_id, str) else "",
+        extra={
+            "from": trail["from"],
+            "to": "completed",
+            "step_count": trail["step_count"],
+            "applied_count": trail["applied_count"],
+            "refusal": trail.get("refusal", ""),
+            "reason": trail["reason"],
+        },
+    )
+    return json.dumps(result)
 
 
 def hermes_plan_set_status(

@@ -472,33 +472,70 @@ class _MutationSpec:
         self.precheck = precheck
 
 
-# Plan node states from which an approval frontier is resolved, and the targets
-# the plan state machine allows from there. ``awaiting_approval -> completed`` is
-# approve; ``awaiting_approval -> failed`` is reject. ``paused`` is legal in the
-# state machine but does not resolve the frontier, so it is excluded.
-_APPROVAL_GATE_STATE = "awaiting_approval"
-_APPROVAL_RESOLUTION_TARGETS: frozenset[str] = frozenset(op_plan.NODE_TRANSITIONS[_APPROVAL_GATE_STATE]) - {"paused"}
+# Plan node states from which an approval frontier is resolved. Approve is no
+# longer a browser transition: it is ``hermes_plan_approve_gate``, which walks
+# the legal path to completed. Reject stays a browser transition, and only from
+# ``awaiting_approval`` to ``failed``. ``paused`` is legal in the state machine
+# but does not resolve the frontier, so it is never a browser target.
+_APPROVAL_REJECT_TARGET = "failed"
 _ACK_MAX_IDS = 50
 
 
+def _refuse_approval(tool: str, message: str) -> JSONResponse:
+    code = "APPROVAL_GATE_REFUSED" if tool == "hermes_plan_approve_gate" else "APPROVAL_TRANSITION_REFUSED"
+    return _json_resp(_err(code, message, 400, extra={"tool": tool}), 400)
+
+
 def _refuse_approval_transition(message: str) -> JSONResponse:
-    return _json_resp(
-        _err("APPROVAL_TRANSITION_REFUSED", message, 400, extra={"tool": "hermes_plan_node_transition"}),
-        400,
+    return _refuse_approval("hermes_plan_node_transition", message)
+
+
+def _read_gated_plan_node(
+    kwargs: dict[str, Any], root: Any, tool: str
+) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+    """Read-only lookup of the plan node a browser approval request names.
+
+    Returns ``(node, None)`` for a gated node on a readable plan, or
+    ``(None, refusal)``. The node is always re-derived here from the plan, never
+    trusted from the request.
+    """
+    mission_id = kwargs.get("mission_id")
+    node_id = kwargs.get("node_id")
+    if not all(isinstance(v, str) and v for v in (mission_id, node_id)):
+        return None, _json_resp(_err("INVALID_ARGS", "mission_id and node_id must be non-empty strings", 400), 400)
+    try:
+        plan = _parse_payload(op_plan.hermes_plan_get(mission_id=mission_id, hermes_root=root))
+    except Exception:  # noqa: BLE001 - fail closed; never echo internals
+        return None, _refuse_approval(tool, "the mission plan could not be read")
+    if plan.get("success") is not True or plan.get("found") is False:
+        return None, _refuse_approval(tool, "no mission plan was found for this mission")
+    node = next(
+        (n for n in (plan.get("nodes") or []) if isinstance(n, dict) and n.get("node_id") == node_id),
+        None,
     )
+    if node is None:
+        return None, _refuse_approval(tool, "the node is not part of this mission plan")
+    cap = node.get("capability_req") if isinstance(node.get("capability_req"), dict) else {}
+    gated = node.get("kind") == op_plan.KIND_APPROVAL or cap.get("authorization_class") == "high_impact"
+    if not gated:
+        return None, _refuse_approval(tool, "the node is not an approval or high_impact node")
+    version = plan.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        return None, _refuse_approval(tool, "the mission plan version could not be read")
+    node = {**node, "_plan_version": version, "_plan_nodes": plan.get("nodes") or []}
+    return node, None
 
 
 def _precheck_approval_transition(kwargs: dict[str, Any], root: Any, dry_run: bool) -> JSONResponse | None:
-    """Restrict ``hermes_plan_node_transition`` to resolving an approval frontier.
+    """Restrict browser ``hermes_plan_node_transition`` to rejecting an approval frontier.
 
     Browser-only restriction layered on the same tool: the node must be an
     ``approval`` node or have ``capability_req.authorization_class ==
     high_impact``, must currently be ``awaiting_approval``, and the target must
-    be ``completed`` (approve) or ``failed`` (reject). The browser path also
-    requires Owner Mode (the inbox item's ``requires`` is ``owner``). The plan
-    is read-only read here; its ``version`` is then passed as
-    ``expected_plan_version`` so a plan replaced in between is refused by the
-    tool's own compare-and-swap.
+    be ``failed`` (reject). Approve goes through ``hermes_plan_approve_gate``.
+    The browser path also requires Owner Mode (the inbox item's ``requires`` is
+    ``owner``). The plan ``version`` is passed as ``expected_plan_version`` so a
+    plan replaced in between is refused by the tool's own compare-and-swap.
     """
     try:
         op.OperatorPolicy().require_owner(dry_run)
@@ -508,35 +545,50 @@ def _precheck_approval_transition(kwargs: dict[str, Any], root: Any, dry_run: bo
                  extra={"required": "owner", "tool": "hermes_plan_node_transition"}),
             403,
         )
-    mission_id = kwargs.get("mission_id")
-    node_id = kwargs.get("node_id")
     target = kwargs.get("target_state")
-    if not all(isinstance(v, str) and v for v in (mission_id, node_id, target)):
-        return _json_resp(_err("INVALID_ARGS", "mission_id, node_id and target_state must be non-empty strings", 400), 400)
-    if target not in _APPROVAL_RESOLUTION_TARGETS:
-        return _refuse_approval_transition("target_state must be completed (approve) or failed (reject)")
+    if target != _APPROVAL_REJECT_TARGET:
+        return _refuse_approval_transition(
+            "target_state must be failed (reject); approve with hermes_plan_approve_gate"
+        )
+    node, refusal = _read_gated_plan_node(kwargs, root, "hermes_plan_node_transition")
+    if refusal is not None or node is None:
+        return refusal
+    # Reject a reached gate from any state the plan state machine lets fail;
+    # Autopilot leaves a reached gate in ``pending``.
+    states = {n.get("node_id"): n.get("state") for n in node["_plan_nodes"] if isinstance(n, dict)}
+    if any(states.get(parent) != "completed" for parent in node.get("parents") or []):
+        return _refuse_approval_transition("the gate has not been reached (a parent is not completed)")
+    if "failed" not in op_plan.NODE_TRANSITIONS.get(str(node.get("state")), ()):
+        return _refuse_approval_transition("the node cannot be rejected from its current state")
+    kwargs["expected_plan_version"] = node["_plan_version"]
+    return None
+
+
+def _precheck_approval_gate(kwargs: dict[str, Any], root: Any, dry_run: bool) -> JSONResponse | None:
+    """Browser precheck for ``hermes_plan_approve_gate`` (Owner Mode, gated node).
+
+    The node must be an approval or high_impact node, on the forward path
+    (``op_plan.GATE_APPROVABLE_STATES``), with every parent completed. The tool
+    re-checks the same conditions and its own CAS; this only refuses early and
+    fixes ``expected_plan_version`` from the plan read here.
+    """
     try:
-        plan = _parse_payload(op_plan.hermes_plan_get(mission_id=mission_id, hermes_root=root))
-    except Exception:  # noqa: BLE001 - fail closed; never echo internals
-        return _refuse_approval_transition("the mission plan could not be read")
-    if plan.get("success") is not True or plan.get("found") is False:
-        return _refuse_approval_transition("no mission plan was found for this mission")
-    node = next(
-        (n for n in (plan.get("nodes") or []) if isinstance(n, dict) and n.get("node_id") == node_id),
-        None,
-    )
-    if node is None:
-        return _refuse_approval_transition("the node is not part of this mission plan")
-    cap = node.get("capability_req") if isinstance(node.get("capability_req"), dict) else {}
-    gated = node.get("kind") == op_plan.KIND_APPROVAL or cap.get("authorization_class") == "high_impact"
-    if not gated:
-        return _refuse_approval_transition("the node is not an approval or high_impact node")
-    if node.get("state") != _APPROVAL_GATE_STATE:
-        return _refuse_approval_transition("the node is not awaiting approval")
-    version = plan.get("version")
-    if not isinstance(version, int) or isinstance(version, bool):
-        return _refuse_approval_transition("the mission plan version could not be read")
-    kwargs["expected_plan_version"] = version
+        op.OperatorPolicy().require_owner(dry_run)
+    except PermissionError as exc:
+        return _json_resp(
+            _err("LEVEL_REQUIRED", op.redact_output(str(exc))[:500], 403,
+                 extra={"required": "owner", "tool": "hermes_plan_approve_gate"}),
+            403,
+        )
+    node, refusal = _read_gated_plan_node(kwargs, root, "hermes_plan_approve_gate")
+    if refusal is not None or node is None:
+        return refusal
+    if node.get("state") not in op_plan.GATE_APPROVABLE_STATES:
+        return _refuse_approval("hermes_plan_approve_gate", "the node is not on the forward path to completed")
+    by_id = {n.get("node_id"): n for n in node["_plan_nodes"] if isinstance(n, dict)}
+    if any((by_id.get(parent) or {}).get("state") != "completed" for parent in node.get("parents", [])):
+        return _refuse_approval("hermes_plan_approve_gate", "the node's parents are not completed")
+    kwargs["expected_plan_version"] = node["_plan_version"]
     return None
 
 
@@ -563,6 +615,13 @@ _MUTATION_TOOLS: dict[str, _MutationSpec] = {
         required_level="owner",
         confirm_gated=True,
         precheck=_precheck_approval_transition,
+    ),
+    "hermes_plan_approve_gate": _MutationSpec(
+        op_plan.hermes_plan_approve_gate,
+        {"mission_id", "node_id", "reason", "confirm", "dry_run"},
+        required_level="owner",
+        confirm_gated=True,
+        precheck=_precheck_approval_gate,
     ),
     "hermes_autopilot_stop": _MutationSpec(
         op_autopilot.hermes_autopilot_stop,

@@ -218,7 +218,7 @@ The v0.16.0 wheel and sdist are attached to the [GitHub v0.16.0 release](https:/
 
 ## Default local MCP surface
 
-With every optional feature gate unset, the main server registers **138 tools**. Setting `HERMES_GPT_ENABLE_FINANCE=1` (the connector acceptance surface) registers **139**. The five core read-oriented tools are:
+With every optional feature gate unset, the main server registers **139 tools**. Setting `HERMES_GPT_ENABLE_FINANCE=1` (the connector acceptance surface) registers **140**. The five core read-oriented tools are:
 
 - `hermes_read_file(path, offset=1, limit=500)`
 - `hermes_search_files(pattern, target="content", path=".", file_glob=None, limit=50)`

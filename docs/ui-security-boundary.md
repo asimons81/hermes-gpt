@@ -130,7 +130,8 @@ resolved server-side.
 | `hermes_swarm_reconcile` | `apply` | workspace | `apply` flag |
 | `hermes_oauth_revoke` | `confirm`, `dry_run`, `rotate_key` | owner | `confirm` |
 | `hermes_mission_approve` (v0.16) | `mission_id`, `approval_reference`, `confirm`, `dry_run` | owner | `confirm` |
-| `hermes_plan_node_transition` (v0.16) | `mission_id`, `node_id`, `target_state`, `reason`, `confirm`, `dry_run` | owner (browser precheck; the tool itself needs workspace) | `confirm` |
+| `hermes_plan_node_transition` (v0.16) | `mission_id`, `node_id`, `target_state` (`failed` only), `reason`, `confirm`, `dry_run` | owner (browser precheck; the tool itself needs workspace) | `confirm` |
+| `hermes_plan_approve_gate` (v0.16.1) | `mission_id`, `node_id`, `reason`, `confirm`, `dry_run` (no `expected_plan_version`: the server derives it) | owner (browser precheck; the tool itself also requires Owner Mode) | `confirm` |
 | `hermes_autopilot_stop` (v0.16) | `mission_id`, `confirm`, `dry_run` | workspace | `confirm` |
 | `hermes_owner_inbox_ack` (v0.16) | `item_ids` (1 to 50), `dry_run` | workspace | none (no `confirm` argument) |
 
@@ -140,14 +141,23 @@ itself is the tool's own check, except for the v0.16 precheck described next.
 The v0.16 entries add gates in front of the tool, under the same two-request
 flow:
 
-- **`hermes_plan_node_transition`** is restricted to resolving an approval
-  frontier. A precheck (`_precheck_approval_transition`) reads the plan
-  read-only and refuses unless the node is an `approval` node or has
-  `authorization_class == high_impact`, is currently `awaiting_approval`, and
-  the target is `completed` (approve) or `failed` (reject). The plan `version`
-  it reads is passed as `expected_plan_version`, so a concurrent plan
+- **`hermes_plan_node_transition`** is restricted to rejecting an approval
+  frontier from the browser. A precheck (`_precheck_approval_transition`) reads
+  the plan read-only and refuses unless the node is an `approval` node or has
+  `authorization_class == high_impact`, the gate is reached (every parent is
+  `completed`), the node's current state may move to `failed`, and the target
+  is `failed`. Approve is no longer a browser transition. The plan
+  `version` it reads is passed as `expected_plan_version`, so a concurrent plan
   replacement is refused by the tool's compare-and-swap. The browser path also
   requires Owner Mode, which is stricter than the tool's own workspace gate.
+- **`hermes_plan_approve_gate`** (v0.16.1) is the browser approve. A precheck
+  (`_precheck_approval_gate`) reads the plan read-only and refuses unless the
+  node is gated, is on the forward path to `completed`, and has every parent
+  `completed`. It sets `expected_plan_version` from that read. The tool walks the
+  shortest legal path through `hermes_plan_node_transition`, one compare-and-swap
+  per step, and does not roll back. Owner Mode is required. Refusals return
+  `400 APPROVAL_GATE_REFUSED` (fixed messages) or `403 LEVEL_REQUIRED`. Details:
+  [owner-inbox.md](owner-inbox.md#owner-gate-approval-hermes_plan_approve_gate).
   Refusals return `400 APPROVAL_TRANSITION_REFUSED` (fixed messages) or
   `403 LEVEL_REQUIRED`, and write nothing. Details: [owner-inbox.md](owner-inbox.md#flight-deck-actions).
 - **`hermes_mission_approve`** calls the same function as MCP
