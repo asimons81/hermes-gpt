@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Autopilot records why a run ended (`max_runtime_exceeded`, or the crash reason) before it terminalizes the job. A status read in between could reconcile the run to `failed` with no `last_error`; this was an intermittent CI failure in `test_real_worker_ends_a_run_that_is_out_of_time_with_nothing_in_flight`.
+
 ## 0.16.1 - 2026-10-22
 
 - Flight Deck reject works on a reached gate in any state that may fail, including the `pending` state Autopilot leaves it in. An unreached gate is still refused. The owner inbox now suggests `hermes_plan_approve_gate` for Autopilot gates.
