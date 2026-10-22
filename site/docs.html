@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hermes GPT Docs | v0.15.0</title>
-  <meta name="description" content="Set up Hermes GPT v0.15.0, check what is waiting on the Owner, understand advisory review assist and tool profiles, and keep approval in human hands.">
+  <title>Hermes GPT Docs | v0.16.0</title>
+  <meta name="description" content="Set up Hermes GPT v0.16.0, route Owner inbox items to notifications, act on them from Flight Deck through gated tools, and keep approval in human hands.">
   <meta name="theme-color" content="#030303">
-  <meta property="og:title" content="Hermes GPT Docs | v0.15.0">
-  <meta property="og:description" content="Canonical setup, Owner loop, acceptance, and safety guides for Hermes GPT v0.15.0.">
+  <meta property="og:title" content="Hermes GPT Docs | v0.16.0">
+  <meta property="og:description" content="Canonical setup, notifications, Owner loop, acceptance, and safety guides for Hermes GPT v0.16.0.">
   <meta property="og:image" content="https://hermes-gpt.tonysimons.dev/assets/hermes-gpt-v0.14.0-readme-hero.jpg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Hermes GPT Docs | v0.15.0">
-  <meta name="twitter:description" content="Hermes GPT v0.15.0 documentation: setup, the read-only Owner inbox, advisory review, and Owner approval.">
+  <meta name="twitter:title" content="Hermes GPT Docs | v0.16.0">
+  <meta name="twitter:description" content="Hermes GPT v0.16.0 documentation: notifications, Flight Deck actions, safe upgrades, and Owner approval.">
   <meta name="twitter:image" content="https://hermes-gpt.tonysimons.dev/assets/hermes-gpt-v0.14.0-readme-hero.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,22 +23,28 @@
   <div class="toast" role="alert" aria-live="polite"></div>
   <main class="page" id="top">
     <header class="topbar reveal">
-      <a class="brand" href="./index.html" aria-label="Hermes GPT Home"><span class="brand-mark" aria-hidden="true">HG</span><span class="brand-copy"><strong>Hermes GPT</strong><small>v0.15.0 Docs</small></span></a>
-      <nav class="topnav" aria-label="Documentation navigation"><a href="./index.html">Home</a><a href="#setup">Setup</a><a href="#owner">Owner loop</a><a href="#acceptance">Acceptance</a><a href="#safety">Safety</a></nav>
+      <a class="brand" href="./index.html" aria-label="Hermes GPT Home"><span class="brand-mark" aria-hidden="true">HG</span><span class="brand-copy"><strong>Hermes GPT</strong><small>v0.16.0 Docs</small></span></a>
+      <nav class="topnav" aria-label="Documentation navigation"><a href="./index.html">Home</a><a href="#setup">Setup</a><a href="#notify">Notifications</a><a href="#owner">Owner loop</a><a href="#acceptance">Acceptance</a><a href="#safety">Safety</a></nav>
       <a class="ghost-link" href="https://github.com/asimons81/hermes-gpt/blob/master/docs/README.md">All guides</a>
     </header>
     <section class="section section-pad reveal">
-      <div class="section-head"><p class="eyebrow">Documentation &bull; v0.15.0</p><h1>Decide with evidence. <span>Keep approval in human hands.</span></h1><p>Install Hermes GPT, connect a trusted client, check what is waiting on the Owner, and supervise Mission work through declared checks and bounded recovery. These links open the canonical repository guides, which stay the source of truth for current behavior.</p></div>
-      <div class="cta-row"><a class="button button-primary" href="https://github.com/asimons81/hermes-gpt/blob/master/README.md#local-quickstart">Start with the quickstart</a><a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/releases/tag/v0.15.0">v0.15.0 release</a></div>
+      <div class="section-head"><p class="eyebrow">Documentation &bull; v0.16.0</p><h1>Close the loop. <span>Keep approval in human hands.</span></h1><p>Install Hermes GPT, connect a trusted client, route Owner inbox items to the places you check, and act on them through gated tools. These links open the canonical repository guides, which stay the source of truth for current behavior.</p></div>
+      <div class="cta-row"><a class="button button-primary" href="https://github.com/asimons81/hermes-gpt/blob/master/README.md#local-quickstart">Start with the quickstart</a><a class="button button-secondary" href="https://github.com/asimons81/hermes-gpt/releases/tag/v0.16.0">v0.16.0 release</a></div>
     </section>
     <section class="section reveal" id="setup"><div class="section-head"><h2>Get connected</h2></div><div class="bento-grid">
-      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/README.md#local-quickstart">Install and update</a></h3><p>Python 3.10+. Install hermes-gpt 0.15.0 from PyPI; verify GitHub and PyPI independently when updating.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/README.md#local-quickstart">Install and update</a></h3><p>Python 3.10+. Install hermes-gpt 0.16.0 from PyPI; verify GitHub and PyPI independently when updating.</p></article>
       <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/mcp-compatibility.md#connector-tool-profiles">Connector tool profiles</a></h3><p>Choose <code>full</code>, <code>operator</code>, or <code>chat-lean</code> with <code>HERMES_GPT_TOOL_PROFILE</code>. A profile only removes tools and never bypasses a gate.</p></article>
       <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/openai-secure-mcp-tunnel.md">Private OpenAI access</a></h3><p>Use the outbound-only private tunnel path to reach loopback Hermes GPT from supported OpenAI products.</p></article>
       <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/codex.md">Codex as a client</a></h3><p>Configure Codex to use Hermes GPT. Client setup and delegated Codex CLI execution have separate authority gates.</p></article>
     </div></section>
+    <section class="section reveal" id="notify"><div class="section-head"><h2>Notify and act</h2></div><div class="bento-grid">
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/attention-delivery.md">Owner notifications (default off)</a></h3><p>Set <code>HERMES_GPT_ATTENTION_DELIVERY=1</code> and <code>HERMES_GPT_ATTENTION_TARGETS</code> to relay new inbox items through <code>hermes send</code> or <code>imsg rpc</code>. Messages are notifications only; replies do nothing.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/owner-inbox.md#flight-deck-actions">Flight Deck inbox actions</a></h3><p>Each action is a dry run followed by a confirm, and calls the existing gated tool. Acknowledging an item with <code>hermes_owner_inbox_ack</code> does not resolve the condition.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/autopilot.md#one-call-launch-v016">One-call Mission launch</a></h3><p><code>hermes_mission_launch</code> requires <code>HERMES_GPT_AUTOPILOT=1</code>, is dry run by default, stops at the first refusal, and never approves a Mission. Re-running it creates a new Mission.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/updating.md#upgrade-a-package-installed-service-safely">Safe package upgrade</a></h3><p><code>hermes-gpt update --apply --version 0.16.0</code> upgrades one virtual environment after a digest check, with a rollback snapshot. Installing a release does not turn on any gate.</p></article>
+    </div></section>
     <section class="section reveal" id="owner"><div class="section-head"><h2>Review the Owner loop</h2></div><div class="bento-grid">
-      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/owner-inbox.md">Owner inbox (read-only)</a></h3><p><code>hermes_owner_inbox</code> lists Missions awaiting approval, Autopilot runs waiting for the Owner, and controller attention. It writes nothing; check <code>sources</code> and <code>complete</code> first.</p></article>
+      <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/owner-inbox.md">Owner inbox (read-only listing)</a></h3><p><code>hermes_owner_inbox</code> lists Missions awaiting approval, Autopilot runs waiting for the Owner, controller attention, and Work Contracts awaiting review. It writes nothing; check <code>sources</code> and <code>complete</code> first.</p></article>
       <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/review-assist.md">Advisory review assist</a></h3><p>Default off. Needs <code>HERMES_GPT_ENABLE_JEV=1</code> and <code>HERMES_GPT_REVIEW_ASSIST=1</code>. A score is advisory only and is never review acceptance or Work Contract evidence.</p></article>
       <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/jev.md">Jev decisions (default off)</a></h3><p>Three typed judgments reuse a pinned adapter and are registered only with <code>HERMES_GPT_ENABLE_JEV=1</code>. Installing the package does not provision the Owner key or activate the gate.</p></article>
     </div></section>
@@ -54,7 +60,7 @@
     </div></section>
     <section class="section reveal" aria-label="Source and deployment verification">
       <div class="bento-grid">
-        <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/release-notes-v0.15.0.md">v0.15.0 release notes</a></h3><p>Owner loop, review assist, tool profiles, and file-backup configuration. Calls to Jev send supplied text to TypeSafe and may incur charges.</p></article>
+        <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/release-notes-v0.16.0.md">v0.16.0 release notes</a></h3><p>Notifications, Owner inbox actions, one-call Mission launch, and safe upgrades. Calls to Jev send supplied text to TypeSafe and may incur charges.</p></article>
         <article class="bento-card"><h3><a href="https://github.com/asimons81/hermes-gpt/blob/master/docs/runtime-checkout.md">Verify the running installation</a></h3><p>Check service provenance, shared environments, authenticated tool discovery, acceptance, and rollback before claiming an update is live.</p></article>
       </div>
     </section>

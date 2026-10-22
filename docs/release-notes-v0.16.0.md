@@ -2,7 +2,7 @@
 
 Release date: October 21, 2026.
 
-> **STATUS: PREPARED IN SOURCE.** This release is cut on the `release/v0.16.0` branch with package version `0.16.0`. A GitHub release and a PyPI upload are separate publication steps. Neither exists until it is verified on that channel, and the maintainer records the verification here after publishing. Verify each channel independently before describing v0.16.0 as available.
+> **STATUS: PUBLISHED.** GitHub release [v0.16.0](https://github.com/asimons81/hermes-gpt/releases/tag/v0.16.0) is live with the wheel, sdist, and `SHA256SUMS` attached, and [`hermes-gpt==0.16.0`](https://pypi.org/project/hermes-gpt/0.16.0/) is on PyPI (both verified 2026-10-21). Verify each channel independently.
 
 v0.16.0 makes what waits on the Owner reach them and lets them resolve it in one place, without adding any new authority. Owner inbox items can now be sent as notifications to Hermes or iMessage targets. The inbox includes Work Contracts that need review acceptance, has stable item ids, and can be acknowledged. Flight Deck offers the same gated approvals and stops that the tools already provide. A one-call Mission launch is available behind the Autopilot gate, and a safe package upgrade command is available. Every new mutating path keeps its existing gates.
 
