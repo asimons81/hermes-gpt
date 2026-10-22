@@ -213,7 +213,8 @@ Both browser resolutions of an approval frontier are restricted. `ui_ops.py` rea
 1. Owner Mode (`require_owner`). This is stricter than the tool's own workspace gate: over MCP the same tool needs only workspace and direct mode.
 2. `target_state` is `failed`. Approve is not a browser transition any more.
 3. The node exists, and it is an `approval` node or has `capability_req.authorization_class == "high_impact"`.
-4. The node is currently `awaiting_approval`. Over MCP the state machine also allows `pending -> failed`, but the browser reject still requires the frontier state.
+4. The gate is reached: every parent is `completed`.
+5. The plan state machine lets the node's current state move to `failed`. A gate that Autopilot has reached stays `pending`, so it can be rejected directly.
 
 A failed check returns `400 APPROVAL_GATE_REFUSED` (approve) or `400 APPROVAL_TRANSITION_REFUSED` (reject), with a fixed message. The owner check returns `403 LEVEL_REQUIRED` with `required: "owner"`. Nothing is written in any refusal case.
 

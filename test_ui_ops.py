@@ -808,14 +808,24 @@ def test_node_transition_refuses_a_non_gated_node(client, ops_root, monkeypatch)
     assert _states(root)["a"] == "pending"
 
 
-def test_node_transition_refuses_a_reject_of_a_gate_not_awaiting_approval(client, ops_root, monkeypatch):
+def test_node_transition_refuses_a_reject_of_a_gate_not_yet_reached(client, ops_root, monkeypatch):
     root, _ = ops_root
     _set_env(monkeypatch, OWNER_ENV)
     _mk(root, [_node("a"), _gate("gate", ["a"])])
     resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "gate", "target_state": "failed", "confirm": True}, dry_run=False)
     assert resp.status_code == 400
-    assert "not awaiting approval" in resp.json()["error"]["message"]
+    assert "not been reached" in resp.json()["error"]["message"]
     assert _states(root)["gate"] == "pending"
+
+
+def test_node_transition_rejects_a_reached_pending_gate(client, ops_root, monkeypatch):
+    # Autopilot leaves a reached gate in pending; the Owner can reject it directly.
+    root, _ = ops_root
+    _set_env(monkeypatch, OWNER_ENV)
+    _mk(root, [_gate("gate", [])])
+    resp = _post(client, "hermes_plan_node_transition", {"mission_id": MID, "node_id": "gate", "target_state": "failed", "confirm": True}, dry_run=False)
+    assert resp.status_code == 200, resp.json()
+    assert _states(root)["gate"] == "failed"
 
 
 def test_node_transition_owner_off_is_refused_before_any_plan_read(client, ops_root):

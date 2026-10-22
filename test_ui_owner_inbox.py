@@ -109,7 +109,7 @@ def test_autopilot_item_exposes_plan_and_frontier_node_ids(client, isolate, monk
     assert item["mission_id"] == MID
     assert item["plan_id"] == MID
     assert item["frontier_node_ids"] == ["gate"]
-    assert item["suggested_tool"] == "hermes_plan_node_transition"
+    assert item["suggested_tool"] == "hermes_plan_approve_gate"
     assert item["item_id"] == op_owner_inbox._item_id("autopilot_waiting_owner", MID, "gate")  # noqa: SLF001
 
 

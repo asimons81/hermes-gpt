@@ -477,7 +477,6 @@ class _MutationSpec:
 # the legal path to completed. Reject stays a browser transition, and only from
 # ``awaiting_approval`` to ``failed``. ``paused`` is legal in the state machine
 # but does not resolve the frontier, so it is never a browser target.
-_APPROVAL_GATE_STATE = "awaiting_approval"
 _APPROVAL_REJECT_TARGET = "failed"
 _ACK_MAX_IDS = 50
 
@@ -554,8 +553,13 @@ def _precheck_approval_transition(kwargs: dict[str, Any], root: Any, dry_run: bo
     node, refusal = _read_gated_plan_node(kwargs, root, "hermes_plan_node_transition")
     if refusal is not None or node is None:
         return refusal
-    if node.get("state") != _APPROVAL_GATE_STATE:
-        return _refuse_approval_transition("the node is not awaiting approval")
+    # Reject a reached gate from any state the plan state machine lets fail;
+    # Autopilot leaves a reached gate in ``pending``.
+    states = {n.get("node_id"): n.get("state") for n in node["_plan_nodes"] if isinstance(n, dict)}
+    if any(states.get(parent) != "completed" for parent in node.get("parents") or []):
+        return _refuse_approval_transition("the gate has not been reached (a parent is not completed)")
+    if "failed" not in op_plan.NODE_TRANSITIONS.get(str(node.get("state")), ()):
+        return _refuse_approval_transition("the node cannot be rejected from its current state")
     kwargs["expected_plan_version"] = node["_plan_version"]
     return None
 

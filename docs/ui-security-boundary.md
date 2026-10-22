@@ -144,8 +144,9 @@ flow:
 - **`hermes_plan_node_transition`** is restricted to rejecting an approval
   frontier from the browser. A precheck (`_precheck_approval_transition`) reads
   the plan read-only and refuses unless the node is an `approval` node or has
-  `authorization_class == high_impact`, is currently `awaiting_approval`, and
-  the target is `failed`. Approve is no longer a browser transition. The plan
+  `authorization_class == high_impact`, the gate is reached (every parent is
+  `completed`), the node's current state may move to `failed`, and the target
+  is `failed`. Approve is no longer a browser transition. The plan
   `version` it reads is passed as `expected_plan_version`, so a concurrent plan
   replacement is refused by the tool's compare-and-swap. The browser path also
   requires Owner Mode, which is stricter than the tool's own workspace gate.
