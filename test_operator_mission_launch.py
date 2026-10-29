@@ -513,6 +513,7 @@ def test_crash_reservation_never_reexecutes(hermes_root, gate_on, spawned, monke
     monkeypatch.setattr(launch, '_apply_chain', real)
     replay = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
     assert replay['replayed'] and replay['outcome_unknown']
+    assert replay['success'] is False and replay['code'] == 'LAUNCH_OUTCOME_UNKNOWN'
     assert replay['receipt']['state'] == 'in_progress'
     assert not spawned
 

@@ -659,7 +659,13 @@ def _keyed_launch(policy, spec_json, budget_json, limits_json, dry_run, confirm,
         if receipt:
             if receipt["input_digest"] != input_digest:
                 return _receipt_error("LAUNCH_REQUEST_CONFLICT")
-            return {**receipt["result"], "replayed": True, "dry_run": dry_run,
+            # An admitted attempt may not have checkpointed its first result yet.
+            # Always return an explicit outcome; missing success must never be
+            # interpreted as a successful mutation by a client adapter.
+            outcome = {"success": False, **receipt["result"]}
+            if not outcome["success"]:
+                outcome.update(_receipt_error("LAUNCH_OUTCOME_UNKNOWN" if receipt["state"] == "in_progress" else "LAUNCH_STOPPED"))
+            return {**outcome, "replayed": True, "dry_run": dry_run,
                     "receipt": receipt, "mission_id": receipt["mission_id"],
                     "outcome_unknown": receipt["state"] == "in_progress", "retry_safe": False}
         spec_json = json.dumps(raw)
