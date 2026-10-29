@@ -1,5 +1,7 @@
 # hermes-gpt
 
+![Hermes GPT v0.17.0 — Daily Operations: Launch, Recover, Review](site/assets/hermes-gpt-v0.17.0-readme-hero.png)
+
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
