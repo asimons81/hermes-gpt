@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.16.2 - 2026-10-29
+
+- Session continuation uses a finite, non-auto-approving stream-json CLI turn. Completion requires a matching terminal result and zero exit code. Durable reservations prevent duplicate submission after ambiguous outcomes; bounded parsing excludes tool event bodies from persisted results. Unsupported CLIs are refused before submission. Live Desktop acceptance is not yet certified.
+- Publish the exact wheel and sdist validated by CI instead of rebuilding during upload. Tag/version mismatch refuses publication.
+- Correct current release documentation and tool counts.
 
 - Autopilot records why a run ended (`max_runtime_exceeded`, or the crash reason) before it terminalizes the job. A status read in between could reconcile the run to `failed` with no `last_error`; this was an intermittent CI failure in `test_real_worker_ends_a_run_that_is_out_of_time_with_nothing_in_flight`.
 

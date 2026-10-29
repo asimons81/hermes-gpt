@@ -24,7 +24,7 @@ Read-only history remains separately controlled by `HERMES_GPT_ENABLE_SESSION_SE
 The start call resolves exact or unique-prefix IDs through Hermes' existing read-only `SessionDB` API before launching anything. It invokes the CLI with a fixed argument array equivalent to:
 
 ```text
-hermes --resume <resolved-session-id> --oneshot <prompt>
+hermes chat --resume <resolved-session-id> -q <prompt> --format stream-json
 ```
 
 No shell is used. Hermes restores the resumed session's recorded working directory using its normal CLI behavior.
@@ -37,7 +37,7 @@ No shell is used. Hermes restores the resumed session's recorded working directo
 - Concurrency: only one session-control job may run for a given session at a time.
 - Job metadata: stored under the Hermes data root in `session-jobs/`.
 - Prompt privacy: raw prompts are not stored in metadata; only length and SHA-256 digest are retained.
-- Output: captured locally for later result retrieval and redacted before MCP exposure.
+- Output: only the bounded, redacted terminal answer is retained for later retrieval.
 - Restart behavior: a persisted running job not owned by the current server process is marked `orphaned`; persisted PIDs are never trusted or signaled.
 
 Session control can consume the configured provider's quota or incur provider charges. Do not enable it on an unauthenticated public endpoint, and review returned content before sharing it.
@@ -45,3 +45,13 @@ Session control can consume the configured provider's quota or incur provider ch
 ## Validation without a real model call
 
 The automated tests replace process launch with a fake Hermes process. They verify the fixed CLI arguments, `shell=False`, prompt-free metadata, timeout bounds, restart reconciliation, redaction, tool registration gates, and status/result flow. The test suite does not resume a real session or contact a model provider.
+
+## Structured execution and uncertain outcomes (v0.16.2)
+
+The CLI must advertise `--format stream-json` in `hermes chat --help`; otherwise the call refuses before submitting. This finite turn does not request unattended autoapproval. Hermes Agent's existing session policy remains authoritative; a turn requiring approval may wait for it. `HERMES_YOLO_MODE` is not forwarded.
+
+A matching terminal `result` with exit code zero, no error, and a successful process exit is required for completion. Other stdout events are not the answer. The parser bounds each JSONL record to 256 KiB and total stdout to 8 MiB; it persists only up to 24,000 redacted final-answer characters. Stderr and intermediate tool bodies are not retained by this bridge.
+
+Before spawning, a durable session reservation and job intent are written. After timeout, missing/malformed terminal output, process failure, restart, or persistence failure, `outcome_unknown=true` and `retry_safe=false` preserve the ambiguity. The reservation refuses another submission even across server processes. Terminating the CLI does not prove gateway work stopped. Inspect the original job and session through the existing read-only tools; do not resend automatically. A successful verified result releases the reservation for a new authorized turn. An administrator may retire an unresolved reservation only after independently reconciling the original turn; no automatic expiry or unlock tool is provided.
+
+Offline protocol/dispatch regressions pass; real Desktop continuation on Windows and other installations is not yet certified. The upstream terminal envelope has no turn identifier, so this bridge binds it to the requested session and this one CLI invocation, without claiming stronger gateway correlation.

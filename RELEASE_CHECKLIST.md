@@ -138,12 +138,13 @@ Check exact tool names and environment variables against the implementation. In 
 
 Only after the checks above pass:
 
-- create/push the intended tag;
+- authorize the intended channels before pushing the tag: every `v*` tag (including RC tags) triggers CI and the PyPI publishing job through the `pypi` environment;
+- create/push the intended tag only when PyPI publication is intended;
 - publish the GitHub release artifacts;
-- publish to PyPI as a separate explicit action when intended;
+- verify the tag-triggered PyPI workflow publishes the exact CI `distributions` artifact; do not rebuild or blindly retry an uncertain upload;
 - verify the public version on each published channel;
 - restart/reconnect any live MCP deployments whose tool schema changed;
 - for ChatGPT MCP apps/connectors, refresh or rescan the app actions after any tool-schema change and review/enable newly discovered actions before acceptance. ChatGPT may retain a frozen approved tool snapshot even after the MCP server and tunnel restart; if the workspace/plan does not expose an action refresh, recreate/re-publish the app connection;
 - verify the refreshed ChatGPT action count/set against the live MCP `tools/list`, then prove representative newly added tools from a new chat;
-- run the automated connector acceptance gate `python -m pytest -q test_server.py::test_v09_connector_surface_acceptance` (Finance enabled, optional env gates neutralized): it must report the exact expected tool count (139 with Finance enabled (`HERMES_GPT_ENABLE_FINANCE=1`, which the gate sets) and every other optional gate neutralized: 137 through v0.14, plus `hermes_owner_inbox` in v0.15 and `hermes_owner_inbox_ack` in v0.16. With every optional gate unset the count is 138; the v0.12 slice-2 budget-enforcement and controller-L2 rungs add no tools and stay invisible with their machine gates unset) with all release additions present, no duplicates, and `serverInfo.version` equal to `versioning.VERSION` for this checkout;
+- run the automated connector acceptance gate `python -m pytest -q test_server.py::test_v09_connector_surface_acceptance` (Finance enabled, optional env gates neutralized): it must report the exact expected tool count (140 with Finance enabled (`HERMES_GPT_ENABLE_FINANCE=1`, which the gate sets) and every other optional gate neutralized: 137 through v0.14, plus `hermes_owner_inbox` in v0.15, `hermes_owner_inbox_ack` in v0.16 and `hermes_plan_approve_gate` in v0.16.1. With every optional gate unset the count is 139; the v0.12 slice-2 budget-enforcement and controller-L2 rungs add no tools and stay invisible with their machine gates unset) with all release additions present, no duplicates, and `serverInfo.version` equal to `versioning.VERSION` for this checkout;
 - confirm the advertised `serverInfo/version` seen by a real MCP client handshake (not just the SDK default) matches the version being published before accepting the connector.

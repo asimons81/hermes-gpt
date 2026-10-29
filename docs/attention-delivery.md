@@ -26,7 +26,7 @@ Code: `operator_attention_delivery.py`. Tests: `test_operator_attention_delivery
 
 ### Delivery state and failures
 
-- An item is marked delivered **only after its backend reports success**.
+- An item is suppressed from further sends after backend success or an ambiguous iMessage send marked `SENT_UNVERIFIED`. Suppression is not confirmation of delivery.
 - A failed target records a bounded error code: `TIMEOUT`, `EXIT_<n>`, `BAD_RESPONSE`, `NOT_CONFIGURED`, or `SPAWN_FAILED`. It backs off exponentially per target (30 s, doubling, capped at 1 h) and is not retried inside the window. Other targets keep going.
 - iMessage delivery is at most once. If `imsg` reports that a send may have completed but cannot confirm it (`retry_safe: false`, for example "Delivery outcome unknown"), or the `imsg` child times out after the request was written, the item is recorded as delivered and never resent. The target's `last_warning` shows `SENT_UNVERIFIED`. This is common when the conversation with the handle is labelled SMS in Messages. Other `imsg` errors still fail and back off.
 - State lives in `missions/attention_delivery_state.json` under the Hermes data root. It is written atomically, pruned to 14 days and at most 2,000 entries per target, and protected by a single-writer lock (`missions/attention_delivery.lock`). If the state file is unreadable, nothing is sent.
@@ -171,14 +171,14 @@ Load it with `launchctl bootstrap gui/$(id -u) <plist>`. The example has no `Kee
 - **Fixed argv, no shell, minimal environment.** Child processes get no inherited secrets.
 - **Redaction before send.** Summaries pass through the shared redactors and a local pass for bearer tokens, `sk-` keys, and `password=`/`token=`/`secret=`/`api_key=` assignments. Raw prompts, objectives, and transcripts are never read into a message.
 - **Fail closed.** Invalid configuration, an unreadable inbox, or an unreadable state file sends nothing.
-- **At-least-once, bounded.** An item is marked delivered only after success. If a send succeeds but the state file cannot be written, the next pass may send that item again, and the run reports `STATE_WRITE_FAILED`.
+- **State persistence boundary.** Success or an ambiguous iMessage outcome is recorded for deduplication. If a send succeeds but the state file cannot be written, the next pass may send that item again, and the run reports `STATE_WRITE_FAILED`.
 - **Delivery is not acknowledgement.** Acknowledging an item with `hermes_owner_inbox_ack` stops future delivery of it. Delivery does not acknowledge anything.
 
 ## Limits
 
 - No reply handling or per-user routing.
 - No delivery control over MCP or in the Flight Deck. The relay runs as a CLI, `python -m operator_attention_delivery` or the `hermes-gpt-attention-relay` console script.
-- `imsg` delivery has not been exercised live in development. Test with one of your own handles before relying on it.
+- A live iMessage test informed the v0.16.1 ambiguous-delivery fix; it does not establish delivery on every target or installation.
 - Digest messages report counts and kinds, not per-item detail.
 
 Related: [owner-inbox.md](owner-inbox.md) (the inbox this relay reads), [operator-mode.md](operator-mode.md), [jev.md](jev.md).
