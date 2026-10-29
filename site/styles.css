@@ -1287,3 +1287,13 @@ a {
     gap: 16px;
   }
 }
+
+/* Keep Daily Operations copy and release actions inside narrow viewports. */
+@media (max-width: 768px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .hero-copy, .hero-visual { min-width: 0; width: 100%; }
+  .hero-copy .eyebrow { max-width: 100%; white-space: normal; }
+  .cta-row { flex-wrap: wrap; }
+  .hero-metrics { grid-template-columns: 1fr; }
+  .metric-card { min-width: 0; overflow-wrap: anywhere; }
+}
