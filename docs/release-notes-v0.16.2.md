@@ -1,6 +1,6 @@
 # Hermes GPT v0.16.2 — session compatibility and reliability
 
-Status: prepared in source; verify GitHub and PyPI independently before claiming publication.
+Published on GitHub and PyPI; the wheel and sdist were independently verified against the tag-CI artifacts. Runtime acceptance remains separate.
 
 - Session control uses the native finite `chat -q --format stream-json` interface, without unattended autoapproval. Matching terminal results determine completion; stdout progress never substitutes for the answer.
 - Durable reservations stop duplicate submissions after unknown outcomes. Bounded parsing and redacted final-only persistence keep tool bodies out of session-job results. Existing session/profile gates remain in force; there is no automatic retry or unlock.

@@ -16,7 +16,7 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.17.0**. The most recently independently verified distribution is 0.16.1 on GitHub and PyPI. Check each channel before claiming 0.17.0 is published. See [0.17.0 release notes](release-notes-v0.17.0.md) and [runtime provenance](runtime-checkout.md).
+Repository version: **0.17.0**. Check [GitHub releases](https://github.com/asimons81/hermes-gpt/releases) and [PyPI versions](https://pypi.org/project/hermes-gpt/#history) independently before installation. Publication does not establish the version or acceptance of a running installation. See [0.17.0 release notes](release-notes-v0.17.0.md) and [runtime provenance](runtime-checkout.md).
 
 Unreleased changes on `master` can retain the same package version. The Jev bridge, owner inbox and review assist ship in 0.15.0 but are default off, or read-only where noted; the version string alone does not prove a feature is installed or active. Verify the artifact/source revision and tool inventory using [runtime provenance](runtime-checkout.md).
 

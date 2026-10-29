@@ -11,8 +11,8 @@
 ## Current status
 
 - **Repository version:** 0.17.0
-- **Last verified GitHub release:** [v0.16.1](https://github.com/asimons81/hermes-gpt/releases/tag/v0.16.1)
-- **Last verified PyPI release:** [0.16.1](https://pypi.org/project/hermes-gpt/0.16.1/); check the badge for later updates
+- **GitHub releases:** [published versions and artifacts](https://github.com/asimons81/hermes-gpt/releases)
+- **PyPI:** [package versions](https://pypi.org/project/hermes-gpt/#history); verify this channel independently
 - **Python requirement:** 3.10+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
 - **Deployment posture:** local-dev / trusted-machine only
