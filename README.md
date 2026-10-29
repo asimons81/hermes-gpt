@@ -3,7 +3,6 @@
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 
-![Hermes GPT v0.14.0 — Acceptance and bounded recovery](https://raw.githubusercontent.com/asimons81/hermes-gpt/master/assets/hermes-gpt-v0.14.0-readme-hero.jpg)
 
 `hermes-gpt` is a local-first MCP sidecar for Hermes Agent. It exposes selected Hermes capabilities to trusted MCP clients without modifying Hermes Agent source files.
 
@@ -11,9 +10,9 @@
 
 ## Current status
 
-- **Repository version:** 0.16.0
-- **Published GitHub release:** [v0.16.0](https://github.com/asimons81/hermes-gpt/releases/tag/v0.16.0)
-- **Verified PyPI release:** [0.16.0](https://pypi.org/project/hermes-gpt/0.16.0/); check the badge for later updates
+- **Repository version:** 0.16.2
+- **Last verified GitHub release:** [v0.16.1](https://github.com/asimons81/hermes-gpt/releases/tag/v0.16.1)
+- **Last verified PyPI release:** [0.16.1](https://pypi.org/project/hermes-gpt/0.16.1/); check the badge for later updates
 - **Python requirement:** 3.10+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
 - **Deployment posture:** local-dev / trusted-machine only
@@ -23,6 +22,10 @@
 > GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. The notification relay, Owner inbox acknowledgements and Flight Deck inbox actions, the one-call Mission launch, and `hermes-gpt update --version` require 0.16.0 or newer. The owner inbox, review assist, and connector tool profiles require 0.15.0 or newer. Declared artifact acceptance and recovery require 0.14.0 or newer. Autopilot requires 0.13.0 or newer and `HERMES_GPT_AUTOPILOT=1`.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.16.2 adds
+
+Finite structured session continuation, durable duplicate prevention after uncertain outcomes, the Autopilot terminal-state race fix, and CI-artifact publication. See [release notes](docs/release-notes-v0.16.2.md) for validation limits and [session control](docs/session-control.md) for recovery. Source preparation is separate from publication.
 
 ## What v0.16.0 adds
 
@@ -34,7 +37,7 @@ For the current documentation map and source-of-truth rules, start with [docs/RE
 4. **One-call Mission launch (Autopilot-gated)** - `hermes_mission_launch` creates the Mission, derives its plan, optionally sets a budget, and starts Autopilot. It is dry run by default, stops at the first refusal, and never approves a Mission. See [one-call launch](docs/autopilot.md#one-call-launch-v016).
 5. **Safe package upgrade** - `hermes-gpt update --apply --version 0.16.0 --venv ... --rollback-dir ...` upgrades one virtual environment after a digest check and an import check, with a rollback snapshot. See [updating](docs/updating.md#upgrade-a-package-installed-service-safely).
 
-Also fixed: contract review reads the whole review-acceptance store, so a late acceptance counts. With every optional gate unset the main server registers **138 tools**, and **139** with `HERMES_GPT_ENABLE_FINANCE=1`, the connector acceptance surface. `HERMES_GPT_AUTOPILOT=1` adds 4, `HERMES_GPT_ATTENTION_DELIVERY=1` adds 1, `HERMES_GPT_ENABLE_JEV=1` adds 3, and `hermes_review_assess` adds 1 more when both Jev and review-assist gates are set. See [v0.16.0 release notes](docs/release-notes-v0.16.0.md) and the [CHANGELOG](CHANGELOG.md).
+Also fixed: contract review reads the whole review-acceptance store, so a late acceptance counts. With every optional gate unset the main server registers **139 tools**, and **140** with `HERMES_GPT_ENABLE_FINANCE=1`, the connector acceptance surface. `HERMES_GPT_AUTOPILOT=1` adds 4, `HERMES_GPT_ATTENTION_DELIVERY=1` adds 1, `HERMES_GPT_ENABLE_JEV=1` adds 3, and `hermes_review_assess` adds 1 more when both Jev and review-assist gates are set. See [v0.16.0 release notes](docs/release-notes-v0.16.0.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## What v0.15.0 adds
 

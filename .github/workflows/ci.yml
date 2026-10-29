@@ -16,6 +16,12 @@ jobs:
         python: ['3.10', '3.11', '3.12']
         sdk: ['mcp>=1.28.1,<2', 'mcp>=2,<3']
         include:
+          - os: macos-latest
+            python: '3.12'
+            sdk: 'mcp>=1.28.1,<2'
+          - os: macos-latest
+            python: '3.12'
+            sdk: 'mcp>=2,<3'
           - os: ubuntu-latest
             python: '3.10'
             sdk: 'mcp==1.28.1'

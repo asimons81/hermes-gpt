@@ -16,7 +16,7 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.16.0** (source prepared for release on `release/v0.16.0`). GitHub and PyPI publication of 0.16.0 must be verified on each channel before it is described as available; the [v0.15.0 release notes](release-notes-v0.15.0.md) record that release's publication. Verify each channel independently when updating. The notification relay, Owner inbox acknowledgements and Flight Deck inbox actions, the one-call Mission launch, and `hermes-gpt update --version` require v0.16.0 or newer. Declared artifact size/digest checks and validation recovery require v0.14.0 or newer. The owner inbox, review assist and connector tool profiles require v0.15.0 or newer.
+Repository version: **0.16.2**. The most recently independently verified distribution is 0.16.1 on GitHub and PyPI. Check each channel before claiming 0.16.2 is published. See [0.16.2 release notes](release-notes-v0.16.2.md) and [runtime provenance](runtime-checkout.md).
 
 Unreleased changes on `master` can retain the same package version. The Jev bridge, owner inbox and review assist ship in 0.15.0 but are default off, or read-only where noted; the version string alone does not prove a feature is installed or active. Verify the artifact/source revision and tool inventory using [runtime provenance](runtime-checkout.md).
 
@@ -45,7 +45,6 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`autopilot.md`](autopilot.md) | current | v0.14 Autopilot: gates, declared artifact acceptance, delivery grace, bounded recovery, approval frontier, budgets, and status |
 | [`owner-inbox.md`](owner-inbox.md) | current (v0.15.0; acknowledgements and Flight Deck actions in v0.16.0) | Owner inbox: Missions awaiting approval, Autopilot waiting for Owner, controller attention, Work Contracts awaiting review acceptance, source health (`complete`), stable item ids, acknowledgements; gated actions only |
 | [`attention-delivery.md`](attention-delivery.md) | current (v0.16.0, default off) | notification-only relay of new Owner inbox items to Hermes or iMessage targets; administrator env config, delivery state, safety boundary |
-| [`attention-delivery.md`](attention-delivery.md) | current (v0.16, default off) | notification-only relay of new Owner inbox items to Hermes or iMessage targets; administrator env config, delivery state, safety boundary |
 | [`live-events.md`](live-events.md) | current | v0.9 durable event cursor/long-poll and authenticated WebSocket wake-up stream |
 | [`flight-deck-missions.md`](flight-deck-missions.md) | current | v0.9 read-only Mission/delegation Flight Deck views with durable live refresh |
 | [`delegations.md`](delegations.md) | current | v0.9 normalized delegation lifecycle across Pi/OpenCode/Codex/Fabric with durable lineage and reconciliation |

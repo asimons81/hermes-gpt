@@ -381,7 +381,7 @@ def test_review_pending_item_is_listed_until_acceptance(root, tmp_path, monkeypa
     assert item["suggested_tool"] == "hermes_review_accept"
     assert item["requires"] == "review"
     assert item["mission_id"] == MID
-    assert delegation["contract_sha256"][:12] in item["summary"]
+    assert inbox.ui_security.redact_browser(delegation["contract_sha256"][:12]) in item["summary"]  # numeric digest prefixes may resemble phone numbers
     assert REVIEW_TASK in item["summary"]
     assert CONTRACT_OBJECTIVE not in json.dumps(result)
     assert len(item["summary"]) <= 240
