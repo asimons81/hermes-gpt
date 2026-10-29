@@ -31,10 +31,15 @@ key; the created ``mission_id`` is returned prominently.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
+import re
+import sqlite3
+from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import operator_autopilot as autopilot
 import operator_mission_budget as budget
@@ -150,7 +155,7 @@ def _budget_request(text: str | None) -> dict[str, Any] | None:
         raise _InputError("budget_json requires quota")
     policy = raw.get("policy")
     # hermes_budget_set's own _clean_policy validates the policy document.
-    return {"quota": raw["quota"], "policy_json": "" if policy is None else json.dumps(policy)}
+    return {"quota": raw["quota"], "policy_json": "" if policy is None else json.dumps(policy, sort_keys=True)}
 
 
 def _limits_request(text: str | None) -> dict[str, int]:
@@ -337,6 +342,7 @@ def _apply_chain(
     limits: dict[str, int],
     hermes_root: Path | None,
     result: dict[str, Any],
+    checkpoint: Callable[[dict[str, Any]], None] | None = None,
 ) -> None:
     ctx: dict[str, Any] = {"mission_id": ""}
     created: dict[str, Any] = {}
@@ -411,6 +417,9 @@ def _apply_chain(
         elif step == STEP_AUTOPILOT:
             run = out.get("run") or {}
             created["autopilot"] = {"job_id": out.get("job_id"), "state": run.get("state")}
+        if checkpoint is not None:
+            result["created"] = created
+            checkpoint(result)
 
     result["created"] = created
     result["completed_steps"] = [s["step"] for s in result["steps"] if s["outcome"] == "completed"]
@@ -431,6 +440,7 @@ def _launch(
     dry_run: bool,
     confirm: bool,
     hermes_root: Path | None,
+    checkpoint: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     apply = not dry_run
     result: dict[str, Any] = {
@@ -540,7 +550,7 @@ def _launch(
         result["autopilot_started"] = False
         return result
 
-    _apply_chain(spec_json, budget_req, effective, hermes_root, result)
+    _apply_chain(spec_json, budget_req, effective, hermes_root, result, checkpoint)
     result["success"] = result["refusal"] is None and result["autopilot_started"]
     return result
 
@@ -554,7 +564,7 @@ def _audit(policy: op.OperatorPolicy, result: dict[str, Any]) -> None:
             apply_mode=policy.apply_mode,
             dry_run=bool(result.get("dry_run")),
             success=bool(result.get("success")),
-            changed=bool(result.get("created")),
+            changed=bool(result.get("created")) and not result.get("replayed", False),
             summary=f"{TOOL} mission={result.get('mission_id') or ''}",
             extra={
                 "mission_id": result.get("mission_id") or "",
@@ -568,6 +578,132 @@ def _audit(policy: op.OperatorPolicy, result: dict[str, Any]) -> None:
         return
 
 
+# Receipts are additive and retained: deleting one allows its request id to be reused.
+# Older versions ignore this store. It contains hashes/identifiers, never launch inputs.
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+MAX_RECEIPTS = 10_000
+
+
+def _receipt_path(root: Path | None) -> Path:
+    return mission_runtime._root(root) / "missions" / "launch-receipts.db"
+
+
+def _request_digest(request_id: str) -> str:
+    if not isinstance(request_id, str) or not REQUEST_ID_RE.fullmatch(request_id):
+        raise ValueError("request_id must contain 16-64 letters, digits, hyphens or underscores")
+    return hashlib.sha256(request_id.encode()).hexdigest()
+
+
+def _receipt_error(code: str) -> dict[str, Any]:
+    return {"success": False, "code": code, "retry_safe": False,
+            "safe_message": "Inspect the original launch receipt before submitting new work."}
+
+
+def _read_receipt(digest: str, root: Path | None) -> dict[str, Any] | None:
+    path = _receipt_path(root)
+    if not path.exists():
+        return None
+    db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        row = db.execute("SELECT input_digest,mission_id,state,result_json,created_at,updated_at FROM receipts WHERE request_digest=?", (digest,)).fetchone()
+        if row is None:
+            return None
+        if len(row[3]) > 65536:
+            raise ValueError("receipt exceeds bound")
+        return {"input_digest": row[0], "mission_id": row[1], "state": row[2],
+                "result": json.loads(row[3]), "created_at": row[4], "updated_at": row[5]}
+    finally:
+        db.close()
+
+
+def launch_receipt(request_id: str, hermes_root: Path | None = None) -> dict[str, Any]:
+    """Read a receipt without resuming work or creating a store."""
+    try:
+        op.OperatorPolicy().require_level("read_only")
+        receipt = _read_receipt(_request_digest(request_id), hermes_root)
+        return {"success": True, "found": receipt is not None, "receipt": receipt, "read_only": True}
+    except PermissionError:
+        return _receipt_error("OPERATOR_LEVEL_INSUFFICIENT")
+    except (ValueError, OSError, sqlite3.Error):
+        return _receipt_error("LAUNCH_RECEIPT_UNAVAILABLE")
+
+
+def _record_receipt(digest: str, root: Path | None, result: dict[str, Any], state: str) -> None:
+    # Closed projection: no objective, arbitrary validator error, or original request.
+    summary = {"success": bool(result.get("success")), "mission_id": result.get("mission_id"),
+               "created": result.get("created", {}), "autopilot_started": bool(result.get("autopilot_started")),
+               "steps": [{"step": x["step"], "outcome": x["outcome"]} for x in result.get("steps", [])],
+               "refusal_code": (result.get("refusal") or {}).get("code"), "retry_safe": False}
+    db = sqlite3.connect(_receipt_path(root))
+    try:
+        with db:
+            db.execute("UPDATE receipts SET state=?,result_json=?,updated_at=? WHERE request_digest=?",
+                       (state, json.dumps(summary), datetime.now(timezone.utc).isoformat(), digest))
+    finally:
+        db.close()
+
+
+def _keyed_launch(policy, spec_json, budget_json, limits_json, dry_run, confirm, root, request_id):
+    try:
+        policy.require_level("read_only")
+        digest = _request_digest(request_id)
+        raw = _json_object(spec_json, "spec_json", required=True) or {}
+        # Stable Mission identity is reserved before effects, including after a crash.
+        raw.setdefault("mission_id", "msn-launch-" + digest[:32])
+        normalized = mission_runtime._normalize_spec(raw)
+        budget_req = _budget_request(budget_json)
+        limits = {**_LIMIT_DEFAULTS, **_limits_request(limits_json)}
+        inputs = json.dumps([normalized, budget_req, limits], sort_keys=True, separators=(",", ":"), allow_nan=False)
+        input_digest = hashlib.sha256(inputs.encode()).hexdigest()
+        receipt = _read_receipt(digest, root)
+        if receipt:
+            if receipt["input_digest"] != input_digest:
+                return _receipt_error("LAUNCH_REQUEST_CONFLICT")
+            return {**receipt["result"], "replayed": True, "dry_run": dry_run,
+                    "receipt": receipt, "mission_id": receipt["mission_id"],
+                    "outcome_unknown": receipt["state"] == "in_progress", "retry_safe": False}
+        spec_json = json.dumps(raw)
+        preview = _launch(policy, spec_json, budget_json, limits_json, True, False, root)
+        if dry_run or not preview["success"]:
+            return preview
+        if not confirm:
+            return _receipt_error("CONFIRM_REQUIRED")
+        path = _receipt_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(path, timeout=10)
+        try:
+            with db:
+                db.execute("CREATE TABLE IF NOT EXISTS receipts (request_digest TEXT PRIMARY KEY,input_digest TEXT NOT NULL,mission_id TEXT NOT NULL,state TEXT NOT NULL,result_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)")
+                db.execute("BEGIN IMMEDIATE")
+                if db.execute("SELECT COUNT(*) FROM receipts").fetchone()[0] >= MAX_RECEIPTS:
+                    return _receipt_error("LAUNCH_RECEIPTS_FULL")
+                now = datetime.now(timezone.utc).isoformat()
+                db.execute("INSERT INTO receipts VALUES(?,?,?,?,?,?,?)", (digest, input_digest, raw["mission_id"], "in_progress", "{}", now, now))
+        except sqlite3.IntegrityError:
+            # Concurrent caller won admission. Read its receipt; never execute again.
+            receipt = _read_receipt(digest, root)
+            if receipt and receipt["input_digest"] != input_digest:
+                return _receipt_error("LAUNCH_REQUEST_CONFLICT")
+            return {**_receipt_error("LAUNCH_ALREADY_RESERVED"), "receipt": receipt, "mission_id": raw["mission_id"]}
+        finally:
+            db.close()
+        try:
+            result = _launch(policy, spec_json, budget_json, limits_json, False, True, root,
+                             checkpoint=lambda result: _record_receipt(digest, root, result, "in_progress"))
+            state = "completed" if result["success"] else "stopped"
+            _record_receipt(digest, root, result, state)
+            result["receipt"] = _read_receipt(digest, root)
+            result["retry_safe"] = False
+            result["note"] = "This request is reserved. Reuse its request_id to inspect the same attempt; never create a new id to retry uncertain work."
+            return result
+        except (OSError, ValueError, sqlite3.Error):
+            return {**_receipt_error("LAUNCH_OUTCOME_UNKNOWN"), "mission_id": raw["mission_id"], "outcome_unknown": True}
+    except PermissionError:
+        return _receipt_error("OPERATOR_LEVEL_INSUFFICIENT")
+    except (ValueError, TypeError, OSError, sqlite3.Error):
+        return _receipt_error("LAUNCH_RECEIPT_UNAVAILABLE")
+
+
 def hermes_mission_launch(
     spec_json: str,
     budget_json: str | None = None,
@@ -575,16 +711,17 @@ def hermes_mission_launch(
     dry_run: bool = True,
     confirm: bool = False,
     hermes_root: Path | None = None,
+    request_id: str | None = None,
 ) -> str:
-    """Objective to running Autopilot in one call, by sequencing the existing tools.
+    """Launch a Mission through existing gated steps; optional request_id deduplicates attempts.
 
-    ``spec_json`` is a MissionSpec object. ``budget_json`` is optional
-    ``{"quota": number, "policy": {...}}``; when omitted the budget step is skipped.
-    ``autopilot_limits_json`` is optional and takes any of the four
-    ``hermes_autopilot_start`` limits. ``dry_run=True`` previews and writes nothing.
-    ``dry_run=False`` requires ``confirm=True``.
+    Dry runs write nothing. Reusing a request_id returns the existing receipt and
+    never resumes or redispatches partial work. Omission preserves legacy behavior.
     """
     policy = op.OperatorPolicy()
-    result = _launch(policy, spec_json, budget_json, autopilot_limits_json, dry_run, confirm, hermes_root)
+    if request_id is None:
+        result = _launch(policy, spec_json, budget_json, autopilot_limits_json, dry_run, confirm, hermes_root)
+    else:
+        result = _keyed_launch(policy, spec_json, budget_json, autopilot_limits_json, dry_run, confirm, hermes_root, request_id)
     _audit(policy, result)
     return json.dumps(result)

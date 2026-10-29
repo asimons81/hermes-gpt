@@ -467,3 +467,145 @@ def test_launch_result_never_echoes_objective_text(hermes_root, gate_on, spawned
     for dry in (True, False):
         raw = launch.hermes_mission_launch(_spec(), dry_run=dry, confirm=True, hermes_root=hermes_root)
         assert SECRET_MARKER not in raw
+
+REQUEST = 'launch-test-0123456789abcdef'
+
+
+def test_keyed_launch_replay_survives_reload(hermes_root, gate_on, spawned):
+    first = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert first['success']
+    assert first['receipt']['state'] == 'completed'
+    second = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert second['replayed'] and second['mission_id'] == first['mission_id']
+    assert len(spawned) == 1
+    assert SECRET_MARKER.encode() not in launch._receipt_path(hermes_root).read_bytes()
+    got = launch.launch_receipt(REQUEST, hermes_root)
+    assert got['found'] and got['receipt']['mission_id'] == first['mission_id']
+
+
+def test_keyed_conflict_is_not_a_second_launch(hermes_root, gate_on, spawned):
+    first = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert first['success']
+    conflict = _j(launch.hermes_mission_launch(_spec(title='different'), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert conflict['code'] == 'LAUNCH_REQUEST_CONFLICT'
+    assert len(spawned) == 1
+
+
+def test_keyed_preview_and_gate_refusal_write_no_receipt(hermes_root, gate_on, spawned, monkeypatch):
+    before = _snapshot(hermes_root)
+    out = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, hermes_root=hermes_root))
+    assert out['success']
+    assert _snapshot(hermes_root) == before
+    monkeypatch.delenv(autopilot.AUTOPILOT_ENV)
+    out = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert not out['success']
+    assert _snapshot(hermes_root) == before
+    assert not spawned
+
+
+def test_crash_reservation_never_reexecutes(hermes_root, gate_on, spawned, monkeypatch):
+    real = launch._apply_chain
+    def crash(*args, **kwargs):
+        raise SystemExit('simulated process death after intent commit')
+    monkeypatch.setattr(launch, '_apply_chain', crash)
+    with pytest.raises(SystemExit):
+        launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root)
+    monkeypatch.setattr(launch, '_apply_chain', real)
+    replay = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert replay['replayed'] and replay['outcome_unknown']
+    assert replay['receipt']['state'] == 'in_progress'
+    assert not spawned
+
+
+def test_checkpoint_failure_stops_before_dispatch(hermes_root, gate_on, spawned, monkeypatch):
+    def broken(*args):
+        raise OSError('disk full')
+    monkeypatch.setattr(launch, '_record_receipt', broken)
+    out = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert out['code'] == 'LAUNCH_OUTCOME_UNKNOWN'
+    assert _mission_exists(out['mission_id'], hermes_root)
+    assert not spawned
+    again = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert again['replayed'] and again['outcome_unknown']
+
+
+def test_receipt_lookup_requires_read_authority_and_writes_nothing(hermes_root, monkeypatch):
+    before = _snapshot(hermes_root)
+    assert launch.launch_receipt(REQUEST, hermes_root)['found'] is False
+    assert _snapshot(hermes_root) == before
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, '0')
+    assert launch.launch_receipt(REQUEST, hermes_root)['code'] == 'OPERATOR_LEVEL_INSUFFICIENT'
+    assert _snapshot(hermes_root) == before
+
+
+def test_concurrent_same_key_admits_only_one_chain(hermes_root, gate_on, spawned, monkeypatch):
+    import threading
+    entered, resume = threading.Event(), threading.Event()
+    real = launch._apply_chain
+    def held(*args, **kwargs):
+        entered.set()
+        assert resume.wait(20)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(launch, '_apply_chain', held)
+    results = []
+    def submit():
+        results.append(_j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root)))
+    thread = threading.Thread(target=submit)
+    thread.start()
+    try:
+        assert entered.wait(10)
+        second = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+        assert second['replayed'] and second['outcome_unknown']
+        assert not spawned
+    finally:
+        resume.set()
+        thread.join(20)
+    assert not thread.is_alive()
+    assert results[0]['success'] and len(spawned) == 1
+
+
+def test_receipt_intent_storage_failure_has_no_effects(hermes_root, gate_on, spawned, monkeypatch):
+    def denied(*args, **kwargs):
+        raise launch.sqlite3.OperationalError('read-only storage')
+    monkeypatch.setattr(launch.sqlite3, 'connect', denied)
+    result = _j(launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert not result['success'] and not spawned
+    assert not launch._receipt_path(hermes_root).exists()
+
+
+def test_replay_audit_does_not_claim_new_changes(hermes_root, gate_on, spawned, tmp_path):
+    for _ in range(2):
+        launch.hermes_mission_launch(_spec(), request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root)
+    records = _launch_records(tmp_path)
+    assert [record['changed'] for record in records] == [True, False]
+
+
+def test_receipt_reservation_is_shared_between_processes(hermes_root, gate_on, tmp_path):
+    """Independent interpreters race the same durable key; exactly one reaches effects."""
+    import subprocess
+    import sys
+    code = r'''
+import json, sys
+from pathlib import Path
+import operator_mission_launch as launch
+import operator_policy as op
+root = Path(sys.argv[1])
+op.set_audit_log_override(root.parent / ('audit-' + sys.argv[2] + '.jsonl'))
+def fake_launch(policy, spec, budget, limits, dry, confirm, root, checkpoint=None):
+    if not dry:
+        with (root / 'effects').open('a') as f:
+            f.write('one-effect\n')
+    return {'success': True, 'mission_id': json.loads(spec)['mission_id'], 'created': {}, 'steps': [], 'autopilot_started': not dry}
+launch._launch = fake_launch
+spec = json.dumps({'title': 'Race', 'objective': 'Test durable admission', 'acceptance_criteria': ['One effect'], 'owner_profile': 'default'})
+print(launch.hermes_mission_launch(spec, request_id='process-race-0123456789', confirm=True, dry_run=False, hermes_root=root))
+'''
+    children = [subprocess.Popen([sys.executable, '-c', code, str(hermes_root), str(i)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for i in range(2)]
+    results = []
+    for child in children:
+        stdout, stderr = child.communicate(timeout=30)
+        assert child.returncode == 0, stderr
+        results.append(json.loads(stdout))
+    assert (hermes_root / 'effects').read_text().splitlines() == ['one-effect']
+    assert any(r['success'] for r in results)
+    assert launch.launch_receipt('process-race-0123456789', hermes_root)['receipt']['state'] == 'completed'
