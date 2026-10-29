@@ -57,7 +57,8 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`session-control.md`](session-control.md) | current | gated asynchronous session continue/send jobs |
 | [`ui-security-boundary.md`](ui-security-boundary.md) | current | conversational UI browser security boundary and opt-in UI mount |
 | [`flight-deck-coverage.md`](flight-deck-coverage.md) | current | Flight Deck browser coverage and mutation safety decisions |
-| [`release-notes-v0.16.0.md`](release-notes-v0.16.0.md) | current release record (prepared; publication must be verified) | v0.16 Close the Loop: attention delivery relay, Owner inbox review source and acknowledgements, Flight Deck inbox actions, action-route cross-site refusal, one-call Mission launch, safe package upgrade |
+| [`release-notes-v0.17.0.md`](release-notes-v0.17.0.md) | current release record; verify publication per channel | guided launch, receipts, review and delivery status |
+| [`release-notes-v0.16.0.md`](release-notes-v0.16.0.md) | historical release record | v0.16 Close the Loop: attention delivery relay, Owner inbox review source and acknowledgements, Flight Deck inbox actions, action-route cross-site refusal, one-call Mission launch, safe package upgrade |
 | [`release-notes-v0.15.0.md`](release-notes-v0.15.0.md) | historical release record | v0.15 Owner Loop: owner inbox, advisory review assist, Jev bridge, connector tool profiles, file-backup switch |
 | [`release-notes-v0.14.0.md`](release-notes-v0.14.0.md) | historical release record | declared acceptance checks, durable delivery grace, bounded artifact-failure recovery, and supervision |
 | [`release-notes-v0.13.0.md`](release-notes-v0.13.0.md) | historical release record | v0.13 Autopilot behavior and initial release verification |
