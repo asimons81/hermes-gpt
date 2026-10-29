@@ -649,8 +649,11 @@ def _keyed_launch(policy, spec_json, budget_json, limits_json, dry_run, confirm,
         digest = _request_digest(request_id)
         raw = _json_object(spec_json, "spec_json", required=True) or {}
         # Stable Mission identity is reserved before effects, including after a crash.
-        raw.setdefault("mission_id", "msn-launch-" + digest[:32])
+        requested_id = raw.get("mission_id")
+        if requested_id is None or (isinstance(requested_id, str) and not requested_id.strip()):
+            raw["mission_id"] = "msn-launch-" + digest[:32]
         normalized = mission_runtime._normalize_spec(raw)
+        raw["mission_id"] = normalized["mission_id"]
         budget_req = _budget_request(budget_json)
         limits = {**_LIMIT_DEFAULTS, **_limits_request(limits_json)}
         inputs = json.dumps([normalized, budget_req, limits], sort_keys=True, separators=(",", ":"), allow_nan=False)

@@ -610,3 +610,14 @@ print(launch.hermes_mission_launch(spec, request_id='process-race-0123456789', c
     assert (hermes_root / 'effects').read_text().splitlines() == ['one-effect']
     assert any(r['success'] for r in results)
     assert launch.launch_receipt('process-race-0123456789', hermes_root)['receipt']['state'] == 'completed'
+
+
+@pytest.mark.parametrize('requested_id', ['', None, '  ', ' msn-explicit-launch '])
+def test_keyed_optional_mission_id_is_normalized_before_reservation(hermes_root, gate_on, spawned, requested_id):
+    spec = _spec(mission_id=requested_id)
+    first = _j(launch.hermes_mission_launch(spec, request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert first['success']
+    assert first['receipt']['mission_id'] == first['mission_id']
+    again = _j(launch.hermes_mission_launch(spec, request_id=REQUEST, confirm=True, dry_run=False, hermes_root=hermes_root))
+    assert again['replayed'] and again['mission_id'] == first['mission_id']
+    assert len(spawned) == 1
