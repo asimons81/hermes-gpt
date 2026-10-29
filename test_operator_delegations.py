@@ -278,7 +278,7 @@ def test_mission_completion_rejects_concurrent_reconcile_authority_change(
 
     def paused_guard(*args, **kwargs):
         observed.set()
-        assert release.wait(5)
+        assert release.wait(60), "test did not release the observed completion"
         return original_guard(*args, **kwargs)
 
     monkeypatch.setattr(missions, "_completion_guard", paused_guard)
@@ -289,21 +289,35 @@ def test_mission_completion_rejects_concurrent_reconcile_authority_change(
         call = lambda: missions.hermes_mission_transition(mission_id, "completed", confirm=True, dry_run=False, hermes_root=root)
     else:
         call = lambda: missions.hermes_mission_reconcile(mission_id, confirm=True, dry_run=False, hermes_root=root)
-    thread = threading.Thread(target=lambda: result.append(json.loads(call())))
-    thread.start()
-    assert observed.wait(5)
+    errors: list[BaseException] = []
 
-    meta_path, _, _ = runners._job_paths(task_id, root)
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta.update({"state": "running", "outcome": "running", "ended_at": ""})
-    runners._atomic_json(meta_path, meta)
-    invalidated = json.loads(delegations.hermes_delegation_reconcile(
-        delegation_id, apply=True, hermes_root=root,
-    ))
-    assert invalidated["delegation"]["state"] == "running"
-    release.set()
-    thread.join(5)
+    def complete():
+        try:
+            result.append(json.loads(call()))
+        except BaseException as exc:  # noqa: BLE001 - surface thread failures after join
+            errors.append(exc)
+
+    thread = threading.Thread(target=complete)
+    thread.start()
+    try:
+        assert observed.wait(30)
+        meta_path, _, _ = runners._job_paths(task_id, root)
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.update({"state": "running", "outcome": "running", "ended_at": ""})
+        runners._atomic_json(meta_path, meta)
+        invalidated = json.loads(delegations.hermes_delegation_reconcile(
+            delegation_id, apply=True, hermes_root=root,
+        ))
+        assert invalidated["delegation"]["state"] == "running"
+        # Ordering is the safety property; wall-clock speed is not. Completion
+        # must still be paused until authority has changed, even on a slow VM.
+        assert not result and thread.is_alive() and not release.is_set()
+    finally:
+        release.set()
+        thread.join(30)
     assert not thread.is_alive()
+    assert errors == []
+    assert result
     assert result[0]["success"] is False
     assert json.loads(missions.hermes_mission_get(mission_id, hermes_root=root))["status"] != "completed"
 
