@@ -653,13 +653,39 @@ body {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     border-right: none;
     border-bottom: 1px solid var(--fd-border);
   }
   .fd-nav-links {
     flex-direction: row;
+    flex-wrap: wrap;
   }
   .fd-main {
+    grid-column: 1;
+    min-width: 0;
     padding: 20px 16px 48px;
   }
 }
+
+/* Daily Operations forms share the Flight Deck palette and keyboard focus. */
+.fd-stack > label { display: block; font-size: 14px; color: var(--fd-text-secondary); }
+.fd-input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--fd-border-strong);
+  border-radius: var(--fd-radius-sm);
+  background: var(--fd-bg-base);
+  color: var(--fd-text-primary);
+  font: inherit;
+  line-height: 1.5;
+}
+textarea.fd-input { min-height: 100px; resize: vertical; }
+.fd-input:disabled { opacity: 0.55; }
+.fd-surface > .fd-card + .fd-card { margin-top: 18px; }
+.fd-surface .fd-mono { overflow-wrap: anywhere; }
+.fd-surface-head > p { flex-basis: 100%; margin: 0; color: var(--fd-text-secondary); }
+
+.fd-surface .fd-card { min-width: 0; overflow-wrap: anywhere; }

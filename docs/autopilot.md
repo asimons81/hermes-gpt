@@ -1,5 +1,8 @@
 # Autopilot (v0.14)
 
+For the v0.17 guided launch, durable receipt recovery, pending-review workbench and read-only delivery page, see [Daily Operations](daily-operations.md). Existing Operator, direct, Autopilot and Owner gates remain authoritative.
+
+
 Autopilot runs one Mission through its MissionPlan without a human re-triggering every node: it places nodes on capable peers, runs independent nodes in parallel, observes and validates their results, retries or replans within hard bounds, and stops at every approval boundary. It is **default off** and it adds no authority. Hermes GPT remains the only authority boundary; Autopilot is a caller of the existing Mission, plan, placement, Work Contract, delegation, budget, and live-event surfaces.
 
 In v0.14.0, nodes can declare artifact size/digest requirements, and confirmed artifact failures after successful execution can enter bounded recovery after a durable delivery grace. See [Declared deliverable acceptance](#declared-deliverable-acceptance-v014) below.
@@ -77,7 +80,7 @@ In `dry_run` apply mode, `dry_run=false` would be quietly turned into a preview 
 
 **Partial failure.** Apply stops at the first refusal or error. The response lists `completed_steps`, `not_run_steps`, the `created` ids, and the `refusal` for the failing step. Nothing is rolled back: no deletion surface exists, so the Owner continues manually from the reported ids with the existing tools. A raised exception in a step is reported as `LAUNCH_STEP_ERROR` with the same partial state.
 
-**Re-running creates a new Mission.** There is no idempotency key. A second call with the same spec makes a second Mission with a new `mission_id`. Use the returned `mission_id` to find the first one. An explicit `mission_id` in the spec that already exists is refused by `hermes_mission_create` at apply, before any write, since dry run does not check for existing Missions.
+**Use a stable request id for recovery (v0.17).** Pass the optional `request_id` to reserve one attempt durably. The same key and input return the original receipt without resuming or redispatching; changed input conflicts. Partial or unknown attempts remain reserved for reconciliation. See [Daily Operations](daily-operations.md#receipts-and-uncertain-outcomes). Without a request id, a second call with the same spec retains the legacy behavior and creates a new Mission. Use the original returned `mission_id` to inspect existing work. An explicit `mission_id` in the spec that already exists is refused by `hermes_mission_create` at apply, before any write, since dry run does not check for existing Missions.
 
 **Audit.** Each call writes one launch-level audit record (`tool` = `hermes_mission_launch`) with the Mission id, step outcomes, created ids, and refusal code. It has no objective, title, or other spec text. The underlying tools still write their own audit records.
 

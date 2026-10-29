@@ -1,5 +1,8 @@
 # Owner inbox
 
+For the v0.17 guided launch, durable receipt recovery, pending-review workbench and read-only delivery page, see [Daily Operations](daily-operations.md). Existing Operator, direct, Autopilot and Owner gates remain authoritative.
+
+
 Status: the read-only inbox **shipped in v0.15.0**. The Work Contract review source, stable item ids, acknowledgements (`hermes_owner_inbox_ack`), and the Flight Deck inbox actions **ship in v0.16.0**. Verify the installed version and tool inventory before relying on any of them (see [runtime provenance](runtime-checkout.md)).
 
 ## Current behavior

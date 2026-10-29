@@ -49,3 +49,6 @@ prune tmp-operator-test
 prune __pycache__
 prune .pytest_cache
 global-exclude *.py[cod] *.log *.err.log .env .env.* *.pem
+
+include docs/release-notes-v0.17.0.md
+include docs/daily-operations.md

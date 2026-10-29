@@ -16,7 +16,7 @@ A design document describes intended architecture. It does not override implemen
 
 ## Current version context
 
-Repository version: **0.16.2**. The most recently independently verified distribution is 0.16.1 on GitHub and PyPI. Check each channel before claiming 0.16.2 is published. See [0.16.2 release notes](release-notes-v0.16.2.md) and [runtime provenance](runtime-checkout.md).
+Repository version: **0.17.0**. The most recently independently verified distribution is 0.16.1 on GitHub and PyPI. Check each channel before claiming 0.17.0 is published. See [0.17.0 release notes](release-notes-v0.17.0.md) and [runtime provenance](runtime-checkout.md).
 
 Unreleased changes on `master` can retain the same package version. The Jev bridge, owner inbox and review assist ship in 0.15.0 but are default off, or read-only where noted; the version string alone does not prove a feature is installed or active. Verify the artifact/source revision and tool inventory using [runtime provenance](runtime-checkout.md).
 
@@ -41,6 +41,7 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`cloudflare-tunnel.md`](cloudflare-tunnel.md) | current | public Cloudflare HTTPS proxy deployment and Host allowlist behavior |
 | [`operator-mode.md`](operator-mode.md) | current | Operator / Owner policy, Mission Control, fleet routing, Work Contracts, Swarm Orchestration, v0.8 Fabric execution, and Flight Deck surfaces |
 | [`finance.md`](finance.md) | current | bounded ChatGPT-to-Hermes Finance bridge, finance evidence/decision contracts, persistence boundary, activation, and verification |
+| [`daily-operations.md`](daily-operations.md) | current (v0.17.0) | guided launch, durable receipt recovery, review workbench, read-only delivery status |
 | [`missions.md`](missions.md) | current | v0.9 first-class Mission lifecycle, bounded context/skills manifests, attachments, reconciliation, and Owner approval |
 | [`autopilot.md`](autopilot.md) | current | v0.14 Autopilot: gates, declared artifact acceptance, delivery grace, bounded recovery, approval frontier, budgets, and status |
 | [`owner-inbox.md`](owner-inbox.md) | current (v0.15.0; acknowledgements and Flight Deck actions in v0.16.0) | Owner inbox: Missions awaiting approval, Autopilot waiting for Owner, controller attention, Work Contracts awaiting review acceptance, source health (`complete`), stable item ids, acknowledgements; gated actions only |
@@ -56,7 +57,8 @@ The [public Docs hub](https://hermes-gpt.tonysimons.dev/docs.html) links to thes
 | [`session-control.md`](session-control.md) | current | gated asynchronous session continue/send jobs |
 | [`ui-security-boundary.md`](ui-security-boundary.md) | current | conversational UI browser security boundary and opt-in UI mount |
 | [`flight-deck-coverage.md`](flight-deck-coverage.md) | current | Flight Deck browser coverage and mutation safety decisions |
-| [`release-notes-v0.16.0.md`](release-notes-v0.16.0.md) | current release record (prepared; publication must be verified) | v0.16 Close the Loop: attention delivery relay, Owner inbox review source and acknowledgements, Flight Deck inbox actions, action-route cross-site refusal, one-call Mission launch, safe package upgrade |
+| [`release-notes-v0.17.0.md`](release-notes-v0.17.0.md) | current release record; verify publication per channel | guided launch, receipts, review and delivery status |
+| [`release-notes-v0.16.0.md`](release-notes-v0.16.0.md) | historical release record | v0.16 Close the Loop: attention delivery relay, Owner inbox review source and acknowledgements, Flight Deck inbox actions, action-route cross-site refusal, one-call Mission launch, safe package upgrade |
 | [`release-notes-v0.15.0.md`](release-notes-v0.15.0.md) | historical release record | v0.15 Owner Loop: owner inbox, advisory review assist, Jev bridge, connector tool profiles, file-backup switch |
 | [`release-notes-v0.14.0.md`](release-notes-v0.14.0.md) | historical release record | declared acceptance checks, durable delivery grace, bounded artifact-failure recovery, and supervision |
 | [`release-notes-v0.13.0.md`](release-notes-v0.13.0.md) | historical release record | v0.13 Autopilot behavior and initial release verification |

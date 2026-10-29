@@ -94,3 +94,9 @@ Any future cleanup automation must remain:
 - conservative around active workflows and legal-hold exceptions.
 
 If documentation and implementation disagree about cleanup behavior, verify `operator_codex.py`, Swarm storage code, and the relevant tests before updating the claim.
+
+## Launch receipts (v0.17)
+
+`missions/launch-receipts.db` retains keyed launch intent and bounded step receipts, including uncertain attempts, with a 10,000-record admission cap. There is no automatic expiry or cleanup command: deleting a key would permit duplicate submission. The original objective/input is not stored in this database; only hashes, identifiers, outcomes and timestamps are retained. Mission data continues to follow its own policy.
+
+Back up the database while launches are idle before upgrade/rollback. Older releases ignore it, but cannot enforce keyed launch deduplication. Hold new launches on rollback, preserve the database, and reconcile each partial or uncertain attempt using its original Mission. Do not delete the store or generate a new key as an automatic retry. At the cap, admission fails closed pending an explicit administrative archival policy; there is no safe automatic pruning based only on age.

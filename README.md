@@ -10,7 +10,7 @@
 
 ## Current status
 
-- **Repository version:** 0.16.2
+- **Repository version:** 0.17.0
 - **Last verified GitHub release:** [v0.16.1](https://github.com/asimons81/hermes-gpt/releases/tag/v0.16.1)
 - **Last verified PyPI release:** [0.16.1](https://pypi.org/project/hermes-gpt/0.16.1/); check the badge for later updates
 - **Python requirement:** 3.10+
@@ -23,9 +23,11 @@
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
 
-## What v0.16.2 adds
+## What v0.17.0 adds
 
-Finite structured session continuation, durable duplicate prevention after uncertain outcomes, the Autopilot terminal-state race fix, and CI-artifact publication. See [release notes](docs/release-notes-v0.16.2.md) for validation limits and [session control](docs/session-control.md) for recovery. Source preparation is separate from publication.
+Daily Operations connects bounded Mission launch, durable launch receipts, and evidence review in Flight Deck. Preview a Mission, confirm once, and recover the original attempt after a disconnect. Review pending work from the Owner inbox using exact contract/task references, then explicitly reconcile it. Delivery status is read-only and labels unverified sends honestly.
+
+See [Daily Operations](docs/daily-operations.md) for gates and recovery, and [v0.17.0 release notes](docs/release-notes-v0.17.0.md) for scope and validation limits. This includes the v0.16.2 finite session protocol and Autopilot terminal-state fix; live Desktop acceptance remains unverified.
 
 ## What v0.16.0 adds
 

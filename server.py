@@ -2788,12 +2788,14 @@ def hermes_mission_launch(
     autopilot_limits_json: str | None = None,
     dry_run: bool = True,
     confirm: bool = False,
+    request_id: str | None = None,
 ) -> str:
     """Objective to running Autopilot in one call: create Mission, derive plan, set budget, start Autopilot.
 
     Dry run by default and writes nothing. Apply needs dry_run=false and confirm=true, plus the
     workspace Operator level in direct apply mode and HERMES_GPT_AUTOPILOT=1. Approval is not
-    touched: the Mission still stops at awaiting_approval.
+    touched: the Mission still stops at awaiting_approval. An optional request_id
+    returns the same durable receipt on replay and never resumes partial work.
     """
     return op_mission_launch.hermes_mission_launch(
         spec_json=spec_json,
@@ -2801,6 +2803,7 @@ def hermes_mission_launch(
         autopilot_limits_json=autopilot_limits_json,
         dry_run=dry_run,
         confirm=confirm,
+        request_id=request_id,
         hermes_root=_default_hermes_root(),
     )
 

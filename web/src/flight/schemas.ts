@@ -176,6 +176,12 @@ function parseItem(value: unknown, path: string): OwnerInboxItem {
     if (!isStringArray(frontier_node_ids)) fail(`${path}.frontier_node_ids`);
     item.frontier_node_ids = frontier_node_ids;
   }
+  for (const key of ['contract_sha256', 'task_id', 'delegation_id', 'review_revision'] as const) {
+    if (value[key] !== undefined) {
+      if (typeof value[key] !== 'string') fail(`${path}.${key}`);
+      item[key] = value[key] as string;
+    }
+  }
   return item;
 }
 

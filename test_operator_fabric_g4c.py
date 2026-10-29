@@ -523,7 +523,7 @@ def test_slow_launch_does_not_hold_peer_lock_for_unrelated_conflict_domain(
 
     def delayed_launch(_contract, **_kwargs):
         launch_entered.set()
-        assert launch_resume.wait(5), "test did not release delayed writer launch"
+        assert launch_resume.wait(60), "test did not release delayed writer launch"
         return {"success": True, "changed": True, "backend": "pi_rpc"}
 
     svc.write_dispatch_fn = delayed_launch
@@ -538,7 +538,7 @@ def test_slow_launch_does_not_hold_peer_lock_for_unrelated_conflict_domain(
 
     accept_thread = threading.Thread(target=run_accept)
     accept_thread.start()
-    assert launch_entered.wait(5), "accept did not reach delayed writer launch"
+    assert launch_entered.wait(30), "accept did not reach delayed writer launch"
 
     def run_unrelated_operations():
         try:
@@ -565,12 +565,16 @@ def test_slow_launch_does_not_hold_peer_lock_for_unrelated_conflict_domain(
 
     unrelated_thread = threading.Thread(target=run_unrelated_operations)
     unrelated_thread.start()
-    assert unrelated_finished.wait(2), "slow external launch held the peer-wide lock"
-    assert claim_for(svc, "workspace:unrelated")["state"] == "ACTIVE"
-
-    launch_resume.set()
-    accept_thread.join(5)
-    unrelated_thread.join(5)
+    try:
+        assert unrelated_finished.wait(30), "slow external launch held the peer-wide lock"
+        assert claim_for(svc, "workspace:unrelated")["state"] == "ACTIVE"
+        # The unrelated operations must finish BEFORE the blocked launch is
+        # released. This detects lock retention without requiring a fast VM.
+        assert not launch_resume.is_set() and accept_thread.is_alive()
+    finally:
+        launch_resume.set()
+        accept_thread.join(30)
+        unrelated_thread.join(30)
     assert not accept_thread.is_alive()
     assert not unrelated_thread.is_alive()
     assert errors == []
