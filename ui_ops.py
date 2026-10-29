@@ -26,32 +26,35 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
+from urllib.parse import urlsplit
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-import operator_policy as op
-import operator_mission as op_mission
-import operator_events as op_events
-import operator_swarm as op_swarm
+import operator_attention_delivery as op_delivery
+import operator_autopilot as op_autopilot
 import operator_codex as op_codex
 import operator_cron as op_cron
-import operator_fleet as op_fleet
-import operator_review as op_review
+import operator_delegations as op_delegations
 import operator_diagnostics as op_diagnostics
-import operator_recovery as op_recovery
-import operator_oauth as op_oauth
-import operator_owner_inbox as op_owner_inbox
+import operator_events as op_events
+import operator_fleet as op_fleet
+import operator_mission as op_mission
+import operator_mission_launch as op_launch
 import operator_mission_plan as op_plan
 import operator_mission_runtime as op_mission_rt
-import operator_autopilot as op_autopilot
+import operator_oauth as op_oauth
+import operator_owner_inbox as op_owner_inbox
+import operator_policy as op
+import operator_recovery as op_recovery
+import operator_review as op_review
+import operator_swarm as op_swarm
 import ui_security
-from urllib.parse import urlsplit
-
 from versioning import VERSION
 
 # The 12 Mission Control surfaces (must match operator_mission.MISSION_SURFACES).
@@ -384,6 +387,57 @@ def _cron_detail(request: Request) -> JSONResponse:
     return _json_resp(_ok({"success": True, "job": job}), 200)
 
 
+def _daily_read_gate(surface: str) -> JSONResponse | None:
+    try:
+        op.OperatorPolicy().require_level("read_only")
+        if not op_mission._surface_allowed(surface):
+            raise PermissionError("surface denied")
+    except PermissionError:
+        return _json_resp(_err("AUTHZ_DENIED", "This read surface is not allowed.", 403), 403)
+    return None
+
+
+def _launch_receipt(request: Request) -> JSONResponse:
+    refusal = _daily_read_gate("delegations")
+    if refusal is not None:
+        return refusal
+    payload = op_launch.launch_receipt(request.path_params["request_id"], _resolve_root())
+    if not payload.get("success"):
+        return _json_resp(_err(payload["code"], payload["safe_message"], 400), 400)
+    return _json_resp(_ok(payload))
+
+
+def _pending_review_item(item_id: str, root: Any) -> dict[str, Any] | None:
+    if not isinstance(item_id, str) or not op_owner_inbox._ITEM_ID_RE.fullmatch(item_id):
+        return None
+    _, items = op_owner_inbox._review_items(root)
+    return next((item for item in items if item["item_id"] == item_id), None)
+
+
+def _pending_review(request: Request) -> JSONResponse:
+    refusal = _daily_read_gate("approvals")
+    if refusal is not None:
+        return refusal
+    try:
+        item = _pending_review_item(request.path_params["item_id"], _resolve_root())
+    except Exception:  # noqa: BLE001 - unavailable evidence must fail closed
+        return _json_resp(_err("REVIEW_UNAVAILABLE", "Review evidence is unavailable.", 503), 503)
+    if item is None:
+        return _json_resp(_err("REVIEW_NOT_PENDING", "This review is no longer pending.", 404), 404)
+    return _json_resp(_ok({"item": item, "read_only": True}))
+
+
+def _delivery_status(request: Request) -> JSONResponse:
+    refusal = _daily_read_gate("health")
+    if refusal is not None:
+        return refusal
+    payload = op_delivery.status(_resolve_root())
+    payload["hermes_gpt_version"] = VERSION
+    payload["session_protocol"] = "finite-stream-json"
+    payload["agent_compatibility"] = "not_probed"
+    return _json_resp(_ok(payload))
+
+
 def _owner_inbox(request: Request) -> JSONResponse:
     """GET /api/ops/owner-inbox — read-only projection of what waits on the Owner.
 
@@ -602,7 +656,47 @@ def _precheck_owner_inbox_ack(kwargs: dict[str, Any], root: Any, dry_run: bool) 
     return None
 
 
+def _precheck_launch(kwargs: dict[str, Any], root: Any, dry_run: bool) -> JSONResponse | None:
+    if not op_mission._surface_allowed("delegations"):
+        return _json_resp(_err("AUTHZ_DENIED", "Mission launch is not allowed.", 403), 403)
+    try:
+        op_launch._request_digest(kwargs.get("request_id"))
+    except ValueError:
+        return _json_resp(_err("INVALID_REQUEST_ID", "The browser launch requires a stable request id.", 400), 400)
+    return None
+
+
+def _precheck_pending_review(kwargs: dict[str, Any], root: Any, dry_run: bool) -> JSONResponse | None:
+    if "item_id" not in kwargs and "review_revision" not in kwargs:
+        return None  # preserve the existing manually addressed review tool
+    if not op_mission._surface_allowed("approvals"):
+        return _json_resp(_err("AUTHZ_DENIED", "Review is not allowed.", 403), 403)
+    try:
+        item = _pending_review_item(kwargs.pop("item_id", ""), root)
+        revision = kwargs.pop("review_revision", None)
+        if item is None or revision != item["review_revision"]:
+            return _json_resp(_err("REVIEW_STALE", "Refresh the review before confirming.", 409), 409)
+        if str(kwargs.get("reviewer") or "").strip() in item["assignee_identities"]:
+            return _json_resp(_err("REVIEW_SELF_REVIEW", "The reviewer must be distinct from every executing identity.", 400), 400)
+        for key in ("contract_sha256", "task_id", "assignee"):
+            if key in kwargs and kwargs[key] != item[key]:
+                return _json_resp(_err("REVIEW_BINDING_MISMATCH", "Review references do not match the pending item.", 400), 400)
+            kwargs[key] = item[key]
+    except Exception:  # noqa: BLE001 - no raw manifest data in errors
+        return _json_resp(_err("REVIEW_UNAVAILABLE", "Review evidence is unavailable.", 503), 503)
+    return None
+
+
 _MUTATION_TOOLS: dict[str, _MutationSpec] = {
+    "hermes_mission_launch": _MutationSpec(
+        op_launch.hermes_mission_launch,
+        {"spec_json", "budget_json", "autopilot_limits_json", "request_id", "dry_run", "confirm"},
+        required_level="workspace", confirm_gated=True, precheck=_precheck_launch,
+    ),
+    "hermes_delegation_reconcile": _MutationSpec(
+        op_delegations.hermes_delegation_reconcile, {"delegation_id", "apply"},
+        required_level="workspace", apply_flag=True,
+    ),
     "hermes_mission_approve": _MutationSpec(
         op_mission_rt.hermes_mission_approve,
         {"mission_id", "approval_reference", "confirm", "dry_run"},
@@ -637,9 +731,10 @@ _MUTATION_TOOLS: dict[str, _MutationSpec] = {
     ),
     "hermes_review_accept": _MutationSpec(
         op_review.hermes_review_accept,
-        {"contract_sha256", "task_id", "assignee", "reviewer", "verdict", "evidence_refs", "approval_reference", "dry_run", "confirm"},
+        {"contract_sha256", "task_id", "assignee", "reviewer", "verdict", "evidence_refs", "approval_reference", "dry_run", "confirm", "item_id", "review_revision"},
         required_level="owner",
         confirm_gated=True,
+        precheck=_precheck_pending_review,
     ),
     "hermes_swarm_stage_advance": _MutationSpec(
         op_swarm.hermes_swarm_stage_advance,
@@ -887,6 +982,9 @@ def ui_ops_routes() -> list[Route]:
         Route("/api/events", _events, methods=["GET"]),
         Route("/api/ops/account", _account, methods=["GET"]),
         Route("/api/ops/owner-inbox", _owner_inbox, methods=["GET"]),
+        Route("/api/ops/launch-receipts/{request_id}", _launch_receipt, methods=["GET"]),
+        Route("/api/ops/pending-review/{item_id}", _pending_review, methods=["GET"]),
+        Route("/api/ops/delivery-status", _delivery_status, methods=["GET"]),
         Route("/api/ops/contracts", _contracts_list, methods=["GET"]),
         Route("/api/ops/contracts/{contract_sha256}", _contracts_detail, methods=["GET"]),
         Route("/api/ops/swarm", _swarm_list, methods=["GET"]),

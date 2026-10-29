@@ -431,6 +431,17 @@ def _review_items(root: Path) -> tuple[str, list[dict[str, Any]]]:
                     suggested_tool=TOOL_REVIEW_ACCEPT,
                     requires="review",
                     stable_key=f"{sha}|{row['delegation_id']}",
+                    extra={
+                        "contract_sha256": sha, "task_id": row["task_id"],
+                        "delegation_id": row["delegation_id"],
+                        "assignee": contract_mod._assignee_identity(contract),
+                        "assignee_identities": sorted(contract_mod._attributable_identities(contract)),
+                        "review_revision": hashlib.sha256(json.dumps([sha, row["delegation_id"], row["updated_at"], summary], sort_keys=True).encode()).hexdigest(),
+                        "validation": summary,
+                        "expected_artifacts": [{"basename": Path(a["path"]).name,
+                                                **{k: a[k] for k in ("sha256", "min_bytes", "max_bytes", "must_exist") if k in a}}
+                                               for a in contract.get("expected_artifacts", [])],
+                    },
                 )
             )
     return ("ok" if items else "empty"), items

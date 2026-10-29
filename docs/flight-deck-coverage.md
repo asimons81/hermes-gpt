@@ -1,5 +1,8 @@
 # Flight Deck v0.8 coverage checklist
 
+For the v0.17 guided launch, durable receipt recovery, pending-review workbench and read-only delivery page, see [Daily Operations](daily-operations.md). Existing Operator, direct, Autopilot and Owner gates remain authoritative.
+
+
 This checklist records the browser-facing Flight Deck adapter and UI coverage
 implemented in `ui_ops.py`, `ui_fabric.py`, `operator_fabric_view.py`, and
 `web/src/flight/`. It is an implementation handoff, not a new authority model.

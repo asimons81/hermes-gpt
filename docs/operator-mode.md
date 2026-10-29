@@ -1,5 +1,8 @@
 # Operator Mode for Hermes GPT
 
+For the v0.17 guided launch, durable receipt recovery, pending-review workbench and read-only delivery page, see [Daily Operations](daily-operations.md). Existing Operator, direct, Autopilot and Owner gates remain authoritative.
+
+
 Operator Mode is the policy-gated control plane for trusted MCP clients such as ChatGPT. This document describes the current v0.16.0 behavior, including the durable Mission lifecycle, unified delegation lineage, live-event bus, and Fabric-backed cross-machine Swarm execution, plus the vNext slice-1 additive surfaces (MissionPlan DAG, derived capability-manifest / mission-ledger views, budget envelope, placement scoring, failure classification + recovery matrix, and the shadow/observe mission controller) and the vNext slice-2 gated execution rungs (budget D3 hard-block enforcement behind `HERMES_GPT_BUDGET_HARD_BLOCK=1`, and the controller L2 rung behind `HERMES_GPT_CONTROLLER_EXECUTE=1`). The slice-1 surfaces are decision-only; the slice-2 rungs are default-off, add no tools, and keep every existing surface byte-identical until their gates are armed. They are documented further in [vnext-capability-manifest-and-mission-ledger.md](vnext-capability-manifest-and-mission-ledger.md) and [design/](https://github.com/asimons81/hermes-gpt/tree/master/docs/design).
 
 For documentation authority and historical-artifact rules, see [docs/README.md](README.md).

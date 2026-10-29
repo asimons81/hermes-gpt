@@ -1,5 +1,8 @@
 # Updating Hermes GPT
 
+For the v0.17 guided launch, durable receipt recovery, pending-review workbench and read-only delivery page, see [Daily Operations](daily-operations.md). Existing Operator, direct, Autopilot and Owner gates remain authoritative.
+
+
 `hermes-gpt update` is deliberately check-first. It reports whether an update is available without changing files, packages, environments, or Git history.
 
 For documentation authority rules, see [docs/README.md](README.md).

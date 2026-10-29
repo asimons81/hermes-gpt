@@ -146,6 +146,10 @@ export interface OwnerInboxItem {
   plan_id?: string;
   /** autopilot_waiting_owner only: the full sorted frontier node ids. */
   frontier_node_ids?: string[];
+  contract_sha256?: string;
+  task_id?: string;
+  delegation_id?: string;
+  review_revision?: string;
 }
 
 export type OwnerInboxSourceState = 'ok' | 'unavailable' | 'empty';

@@ -1,5 +1,8 @@
 # Autopilot (v0.14)
 
+For the v0.17 guided launch, durable receipt recovery, pending-review workbench and read-only delivery page, see [Daily Operations](daily-operations.md). Existing Operator, direct, Autopilot and Owner gates remain authoritative.
+
+
 Autopilot runs one Mission through its MissionPlan without a human re-triggering every node: it places nodes on capable peers, runs independent nodes in parallel, observes and validates their results, retries or replans within hard bounds, and stops at every approval boundary. It is **default off** and it adds no authority. Hermes GPT remains the only authority boundary; Autopilot is a caller of the existing Mission, plan, placement, Work Contract, delegation, budget, and live-event surfaces.
 
 In v0.14.0, nodes can declare artifact size/digest requirements, and confirmed artifact failures after successful execution can enter bounded recovery after a durable delivery grace. See [Declared deliverable acceptance](#declared-deliverable-acceptance-v014) below.

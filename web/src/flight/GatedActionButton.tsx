@@ -1,7 +1,7 @@
 // GatedActionButton — three-stage dangerous-action treatment (media spec §5):
 // idle -> dry-run plan -> confirm. Confirm is never pre-enabled; the dry-run
 // result must exist first. All calls go through POST /api/ops/action.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { ApiError, api } from '../api/client';
 
@@ -45,10 +45,13 @@ export function GatedActionButton({
   previewChars = 400,
 }: GatedActionButtonProps) {
   const [stage, setStage] = useState<'idle' | 'dryrun' | 'confirm' | 'busy' | 'done'>('idle');
+  const inFlight = useRef(false);
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function runDryRun() {
+    if (inFlight.current || disabled) return;
+    inFlight.current = true;
     setStage('busy');
     setError(null);
     try {
@@ -66,10 +69,12 @@ export function GatedActionButton({
       setError(message);
       onError?.(message);
       setStage('idle');
-    }
+    } finally { inFlight.current = false; }
   }
 
   async function runConfirm() {
+    if (inFlight.current || disabled || stage !== 'dryrun') return;
+    inFlight.current = true;
     setStage('busy');
     setError(null);
     try {
@@ -94,7 +99,7 @@ export function GatedActionButton({
       setError(message);
       onError?.(message);
       setStage('dryrun');
-    }
+    } finally { inFlight.current = false; }
   }
 
   return (
@@ -119,7 +124,7 @@ export function GatedActionButton({
               <button type="button" className="fd-btn fd-btn--ghost" onClick={() => setStage('idle')}>
                 Reset
               </button>
-              <button type="button" className="fd-btn fd-btn--primary" onClick={() => void runConfirm()}>
+              <button type="button" className="fd-btn fd-btn--primary" disabled={disabled} onClick={() => void runConfirm()}>
                 Confirm {label.toLowerCase()}
               </button>
             </div>
@@ -140,7 +145,7 @@ export function GatedActionButton({
           <button type="button" className="fd-btn fd-btn--ghost" onClick={() => setStage('idle')}>
             Cancel
           </button>
-          <button type="button" className="fd-btn fd-btn--primary" onClick={() => void runConfirm()}>
+          <button type="button" className="fd-btn fd-btn--primary" disabled={disabled} onClick={() => void runConfirm()}>
             Confirm {label.toLowerCase()}
           </button>
         </div>

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-gpt"
-version = "0.16.2"
+version = "0.17.0"
 description = "Local-dev MCP sidecar for exposing selected Hermes Agent capabilities."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -134,6 +134,8 @@ py-modules = [
   "docs/release-notes-v0.15.0.md",
   "docs/release-notes-v0.16.0.md",
   "docs/release-notes-v0.16.2.md",
+  "docs/release-notes-v0.17.0.md",
+  "docs/daily-operations.md",
   "docs/live-events.md",
   "docs/delegations.md",
   "docs/mcp-compatibility.md",

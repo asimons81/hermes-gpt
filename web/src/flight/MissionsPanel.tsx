@@ -81,7 +81,7 @@ export function MissionsPanel() {
   }, []);
   const rows = payload?.missions ?? [];
   return <section className="fd-surface" data-surface="missions" data-testid="missions-panel">
-    <header className="fd-surface-head"><h2>Missions</h2><p className="fd-surface-desc">First-class v0.9 Mission state and lineage. This screen is observational; execution and approval authority remain in gated operator tools.</p></header>
+    <header className="fd-surface-head"><h2>Missions</h2><Link className="fd-btn fd-btn--primary" to="/ops/missions/new">New Mission</Link><p className="fd-surface-desc">First-class v0.9 Mission state and lineage. This screen is observational; execution and approval authority remain in gated operator tools.</p></header>
     {!payload && !error ? <LoadingState label="Loading Missions…" /> : null}
     {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
     {payload ? <PanelCard title={`Missions (${rows.length})`}>

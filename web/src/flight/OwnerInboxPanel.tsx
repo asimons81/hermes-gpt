@@ -4,6 +4,7 @@
 // every gate (Owner Mode, level, apply mode); the UI adds no authority. The
 // inbox is refetched after any action that was actually applied.
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { useOwnerInboxStore } from '../stores/ownerInbox';
 import { GatedActionButton } from './GatedActionButton';
@@ -11,6 +12,7 @@ import type { OwnerInboxItem } from './types';
 import { EmptyState, ErrorState, LoadingState, PanelCard, StatusChip, safeText } from './ui';
 
 const KIND_LABELS: Record<string, string> = {
+  contract_review_pending: 'Work ready for review',
   mission_awaiting_approval: 'Mission awaiting approval',
   autopilot_waiting_owner: 'Autopilot waiting for Owner',
   budget_breaker: 'Budget breaker',
@@ -141,6 +143,7 @@ function AutopilotActions({ item, onApplied }: ActionProps) {
 function ItemActions({ item, onApplied }: ActionProps) {
   return (
     <div className="fd-stack">
+      {item.kind === 'contract_review_pending' ? <Link className="fd-btn fd-btn--primary" to={`/ops/review/${item.item_id}`}>Review evidence</Link> : null}
       {item.kind === 'mission_awaiting_approval' ? <MissionApproveAction item={item} onApplied={onApplied} /> : null}
       {item.kind === 'autopilot_waiting_owner' ? <AutopilotActions item={item} onApplied={onApplied} /> : null}
       {/* Acknowledge hides the item only; it never resolves the condition. No confirm argument exists. */}
