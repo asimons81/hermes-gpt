@@ -25,7 +25,7 @@ Both retain JSON, stateless Streamable HTTP when started with `--http` and
 the existing host/origin restrictions. SDK 2 uses its public app-version
 parameter; only SDK 1 needs the legacy private version assignment.
 
-The real Agent-loader CI fixture is pinned to Hermes Agent `cca83848ec79a4a6a2ecc10285725559bf72c97c`, the last passing upstream revision with the loader contract this package consumes. Newer Agent revisions require separate compatibility verification; a passing fixture test does not establish compatibility with arbitrary upstream HEAD.
+The real Agent-loader CI matrix checks Hermes Agent `cca83848ec79a4a6a2ecc10285725559bf72c97c` (legacy `_find_all_skills`) and `26874afd73ea4f81c5ac5a5098e222750a337a82` (public `find_all_skills`). It imports those pinned sources with focused loader dependencies, rather than installing a full Agent runtime. A passing loader test establishes these interfaces only; it does not establish full runtime installation, live execution, or compatibility with arbitrary upstream HEAD.
 
 ## Transport matrix
 

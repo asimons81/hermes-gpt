@@ -52,3 +52,5 @@ global-exclude *.py[cod] *.log *.err.log .env .env.* *.pem
 
 include docs/release-notes-v0.17.0.md
 include docs/daily-operations.md
+include docs/release-notes-v0.18.0.md
+include docs/agent-readiness.md

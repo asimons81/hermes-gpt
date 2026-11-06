@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -128,6 +129,78 @@ class _StubSkillsTool:
 
     def _is_skill_disabled(self, name):
         return False
+
+
+@pytest.mark.parametrize("api", ["find_all_skills", "_find_all_skills"])
+def test_discovery_uses_modern_and_legacy_catalogs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, api: str
+):
+    root = tmp_path / "hermes"
+    (root / "profiles" / "dev").mkdir(parents=True)
+    tool = SimpleNamespace(**{api: lambda: [{"name": "available", "description": "skill"}]})
+    monkeypatch.setattr(resolution, "_require_agent_modules", lambda: (tool, object()))
+    monkeypatch.setattr(resolution, "_plugin_entries", lambda _tool: [])
+
+    assert resolution._discovery_entries("dev", root) == [
+        {"name": "available", "category": None, "description": "skill"}
+    ]
+
+
+def test_public_catalog_preferred_without_calling_legacy():
+    def legacy():
+        pytest.fail("legacy catalog must not be called when public API is callable")
+
+    public = lambda: [{"name": "public"}]
+    tool = SimpleNamespace(find_all_skills=public, _find_all_skills=legacy)
+    assert resolution._catalog_loader(tool) is public
+
+
+def test_noncallable_public_catalog_falls_back_to_legacy():
+    legacy = list
+    tool = SimpleNamespace(find_all_skills=None, _find_all_skills=legacy)
+    assert resolution._catalog_loader(tool) is legacy
+
+
+@pytest.mark.parametrize(
+    ("api", "explicit_loader", "accepted"),
+    [
+        ("find_all_skills", True, True),
+        ("_find_all_skills", True, True),
+        ("find_all_skills", False, False),
+        ("_find_all_skills", False, False),
+        (None, True, False),
+    ],
+)
+def test_agent_modules_require_catalog_and_explicit_loader(
+    monkeypatch: pytest.MonkeyPatch, api: str | None,
+    explicit_loader: bool, accepted: bool,
+):
+    def catalog():
+        pytest.fail("module validation must not execute the catalog")
+
+    tool = SimpleNamespace(skill_view=(lambda *_args, **_kwargs: "{}") if explicit_loader else None)
+    if api is not None:
+        setattr(tool, api, catalog)
+    constants = object()
+    modules = {"tools.skills_tool": tool, "hermes_constants": constants}
+    monkeypatch.setattr(resolution, "_agent_root_candidates", list)
+    monkeypatch.setattr(resolution.importlib, "import_module", lambda name: modules[name])
+
+    if accepted:
+        assert resolution._require_agent_modules() == (tool, constants)
+    else:
+        with pytest.raises(resolution._LoaderUnavailable):
+            resolution._require_agent_modules()
+
+
+def test_missing_agent_source_fails_closed(monkeypatch: pytest.MonkeyPatch):
+    def missing(_name):
+        raise ModuleNotFoundError("isolated Agent source unavailable")
+
+    monkeypatch.setattr(resolution, "_agent_root_candidates", list)
+    monkeypatch.setattr(resolution.importlib, "import_module", missing)
+    with pytest.raises(resolution._LoaderUnavailable):
+        resolution._require_agent_modules()
 
 
 def test_validation_probe_does_not_execute_inline_shell(

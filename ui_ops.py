@@ -36,6 +36,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+import operator_agent_readiness as op_agent_readiness
 import operator_attention_delivery as op_delivery
 import operator_autopilot as op_autopilot
 import operator_codex as op_codex
@@ -80,6 +81,13 @@ _SURFACE_DICT_FNS: dict[str, Callable[..., dict[str, Any]]] = {
 _REVIEW_RECORD_LIMIT = 200
 # Max workflow rows surfaced in the contracts list read-model.
 _CONTRACT_WORKFLOW_LIMIT = 50
+_agent_root_provider: Callable[[], Any] = lambda: None
+
+
+def set_agent_root_provider(provider: Callable[[], Any]) -> None:
+    """Bind the exact running server selection without importing server again."""
+    global _agent_root_provider
+    _agent_root_provider = provider
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +443,17 @@ def _delivery_status(request: Request) -> JSONResponse:
     payload["hermes_gpt_version"] = VERSION
     payload["session_protocol"] = "finite-stream-json"
     payload["agent_compatibility"] = "not_probed"
+    return _json_resp(_ok(payload))
+
+
+def _agent_readiness(request: Request) -> JSONResponse:
+    refusal = _daily_read_gate("health")
+    if refusal is not None:
+        return refusal
+    try:
+        payload = op_agent_readiness.readiness(_agent_root_provider())
+    except (OSError, ValueError, RuntimeError):
+        return _json_resp(_err("READINESS_UNAVAILABLE", "Local Agent readiness is unavailable.", 503), 503)
     return _json_resp(_ok(payload))
 
 
@@ -985,6 +1004,7 @@ def ui_ops_routes() -> list[Route]:
         Route("/api/ops/launch-receipts/{request_id}", _launch_receipt, methods=["GET"]),
         Route("/api/ops/pending-review/{item_id}", _pending_review, methods=["GET"]),
         Route("/api/ops/delivery-status", _delivery_status, methods=["GET"]),
+        Route("/api/ops/agent-readiness", _agent_readiness, methods=["GET"]),
         Route("/api/ops/contracts", _contracts_list, methods=["GET"]),
         Route("/api/ops/contracts/{contract_sha256}", _contracts_detail, methods=["GET"]),
         Route("/api/ops/swarm", _swarm_list, methods=["GET"]),

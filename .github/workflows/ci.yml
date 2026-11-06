@@ -110,24 +110,36 @@ jobs:
 
   agent-loader:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - agent: legacy-private-catalog
+            ref: cca83848ec79a4a6a2ecc10285725559bf72c97c
+          - agent: public-catalog
+            ref: 26874afd73ea4f81c5ac5a5098e222750a337a82
+    name: Agent loader (${{ matrix.agent }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
           repository: NousResearch/hermes-agent
-          # Last passing loader contract; upstream HEAD removed _find_all_skills.
-          ref: cca83848ec79a4a6a2ecc10285725559bf72c97c
+          ref: ${{ matrix.ref }}
           path: hermes-agent-src
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
       - run: python -m pip install -e ".[dev]" httpx
-      - name: Install the Hermes Agent runtime used by the loader
-        run: python -m pip install -e hermes-agent-src
+      # These are source-loader interface checks, not a full Agent installation.
+      # The modern runtime's browser-harness/Pillow pins currently conflict;
+      # use only the loader's import dependencies with the real pinned source.
+      - name: Install focused Agent loader dependencies
+        run: python -m pip install ruamel.yaml==0.18.16 python-dotenv==1.2.4 rich==14.3.4
       - name: Prove the real Agent loader is importable
         env:
           HERMES_AGENT_ROOT: ${{ github.workspace }}/hermes-agent-src
+          HERMES_HOME: ${{ runner.temp }}/agent-loader-home
           PYTHONPATH: ${{ github.workspace }}/hermes-agent-src
         run: >-
           python -c "import operator_skill_resolution as r;
@@ -138,7 +150,7 @@ jobs:
           HERMES_AGENT_ROOT: ${{ github.workspace }}/hermes-agent-src
           PYTHONPATH: ${{ github.workspace }}/hermes-agent-src
           HERMES_GPT_REQUIRE_AGENT_LOADER: "1"
-        run: python -m pytest -q test_operator_skill_resolution.py
+        run: python -m pytest -q test_operator_skill_resolution.py test_operator_agent_readiness.py
 
   compatibility:
     runs-on: ubuntu-latest
@@ -172,6 +184,8 @@ jobs:
           operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py
           test_operator_fabric.py test_operator_fabric_adversarial.py test_operator_fabric_control.py
           test_operator_fabric_router.py test_operator_fabric_g4c.py test_operator_fabric_view.py test_operator_fabric_integration.py test_ui_fabric.py
+          operator_agent_readiness.py test_operator_agent_readiness.py test_ui_agent_readiness.py
+          operator_skill_resolution.py test_operator_skill_resolution.py
           operator_runners.py test_operator_runners.py operator_delegations.py test_operator_delegations.py
           runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
           operator_export.py test_operator_export.py test_server_export.py
