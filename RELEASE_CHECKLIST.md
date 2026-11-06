@@ -30,6 +30,7 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - Autopilot must stay default off (tools registered only with `HERMES_GPT_AUTOPILOT=1`), must never dispatch or advance an approval or `high_impact` node, must never approve or complete a Mission, must complete nodes only on observed evidence, must hold new dispatch when the budget envelope is not verifiably within its limit, and must keep the same worker across an MCP server restart. The `superseded_by` marker tests (a forged or stale marker has no effect) must be green.
 - `python -m pytest -q test_v015_registration.py test_v016_registration.py test_tool_inventory.py test_tool_profiles.py test_operator_owner_inbox.py test_operator_review.py test_operator_review_assist.py test_ui_owner_inbox.py test_operator_attention_delivery.py`
   - Owner inbox read-only behavior and acknowledgement, the whole review-acceptance store read for contract validation, review-assist gates and evidence isolation, attention relay gating, tool profiles, and the default/gated tool inventory must be green.
+- Run the Agent readiness and skill-loader tests under both MCP SDK families; readiness must keep the `health` gate, suppress private paths/raw output, and never launch a subprocess or submit a turn. Verify bounded help output/time in the existing authorized session-preflight path. Verify modern and legacy pinned Agent loader CI jobs independently.
 - Run the Windows/Linux Python 3.10-3.12 CI matrix.
 - Run `npm ci`, `npm test`, and `npm run build` in `web/`; verify installed `/ui/ops/missions` navigation and read-only Autopilot supervision.
 
@@ -55,6 +56,7 @@ Use this checklist before publishing a Hermes GPT release artifact.
   - `docs/windows-chatgpt-codex.md`
   - `docs/updating.md`
   - `docs/runtime-checkout.md`
+  - `docs/agent-readiness.md`
   - `docs/jev.md`
   - `docs/owner-inbox.md`
   - `docs/attention-delivery.md`
@@ -129,6 +131,7 @@ Before publication, inspect at minimum:
 - `docs/windows-chatgpt-codex.md`
 - `docs/updating.md`
 - `docs/retention-policy.md`
+- `docs/agent-readiness.md`
 - current release notes
 - `CHANGELOG.md`
 

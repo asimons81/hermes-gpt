@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.0 — Agent readiness and compatibility
+
+- Add read-only Flight Deck Agent readiness: separate server source and CLI identity, static protocol declarations, prior authorized preflight observations, session-control gate state, and an explicit unverified live-acceptance boundary. No Agent code execution, turn submission or configuration changes.
+- Bound the existing session-control execution path's help probe by time and output size; failures and uncertain observations refuse submission. Raw help, errors and private paths are not exposed by readiness.
+- Support the public `find_all_skills` Agent API with legacy `_find_all_skills` fallback. Keep explicit `skill_view(..., preprocess=False)` authoritative and fail closed if the loader is unavailable.
+- Exercise both exact modern and legacy Agent source revisions in CI. These are loader compatibility tests, not certification of a full Agent installation.
+- Preserve the default 139-tool MCP inventory (140 with Finance), schemas and all existing authority gates.
+
 ## 0.17.0 — Daily Operations
 
 - Add optional stable `request_id` to Mission launch. Commit durable intent before effects, checkpoint completed steps, reject changed payloads, and return the original receipt on replay without redispatch.

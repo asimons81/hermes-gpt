@@ -4,6 +4,7 @@ import { ChatPage } from './chat/ChatPage';
 import { LaunchPanel } from './flight/LaunchPanel';
 import { ReviewPanel } from './flight/ReviewPanel';
 import { DeliveryPanel } from './flight/DeliveryPanel';
+import { AgentReadinessPanel } from './flight/AgentReadinessPanel';
 import { AccountPanel } from './flight/AccountPanel';
 import { ApprovalsPanel } from './flight/ApprovalsPanel';
 import { ContractDetail, ContractsPanel } from './flight/ContractsPanel';
@@ -24,7 +25,7 @@ function FlightNav() {
       <Link to="/chat" className="fd-nav-brand">HERMES</Link>
       <div className="fd-nav-links">
         <Link to="/chat">Chat</Link><Link to="/ops">Deck</Link><Link to="/events">Events</Link>
-        <Link to="/ops/missions">Missions</Link><Link to="/ops/delivery-status">Delivery</Link><Link to="/ops/contracts">Contracts</Link><Link to="/ops/swarm">Swarm</Link><Link to="/ops/fabric">Fabric</Link><Link to="/account">Account</Link>
+        <Link to="/ops/missions">Missions</Link><Link to="/ops/agent-readiness">Agent readiness</Link><Link to="/ops/delivery-status">Delivery</Link><Link to="/ops/contracts">Contracts</Link><Link to="/ops/swarm">Swarm</Link><Link to="/ops/fabric">Fabric</Link><Link to="/account">Account</Link>
       </div>
     </nav>
   );
@@ -40,6 +41,7 @@ function OpsSurface() {
     })}
     <Route path="missions/new" element={<LaunchPanel />} /><Route path="review/:itemId" element={<ReviewPanel />} /><Route path="delivery-status" element={<DeliveryPanel />} /><Route path="missions" element={<MissionsPanel />} /><Route path="missions/:missionId" element={<MissionDetail />} />
     <Route path="owner-inbox" element={<OwnerInboxPanel />} />
+    <Route path="agent-readiness" element={<AgentReadinessPanel />} />
     <Route path="contracts" element={<ContractsPanel />} /><Route path="contracts/:contractSha256" element={<ContractDetail />} />
     <Route path="swarm" element={<SwarmMonitor />} /><Route path="swarm/:workflowId" element={<SwarmDetail />} />
     <Route path="fabric" element={<FabricPanel />} /><Route path="fabric/:attemptId" element={<FabricAttemptDetail />} />

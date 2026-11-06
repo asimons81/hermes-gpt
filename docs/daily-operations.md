@@ -34,7 +34,7 @@ After recording acceptance, explicitly preview and confirm **Reconcile delegatio
 
 **Delivery status** is a read-only `health` surface. It shows the package version, relay configuration state, masked targets, pending count, failure/backoff state and `SENT_UNVERIFIED`. No send, configure or resend action is provided. An unverified send is suppressed from resend to avoid duplicates; it is not proof of recipient delivery.
 
-Agent provenance/capability inspection is deferred. This page explicitly says compatibility is not probed. Session control's finite-protocol preflight is separate and does not prove live Desktop acceptance. See [session control](session-control.md) and [attention delivery](attention-delivery.md).
+The delivery page does not probe Agent compatibility. In v0.18.0, open **Agent readiness** for separate, passive observations of the server source, selected CLI, static protocol declarations and prior authorized session preflights. Readiness never launches Agent code. These checks do not prove live Desktop acceptance. See [Agent readiness](agent-readiness.md). See [session control](session-control.md) and [attention delivery](attention-delivery.md).
 
 ## Upgrade and rollback
 

@@ -10,7 +10,7 @@ export function DeliveryPanel() {
   return <section className="fd-surface"><header className="fd-surface-head"><h2>Delivery status</h2><p>Read-only notification health. Checking this page sends nothing.</p><button className="fd-btn" onClick={() => void load()}>Refresh</button></header>
     {error ? <ErrorState message={error} /> : null}
     {!data && !error ? <LoadingState /> : null}
-    {data ? <><PanelCard title="Compatibility"><p>Hermes GPT {safeText(data.hermes_gpt_version, 40)}</p><p>Agent compatibility has not been probed here. Session control checks finite stream-json support before submission; that check does not prove live Desktop acceptance.</p></PanelCard>
+    {data ? <><PanelCard title="Compatibility"><p>Hermes GPT {safeText(data.hermes_gpt_version, 40)}</p><p>Agent compatibility has not been probed here. Session control checks finite stream-json support before submission; that check does not prove live Desktop acceptance.</p><a href="/ui/ops/agent-readiness">Inspect local Agent readiness</a></PanelCard>
     <PanelCard title={data.enabled ? data.configured ? 'Relay enabled' : 'Relay configuration unavailable' : 'Relay disabled'}>
       {data.error ? <p role="alert">{safeText(data.error, 80)}</p> : null}
       {data.inbox_complete === false ? <p role="alert">Some inbox sources are unavailable; pending counts may be incomplete.</p> : null}

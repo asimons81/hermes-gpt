@@ -1,6 +1,6 @@
 # hermes-gpt
 
-![Hermes GPT v0.17.0 — Daily Operations: Launch, Recover, Review](site/assets/hermes-gpt-v0.17.0-readme-hero.png)
+![Hermes GPT — MCP sidecar for Hermes Agent](site/assets/hermes-gpt-branding.jpg)
 
 [![PyPI version](https://img.shields.io/pypi/v/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/hermes-gpt.svg)](https://pypi.org/project/hermes-gpt/)
@@ -12,7 +12,7 @@
 
 ## Current status
 
-- **Repository version:** 0.17.0
+- **Repository version:** 0.18.0
 - **GitHub releases:** [published versions and artifacts](https://github.com/asimons81/hermes-gpt/releases)
 - **PyPI:** [package versions](https://pypi.org/project/hermes-gpt/#history); verify this channel independently
 - **Python requirement:** 3.10+
@@ -24,6 +24,14 @@
 > GitHub releases and PyPI can temporarily be on different versions. The PyPI badge above is the source of truth for what `pip install hermes-gpt` installs. The notification relay, Owner inbox acknowledgements and Flight Deck inbox actions, the one-call Mission launch, and `hermes-gpt update --version` require 0.16.0 or newer. The owner inbox, review assist, and connector tool profiles require 0.15.0 or newer. Declared artifact acceptance and recovery require 0.14.0 or newer. Autopilot requires 0.13.0 or newer and `HERMES_GPT_AUTOPILOT=1`.
 
 For the current documentation map and source-of-truth rules, start with [docs/README.md](docs/README.md). Agents working in this repository should also read [AGENTS.md](AGENTS.md).
+
+## What v0.18.0 adds
+
+Agent readiness and compatibility: Flight Deck now distinguishes the Agent source used by the server, the CLI selected for session control, and static protocol declarations, and any previous authorized session-preflight observation. Read-only inspection launches no Agent code and discloses missing or uncertain evidence without submitting work. Live Desktop acceptance remains a separate, unverified claim.
+
+Skill validation supports the current public Agent discovery API and the legacy API. Explicit loading still decides whether a skill can run in its selected profile, with preprocessing disabled during validation.
+
+See [Agent readiness](docs/agent-readiness.md) for observations and limits, and [v0.18.0 release notes](docs/release-notes-v0.18.0.md) for scope. Default tools remain **139**, or **140** with Finance enabled. No MCP schema or authority change.
 
 ## What v0.17.0 adds
 
@@ -177,7 +185,8 @@ See the [v0.6.0 release notes](docs/release-notes-v0.6.0.md) and [retention poli
 | Get an advisory Jev review score for a Work Contract (default off) | [Advisory review assist (v0.15)](docs/review-assist.md) |
 | Send Owner inbox items as notifications (default off) | [Attention delivery (v0.16)](docs/attention-delivery.md) |
 | Start a Mission and its Autopilot in one call (Autopilot-gated, dry run first) | [One-call launch (v0.16)](docs/autopilot.md#one-call-launch-v016) |
-| Upgrade a package-installed service to 0.16.0 safely | [Safe package upgrade (v0.16)](docs/updating.md#upgrade-a-package-installed-service-safely) |
+| Inspect Agent source, CLI selection and finite-protocol support | [Agent readiness (v0.18)](docs/agent-readiness.md) |
+| Upgrade a package-installed service safely | [Safe package upgrade (v0.16)](docs/updating.md#upgrade-a-package-installed-service-safely) |
 | Shrink the connector tool surface for a small-budget chat client | [Connector tool profiles](docs/mcp-compatibility.md#connector-tool-profiles) |
 | Consume durable live events / wake-up stream | [Live events (v0.9)](docs/live-events.md) |
 | Send bounded financial evidence to the local Finance profile | [Finance bridge](docs/finance.md) |

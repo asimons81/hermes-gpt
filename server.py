@@ -3274,6 +3274,13 @@ def build_asgi_app(server: FastMCP, *, http: bool) -> Any:
         try:
             import ui_api
 
+            try:
+                import ui_ops
+            except ImportError:
+                eprint("UI operator module unavailable")
+            else:
+                ui_ops.set_agent_root_provider(lambda: HERMES_ROOT)
+
             routes.extend(ui_api.routes())
         except Exception as exc:  # noqa: BLE001
             eprint(f"UI mount skipped: {exc.__class__.__name__}: {exc}")

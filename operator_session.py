@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import threading
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import operator_agent_readiness as agent_readiness
 import operator_policy as op
 
 ENABLE_SESSION_CONTROL_ENV = "HERMES_GPT_ENABLE_SESSION_CONTROL"
@@ -85,13 +85,7 @@ def _load(job_id: str, hermes_root: Path | None = None) -> dict[str, Any] | None
 
 
 def _hermes_executable(agent_root: Path | None = None) -> str:
-    if agent_root:
-        candidate = Path(agent_root) / "venv" / ("Scripts" if os.name == "nt" else "bin") / (
-            "hermes.exe" if os.name == "nt" else "hermes"
-        )
-        if candidate.is_file():
-            return str(candidate)
-    return shutil.which("hermes") or "hermes"
+    return agent_readiness.resolve_cli(agent_root)[0]
 
 
 def _validate_start(
@@ -125,14 +119,7 @@ def _reservation(session_id: str, profile: str, root: Path | None) -> Path:
 
 def _supports_stream_json(executable: str, env: dict[str, str]) -> bool:
     """Inspect CLI help only; never submit a capability probe."""
-    try:
-        result = subprocess.run(
-            [executable, "chat", "--help"], capture_output=True, text=True, check=False,
-            timeout=10, shell=False, env=env, stdin=subprocess.DEVNULL,
-        )
-        return result.returncode == 0 and "--format" in result.stdout and "stream-json" in result.stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    return agent_readiness.observe_session_preflight(executable, env)["state"] == "supported"
 
 
 def _consume(proc, session_id: str, result: dict[str, Any]) -> None:

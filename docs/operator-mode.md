@@ -233,6 +233,16 @@ before invoking the runner. This is a live guard against profile changes after
 planning; rejection is non-mutating. Fabric eligibility remains separate from
 logical profile skill ownership.
 
+The catalog adapter prefers Hermes Agent's public `find_all_skills()` API and
+supports the older `_find_all_skills()` API. Both require the Agent's
+`skill_view()` explicit loader; an absent or incompatible loader refuses
+required-skill validation as `skill_resolution_unavailable`. Catalog discovery
+only explains provenance. The dispatch guard still calls
+`skill_view(..., preprocess=False)` freshly and never executes inline shell
+snippets. CI checks these loader interfaces against pinned modern and legacy
+Agent source with focused loader dependencies; it does not certify a complete
+Agent installation or live session execution.
+
 ### Validation model
 
 A worker's claim that work is complete is never proof by itself. Validation inspects observed state such as runs, artifacts, tests, audit evidence, and required review evidence.

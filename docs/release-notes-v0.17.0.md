@@ -13,6 +13,6 @@ Includes the v0.16.2 finite structured session protocol, durable session reserva
 
 Default tools remain 139, or 140 with Finance enabled. `hermes_mission_launch` has an additive optional argument; refresh client schemas. Existing callers without a request id retain their old launch behavior. Receipt storage is additive, capped at `10_000` receipts and retained without automatic expiry. An uncertain attempt is never automatically retried.
 
-The delivery page does not probe Agent provenance. Live Windows/Desktop session acceptance remains unverified; issue #103 is not closed on offline results. Tests use isolated homes and synthetic workers/evidence, with both MCP SDK families and the supported CI OS/Python matrix. A released package is not acceptance of an installed service, live Mission, notification delivery, or connector.
+The delivery page does not probe Agent provenance. Live Windows/Desktop session acceptance remains unverified. Closing issue #103 does not establish live acceptance; offline results cover only the protocol and reservation contracts. Tests use isolated homes and synthetic workers/evidence, with both MCP SDK families and the supported CI OS/Python matrix. A released package is not acceptance of an installed service, live Mission, notification delivery, or connector.
 
 GitHub and PyPI are independent channels. Verify the version and artifact hashes on each before installation. No fleet rollout is included in this release.
