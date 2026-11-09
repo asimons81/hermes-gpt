@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "dompurify": "^3.1.6",
+    "dompurify": "^3.4.17",
     "highlight.js": "^11.10.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -20,6 +20,7 @@
     "react-router": "7.18.2",
     "react-router-dom": "7.18.2",
     "remark-gfm": "^4.0.0",
+    "source-map-js": "^1.2.2",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
@@ -32,7 +33,7 @@
     "@vitejs/plugin-react": "^6.0.4",
     "jsdom": "^25.0.0",
     "typescript": "~5.6.2",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vite": "^8.3.7",
+    "vitest": "^4.1.12"
   }
 }

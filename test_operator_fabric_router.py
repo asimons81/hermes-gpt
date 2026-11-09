@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -9,7 +9,7 @@ import operator_fabric as fabric
 import operator_fabric_router as router
 import operator_runners as runners
 
-NOW = datetime(2026, 8, 20, 15, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 20, 15, 0, tzinfo=UTC)
 
 
 def target_facts(

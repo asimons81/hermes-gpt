@@ -564,3 +564,38 @@ def test_run_argv_timeout_kills_descendant_process_group(tmp_path):
         time.sleep(0.05)
 
     assert not Path(f"/proc/{child_pid}").exists()
+
+
+def test_workspace_path_denies_configured_denied_subtree(monkeypatch, tmp_path):
+    _clear_operator_envs(monkeypatch)
+    ws = tmp_path / "ws"
+    monkeypatch.setenv(op.OPERATOR_ENABLED_ENV, "1")
+    monkeypatch.setenv(op.OPERATOR_LEVEL_ENV, "workspace")
+    monkeypatch.setenv(op.OPERATOR_APPLY_MODE_ENV, "direct")
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PATHS_ENV, str(ws))
+    monkeypatch.setenv(op.OPERATOR_DENIED_PATHS_ENV, str(ws / "secret"))
+    policy = op.OperatorPolicy()
+    with pytest.raises(PermissionError, match=op.OPERATOR_DENIED_PATHS_ENV):
+        policy.require_workspace_path(ws / "secret" / "keys.txt")
+    # Sibling outside the denied subtree still passes.
+    policy.require_workspace_path(ws / "notes.txt")
+
+
+def test_workspace_path_denied_not_enforced_when_unset(monkeypatch, tmp_path):
+    _clear_operator_envs(monkeypatch)
+    ws = tmp_path / "ws"
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PATHS_ENV, str(ws))
+    monkeypatch.delenv(op.OPERATOR_DENIED_PATHS_ENV, raising=False)
+    policy = op.OperatorPolicy()
+    # Unconfigured deny list must not change behavior.
+    policy.require_workspace_path(ws / "anything.txt")
+
+
+def test_workspace_path_parent_of_denied_root_still_allowed(monkeypatch, tmp_path):
+    _clear_operator_envs(monkeypatch)
+    ws = tmp_path / "ws"
+    monkeypatch.setenv(op.OPERATOR_ALLOWED_PATHS_ENV, str(ws))
+    monkeypatch.setenv(op.OPERATOR_DENIED_PATHS_ENV, str(ws / "secret"))
+    policy = op.OperatorPolicy()
+    # Denying a child subtree does not deny its parent workspace root.
+    policy.require_workspace_path(ws / "readme.md")

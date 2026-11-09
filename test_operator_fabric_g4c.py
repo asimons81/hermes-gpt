@@ -4,6 +4,7 @@ import base64
 import hashlib
 import threading
 from contextlib import contextmanager
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -1278,10 +1279,10 @@ def facts(now):
 
 
 def test_auto_remote_write_unlock_requires_live_g4c_features(tmp_path, monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     common = {
         "registry_loader": lambda: {"node-a": node()},
         "routing_policy_loader": lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
@@ -1306,7 +1307,7 @@ def test_auto_remote_write_unlock_requires_live_g4c_features(tmp_path, monkeypat
 
 
 def test_g4c_auto_route_audits_only_authoritative_post_unlock_decision(tmp_path, monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
     audits: list[dict[str, object]] = []
@@ -1321,7 +1322,7 @@ def test_g4c_auto_route_audits_only_authoritative_post_unlock_decision(tmp_path,
         )
 
     monkeypatch.setattr(base_router, "_audit_route", capture_audit)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     decision = fabric.AutoRouter(
         registry_loader=lambda: {"node-a": node()},
         routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
@@ -1363,7 +1364,7 @@ def test_g4c_auto_route_audits_only_authoritative_post_unlock_decision(tmp_path,
 def test_g4c_auto_route_audits_failure_when_feature_gate_raises(tmp_path, monkeypatch):
     """A gate crash after the preliminary base route must still leave one audit
     record, must not claim the preliminary winner, and must propagate."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
     audits: list[dict[str, object]] = []
@@ -1383,7 +1384,7 @@ def test_g4c_auto_route_audits_failure_when_feature_gate_raises(tmp_path, monkey
         def get(self, *_args, **_kwargs):
             raise RuntimeError("g4c feature gate exploded")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     router_obj = fabric.AutoRouter(
         registry_loader=lambda: {"node-a": node()},
         routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
@@ -1410,10 +1411,10 @@ def test_g4c_auto_route_audits_failure_when_feature_gate_raises(tmp_path, monkey
 
 
 def test_auto_remote_artifact_unlock_requires_snapshot_features(tmp_path, monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     router_obj = fabric.AutoRouter(
         registry_loader=lambda: {"node-a": node()},
         routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"node-a": facts(now)}),
@@ -1433,10 +1434,10 @@ def test_auto_remote_artifact_unlock_requires_snapshot_features(tmp_path, monkey
 
 
 def test_local_auto_write_remains_fail_closed(tmp_path, monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     route = fabric.AutoRouter(
         registry_loader=dict,
         routing_policy_loader=lambda: base_router.RoutingPolicy(targets={"local": facts(now)}),

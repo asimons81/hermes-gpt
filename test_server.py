@@ -1654,3 +1654,25 @@ def test_autopilot_tools_register_only_behind_their_machine_gate(monkeypatch):
     assert schema["max_concurrency"]["default"] == 3 and schema["max_replans"]["default"] == 2
     assert schema["max_attempts_per_node"]["default"] == 3 and schema["max_runtime_seconds"]["default"] == 86400
     assert schema["dry_run"]["default"] is True and schema["confirm"]["default"] is False
+
+
+def test_codex_mcp_http_refuses_nonloopback_without_auth(monkeypatch):
+    monkeypatch.setattr(server, "auth_enabled", lambda: False)
+    with pytest.raises(SystemExit, match="non-loopback"):
+        server._run_codex_mcp(["--http", "--host", "0.0.0.0", "--port", "7677"])
+
+
+def test_codex_mcp_http_allows_nonloopback_with_auth(monkeypatch):
+    monkeypatch.setattr(server, "auth_enabled", lambda: True)
+    calls = []
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=lambda *a, **k: calls.append(1)))
+    server._run_codex_mcp(["--http", "--host", "0.0.0.0", "--port", "7677"])
+    assert calls == [1]
+
+
+def test_codex_mcp_http_allows_loopback_without_auth(monkeypatch):
+    monkeypatch.setattr(server, "auth_enabled", lambda: False)
+    calls = []
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=lambda *a, **k: calls.append(1)))
+    server._run_codex_mcp(["--http", "--host", "127.0.0.1", "--port", "7677"])
+    assert calls == [1]

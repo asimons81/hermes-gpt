@@ -1105,13 +1105,24 @@ def hermes_plan_node_transition(
                 if actual_version != int(expected_plan_version):
                     raise PlanVersionConflict(int(expected_plan_version), actual_version)
             row = db.execute(
-                "SELECT state FROM plan_nodes WHERE mission_id=? AND node_id=?", (mission_id, node_id)
+                "SELECT state, capability_req FROM plan_nodes WHERE mission_id=? AND node_id=?", (mission_id, node_id)
             ).fetchone()
             if row is None:
                 raise LookupError(f"plan node {node_id!r} not found for mission {mission_id!r}")
             current = row["state"]
             if current not in NODE_TRANSITIONS or target_state not in NODE_TRANSITIONS[current]:
                 raise ValueError(f"illegal node transition {current} -> {target_state} for node {node_id!r}")
+            try:
+                capability = json.loads(row["capability_req"]) if row["capability_req"] else {}
+            except ValueError:
+                capability = {}
+            gated = isinstance(capability, dict) and capability.get("authorization_class") == "high_impact"
+            if gated and (target_state == "awaiting_approval" or current == "awaiting_approval"):
+                # Gated nodes (approval kind or high_impact authorization class) reach
+                # ``completed`` only through hermes_plan_approve_gate (Owner Mode). The
+                # generic transition tool must not walk the approval stages of a gated
+                # node itself, at any operator level below owner.
+                policy.require_owner(dry_run)
             if effective_dry:
                 db.rollback()
                 _audit("hermes_plan_node_transition", policy, dry_run=True, success=True, changed=False,

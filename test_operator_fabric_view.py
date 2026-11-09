@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -12,7 +12,7 @@ import operator_fabric as fabric
 import operator_fabric_router as router
 import operator_fabric_view as view
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 def node(name: str = "node-a") -> fabric.FabricNode:
