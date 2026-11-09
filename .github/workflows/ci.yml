@@ -1,0 +1,262 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+        sdk: ['mcp>=1.28.1,<2', 'mcp>=2,<3']
+        include:
+          - os: macos-latest
+            python: '3.12'
+            sdk: 'mcp>=1.28.1,<2'
+          - os: macos-latest
+            python: '3.12'
+            sdk: 'mcp>=2,<3'
+          - os: ubuntu-latest
+            python: '3.11'
+            sdk: 'mcp==1.28.1'
+          - os: ubuntu-latest
+            python: '3.11'
+            sdk: 'mcp==2.0.0'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check out pinned Jev adapter for offline interoperability tests
+        uses: actions/checkout@v4
+        with:
+          repository: asimons81/jev-mcp
+          ref: fc4d4bef26af92d1d5a3b9e05bffb46d90a37eae
+          path: .qa-tmp/jev-mcp
+          persist-credentials: false
+      - name: Preserve exact pinned adapter bytes on Windows and Linux
+        run: git -C .qa-tmp/jev-mcp -c core.autocrlf=false -c core.eol=lf checkout-index --all --force
+      - run: npm ci --ignore-scripts --prefix .qa-tmp/jev-mcp
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]" "${{ matrix.sdk }}"
+      - name: Run bounded Jev bridge interoperability preflight
+        timeout-minutes: 3
+        env:
+          HERMES_GPT_TEST_JEV_ADAPTER_ROOT: ${{ github.workspace }}/.qa-tmp/jev-mcp
+        run: python -m pytest -vv -o addopts='' -o faulthandler_timeout=30 test_jev_bridge.py
+      - name: Run full test suite
+        env:
+          HERMES_HTTP_TEST: "1"
+          HERMES_GPT_TEST_JEV_ADAPTER_ROOT: ${{ github.workspace }}/.qa-tmp/jev-mcp
+        run: python -m pytest -q -o addopts='' --tb=short
+      - name: Run runner regression tests
+        run: >-
+          python -m pytest -q
+          test_operator_runners.py
+          test_operator_fabric.py
+          test_operator_fabric_adversarial.py
+          test_operator_fabric_control.py
+          test_operator_fabric_router.py
+          test_operator_fabric_g4c.py
+          test_operator_fabric_view.py
+          test_operator_fabric_integration.py
+          test_ui_fabric.py
+      - name: Run binary export regression tests
+        run: python -m pytest -q test_operator_export.py test_server_export.py
+      - name: Compile operator modules
+        run: >-
+          python -m py_compile
+          server.py
+          jev_bridge.py
+          codex_core.py
+          codex_mcp.py
+          mcp_compat.py
+          codex_config.py
+          operator_codex.py
+          operator_contract.py
+          fabric_artifacts.py
+          fabric_write_guard.py
+          operator_fabric.py
+          operator_fabric_control.py
+          operator_fabric_router.py
+          operator_fabric_g4c.py
+          operator_fabric_view.py
+          operator_fleet.py
+          operator_runners.py
+          operator_swarm.py
+          operator_swarm_workflows.py
+          operator_workspace.py
+          operator_export.py
+          updater.py
+          operator_recovery.py
+          operator_review.py
+          operator_events.py
+          operator_oauth.py
+          token_store.py
+          seams.py
+          ui_api.py
+          ui_fabric.py
+      - name: Check whitespace
+        run: git diff --check
+
+  agent-loader:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - agent: legacy-private-catalog
+            ref: cca83848ec79a4a6a2ecc10285725559bf72c97c
+          - agent: public-catalog
+            ref: 26874afd73ea4f81c5ac5a5098e222750a337a82
+    name: Agent loader (${{ matrix.agent }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ matrix.ref }}
+          path: hermes-agent-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -e ".[dev]" httpx
+      # These are source-loader interface checks, not a full Agent installation.
+      # The modern runtime's browser-harness/Pillow pins currently conflict;
+      # use only the loader's import dependencies with the real pinned source.
+      - name: Install focused Agent loader dependencies
+        run: python -m pip install ruamel.yaml==0.18.16 python-dotenv==1.2.4 rich==14.3.4
+      - name: Prove the real Agent loader is importable
+        env:
+          HERMES_AGENT_ROOT: ${{ github.workspace }}/hermes-agent-src
+          HERMES_HOME: ${{ runner.temp }}/agent-loader-home
+          PYTHONPATH: ${{ github.workspace }}/hermes-agent-src
+        run: >-
+          python -c "import operator_skill_resolution as r;
+          assert r._agent_modules() is not None, 'Hermes Agent loader missing'"
+      - name: Run skill-resolution tests against the real Agent loader
+        env:
+          HERMES_HTTP_TEST: "1"
+          HERMES_AGENT_ROOT: ${{ github.workspace }}/hermes-agent-src
+          PYTHONPATH: ${{ github.workspace }}/hermes-agent-src
+          HERMES_GPT_REQUIRE_AGENT_LOADER: "1"
+        run: python -m pytest -q test_operator_skill_resolution.py test_operator_agent_readiness.py
+
+  compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Prove v0.7 local-only contracts, swarms, and runners remain unchanged
+        run: >-
+          python -m pytest -q
+          test_operator_contract.py
+          test_operator_swarm.py
+          test_operator_runners.py
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - run: >-
+          python -m ruff check
+          mcp_compat.py codex_mcp.py test_mcp_sdk_migration.py test_mcp_compat.py
+          jev_bridge.py test_jev_bridge.py
+          test_mcp_transport_mode.py test_codex_mcp.py test_hermetic_environment.py test_operator_codex.py
+          fabric_artifacts.py fabric_write_guard.py
+          operator_fabric.py operator_fabric_control.py operator_fabric_router.py operator_fabric_g4c.py operator_fabric_view.py
+          test_operator_fabric.py test_operator_fabric_adversarial.py test_operator_fabric_control.py
+          test_operator_fabric_router.py test_operator_fabric_g4c.py test_operator_fabric_view.py test_operator_fabric_integration.py test_ui_fabric.py
+          operator_agent_readiness.py test_operator_agent_readiness.py test_ui_agent_readiness.py
+          operator_skill_resolution.py test_operator_skill_resolution.py
+          operator_runners.py test_operator_runners.py operator_delegations.py test_operator_delegations.py
+          runner_confinement.py test_runner_confinement.py test_runner_confinement_policy.py
+          operator_export.py test_operator_export.py test_server_export.py
+          operator_mission_runtime.py test_operator_mission_runtime.py
+          operator_live_events.py test_operator_live_events.py test_v09_system_invariants.py
+          tools/check_package_hygiene.py test_package_hygiene.py
+          ui_api.py ui_fabric.py ui_missions.py test_ui_missions.py
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flight-deck
+          path: web/dist/
+
+  windows-docs:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Secure MCP Tunnel PowerShell examples
+        shell: powershell
+        run: |
+          $paths = @(
+            'examples/start-openai-secure-mcp-tunnel.example.ps1',
+            'examples/status-hermes-gpt.example.ps1'
+          )
+          foreach ($path in $paths) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+              exit 1
+            }
+          }
+
+  build:
+    needs: [test, agent-loader, compatibility, lint, web, windows-docs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: flight-deck
+          path: web/dist/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Check package content and private-file hygiene
+        run: python tools/check_package_hygiene.py dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/*
