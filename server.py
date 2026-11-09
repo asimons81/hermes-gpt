@@ -4062,6 +4062,13 @@ def _run_codex_mcp(argv: list[str]) -> None:
         eprint("hermes-gpt Codex MCP server starting in stdio mode.")
         server.run(transport="stdio")
         return
+    if not is_loopback_host(args.host) and not auth_enabled():
+        raise SystemExit(
+            "Refusing to serve the Codex MCP server over HTTP on a non-loopback host "
+            "without authentication. Configure a static bearer token "
+            "(HERMES_GPT_BEARER_TOKEN) or confidential-client OAuth, or bind a "
+            "loopback host (127.0.0.1)."
+        )
     eprint(f"hermes-gpt Codex MCP server running at http://{args.host}:{args.port}/mcp")
     import uvicorn
 

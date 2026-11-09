@@ -224,3 +224,24 @@ def test_completion_evidence_gate_accepts_only_the_full_proof():
         "success": True, "evidence_ref": f"contract:{sha}",
         "delegation": {"state": "succeeded", "validation_verdict": "SATISFIED", "contract_sha256": sha},
     }) is True
+
+
+def test_generic_transition_refuses_gated_node_at_workspace_level(env):
+    root, _backend = env
+    _mk(root, [_node("g", kind="approval", owner="owner", auth="high_impact")])
+    for target in ("dispatched", "running", "awaiting_review", "validated"):
+        assert _j(plan.hermes_plan_node_transition(
+            MID, "g", target, confirm=True, dry_run=False, hermes_root=root))["success"]
+    # The approval-bearing step is Owner-only: hermes_plan_approve_gate owns it.
+    out = _j(plan.hermes_plan_node_transition(
+        MID, "g", "awaiting_approval", confirm=True, dry_run=False, hermes_root=root))
+    assert out["success"] is False and "owner" in str(out.get("safe_message", "")).lower()
+
+
+def test_generic_transition_still_walks_ordinary_nodes_at_workspace_level(env):
+    root, _backend = env
+    _mk(root, [_node("n", auth="reversible_write")])
+    for target in ("dispatched", "running", "awaiting_review", "validated",
+                   "awaiting_approval", "completed"):
+        assert _j(plan.hermes_plan_node_transition(
+            MID, "n", target, confirm=True, dry_run=False, hermes_root=root))["success"]

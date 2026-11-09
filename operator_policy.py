@@ -696,6 +696,11 @@ class OperatorPolicy:
                 f"Path {str(path)!r} is denied by the operator path safety policy "
                 "(secret / credential / vault / token / .env)."
             )
+        if self.denied_paths and path_under_allowed(path, self.denied_paths):
+            raise PermissionError(
+                f"Path {str(path)!r} is denied by the operator path safety policy "
+                f"({OPERATOR_DENIED_PATHS_ENV})."
+            )
         if not self.allowed_paths:
             raise PermissionError(
                 "Workspace writes are disabled because "
