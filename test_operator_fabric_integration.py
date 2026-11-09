@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -85,7 +85,7 @@ class _ImmediateBackend:
 
 def _router_for_service(tmp_path, svc, monkeypatch):
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def probe(_node, _timeout):
         snapshot = svc.capabilities(policy(tmp_path))
@@ -210,7 +210,7 @@ def test_auto_local_dispatch_composes_while_remote_candidate_is_available(tmp_pa
     svc = make_service(tmp_path, monkeypatch)
     monkeypatch.setattr(runners, "get_backend", real_get_backend)
     monkeypatch.setattr(runners, "_runner_allowed", lambda _name: True)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def probe(_node, _timeout):
         snapshot = svc.capabilities(policy(tmp_path))
@@ -754,7 +754,7 @@ def test_mixed_local_remote_swarm_fan_out_fan_in_and_owner_approval_compose(tmp_
     coord = make_coordinator(workspace, svc)
     monkeypatch.setattr(runners, "get_backend", real_get_backend)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def probe(_node, _timeout):
         snapshot = svc.capabilities(policy(workspace))

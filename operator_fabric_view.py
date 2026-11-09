@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -145,7 +145,7 @@ def nodes_view(*, hermes_root: Path | None = None) -> dict[str, Any]:
             {"code": "FABRIC_ROUTING_CONFIG_INVALID", "detail": "routing capability facts are unavailable"}
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows: list[dict[str, Any]] = []
     for name in sorted(nodes):
         node = nodes[name]

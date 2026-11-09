@@ -16,7 +16,7 @@ import stat
 import subprocess
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,7 @@ _ENV_KEYS = frozenset({
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def probe_environment(env: dict[str, str] | None = None) -> dict[str, str]:

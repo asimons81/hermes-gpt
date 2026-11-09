@@ -36,7 +36,7 @@ import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Protocol
@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _root(hermes_root: Path | None = None) -> Path:
@@ -280,7 +280,7 @@ def _cleanup_stale_request_envelopes(*, hermes_root: Path | None = None, ttl_sec
     root = _root(hermes_root)
     if not root.is_dir():
         return 0
-    now = datetime.now(timezone.utc).timestamp()
+    now = datetime.now(UTC).timestamp()
     removed = 0
     for request_path in root.glob("*.request.json"):
         try:

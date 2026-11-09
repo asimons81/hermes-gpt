@@ -29,7 +29,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -120,7 +120,7 @@ def _iso_datetime(value: Any, *, field: str) -> datetime:
         raise RoutingError("FABRIC_ROUTING_CONFIG_INVALID", f"{field} is not ISO-8601") from exc
     if parsed.tzinfo is None:
         raise RoutingError("FABRIC_ROUTING_CONFIG_INVALID", f"{field} must include a timezone")
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _bucket(value: Any, *, field: str) -> int | None:
@@ -486,7 +486,7 @@ def _append_decision(decision: dict[str, Any], *, placed_sha256: str, hermes_roo
         "preferences": decision.get("preferences") or {},
         "selected": decision["selected"],
         "candidates": decision.get("candidates") or [],
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     with _ROUTER_LOG_LOCK, path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
@@ -538,7 +538,7 @@ class AutoRouter:
         self.routing_policy_loader = routing_policy_loader or (lambda: load_routing_policy(hermes_root=hermes_root))
         self.local_backends = local_backends or (lambda: _default_local_backends(hermes_root=hermes_root))
         self.local_posture = local_posture or (lambda dry_run: _default_local_posture(dry_run=dry_run))
-        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.now = now or (lambda: datetime.now(UTC))
         if remote_probe is not None:
             self.remote_probe = remote_probe
         else:
@@ -595,7 +595,7 @@ class AutoRouter:
         requirements = options["requirements"]
         preferences = options["preferences"]
         routing_policy = self.routing_policy_loader()
-        now = self.now().astimezone(timezone.utc)
+        now = self.now().astimezone(UTC)
         auth_class = str((contract.get("authorization") or {}).get("class") or "none")
         if auth_class not in _AUTH_RANK:
             raise RoutingError("FABRIC_ROUTING_AUTHORITY_INVALID", "contract authorization class is invalid")

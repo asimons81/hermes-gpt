@@ -17,7 +17,7 @@ import os
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +42,7 @@ _ARTIFACT_FAILURE_CODES = frozenset({"artifact_missing", "artifact_too_small", "
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _root(hermes_root: Path | None = None) -> Path:
@@ -586,12 +586,12 @@ def _observation_is_fresh_for_cancellation(stored: dict[str, Any], observed: dic
         if not isinstance(value, str) or not value.strip():
             return None
         try:
-            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.strip())
         except ValueError:
             return None
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             return None
-        return parsed.astimezone(timezone.utc)
+        return parsed.astimezone(UTC)
 
     claimed_at = ordered_time(stored.get("cancellation_claimed_at"))
     if claimed_at is None:
@@ -1041,7 +1041,7 @@ def hermes_delegation_reconcile(
         if defect:
             failure_since = str(stored.get("validation_failure_since") or _now())
             try:
-                age = (datetime.now(timezone.utc) - datetime.fromisoformat(failure_since)).total_seconds()
+                age = (datetime.now(UTC) - datetime.fromisoformat(failure_since)).total_seconds()
             except (ValueError, TypeError):
                 failure_since, age = _now(), 0
             if age >= VALIDATION_GRACE_SECONDS:
