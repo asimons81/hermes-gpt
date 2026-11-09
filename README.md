@@ -15,7 +15,7 @@
 - **Repository version:** 0.18.0
 - **GitHub releases:** [published versions and artifacts](https://github.com/asimons81/hermes-gpt/releases)
 - **PyPI:** [package versions](https://pypi.org/project/hermes-gpt/#history); verify this channel independently
-- **Python requirement:** 3.10+
+- **Python requirement:** 3.11+
 - **MCP SDK (current source):** 1.28.1+ or 2.x; see [compatibility](docs/mcp-compatibility.md).
 - **Deployment posture:** local-dev / trusted-machine only
 - **Remote public hosting:** unsupported without a real authenticated private boundary
